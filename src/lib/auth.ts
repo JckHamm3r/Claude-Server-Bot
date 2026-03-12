@@ -1,6 +1,15 @@
 import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
+import { logActivity } from "./activity-log";
+import {
+  extractIP,
+  isIPBlocked,
+  recordLoginAttempt,
+  getFailedAttemptCount,
+  blockIP,
+  getIPProtectionSettings,
+} from "./ip-protection";
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -10,10 +19,21 @@ export const authOptions: NextAuthOptions = {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, req) {
         if (!credentials?.email || !credentials?.password) return null;
 
         try {
+          const ipSettings = getIPProtectionSettings();
+          const ip = extractIP((req?.headers ?? {}) as Record<string, string | string[] | undefined>);
+
+          // Check if IP is blocked
+          if (ipSettings.enabled) {
+            const block = isIPBlocked(ip);
+            if (block.blocked) {
+              throw new Error(`IP_BLOCKED: ${block.reason ?? "Too many failed attempts"}`);
+            }
+          }
+
           // Import db lazily to avoid edge-runtime issues
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           const db = (require("./db") as { default: import("better-sqlite3").Database }).default;
@@ -21,10 +41,53 @@ export const authOptions: NextAuthOptions = {
             | { email: string; hash: string; is_admin: number }
             | undefined;
 
-          if (!user) return null;
+          if (!user) {
+            if (ipSettings.enabled) {
+              recordLoginAttempt(ip, credentials.email, false);
+              const count = getFailedAttemptCount(ip, ipSettings.windowMinutes);
+              if (count >= ipSettings.maxAttempts) {
+                blockIP(ip, "Too many failed login attempts", "temporary", ipSettings.blockDurationMinutes, "system");
+                logActivity("security_ip_blocked", null, { ip, attempts: count });
+                // Dispatch notification to admins (lazy import to avoid circular deps)
+                try {
+                  const { dispatchNotification } = await import("./notifications");
+                  const admins = db.prepare("SELECT email FROM users WHERE is_admin = 1").all() as { email: string }[];
+                  for (const admin of admins) {
+                    dispatchNotification("security_ip_blocked", admin.email, "IP Blocked — Brute Force Detected", `IP ${ip} was automatically blocked after ${count} failed login attempts.`).catch(() => {});
+                  }
+                } catch { /* ignore */ }
+              }
+              logActivity("security_failed_login", credentials.email, { ip });
+            }
+            return null;
+          }
 
           const valid = await bcrypt.compare(credentials.password, user.hash);
-          if (!valid) return null;
+          if (!valid) {
+            if (ipSettings.enabled) {
+              recordLoginAttempt(ip, credentials.email, false);
+              const count = getFailedAttemptCount(ip, ipSettings.windowMinutes);
+              if (count >= ipSettings.maxAttempts) {
+                blockIP(ip, "Too many failed login attempts", "temporary", ipSettings.blockDurationMinutes, "system");
+                logActivity("security_ip_blocked", null, { ip, attempts: count });
+                try {
+                  const { dispatchNotification } = await import("./notifications");
+                  const admins = db.prepare("SELECT email FROM users WHERE is_admin = 1").all() as { email: string }[];
+                  for (const admin of admins) {
+                    dispatchNotification("security_ip_blocked", admin.email, "IP Blocked — Brute Force Detected", `IP ${ip} was automatically blocked after ${count} failed login attempts.`).catch(() => {});
+                  }
+                } catch { /* ignore */ }
+              }
+              logActivity("security_failed_login", credentials.email, { ip });
+            }
+            return null;
+          }
+
+          // Successful login
+          if (ipSettings.enabled) {
+            recordLoginAttempt(ip, credentials.email, true);
+          }
+          logActivity("user_login", user.email);
 
           return {
             id: user.email,
@@ -33,6 +96,8 @@ export const authOptions: NextAuthOptions = {
             isAdmin: Boolean(user.is_admin),
           };
         } catch (err) {
+          const msg = String(err);
+          if (msg.includes("IP_BLOCKED:")) throw err; // re-throw so NextAuth surfaces it
           console.error("[auth] authorize error:", err);
           return null;
         }

@@ -25,6 +25,7 @@ interface MessageItemProps {
   onSelectOption?: (sessionId: string, choice: string) => void;
   onConfirm?: (sessionId: string, value: boolean) => void;
   onAllowTool?: (sessionId: string, toolName: string, scope: "session" | "once") => void;
+  onAlwaysAllow?: (sessionId: string, toolName: string, command: string) => void;
   sessionId: string;
   isLatest?: boolean;
 }
@@ -51,6 +52,7 @@ export function MessageItem({
   onSelectOption,
   onConfirm,
   onAllowTool,
+  onAlwaysAllow,
   sessionId,
   isLatest,
 }: MessageItemProps) {
@@ -111,6 +113,17 @@ export function MessageItem({
       );
     }
 
+    if (p.type === "security_warn") {
+      return (
+        <div className="rounded-xl border border-bot-red/40 bg-bot-red/10 px-4 py-3 text-body text-bot-red my-1 flex items-start gap-2">
+          <span className="shrink-0 text-lg">🛡</span>
+          <div>
+            <span className="font-semibold">Security:</span> {p.message}
+          </div>
+        </div>
+      );
+    }
+
     if (p.type === "permission_request" && p.toolName) {
       return (
         <div className="py-1">
@@ -119,7 +132,10 @@ export function MessageItem({
             toolInput={p.toolInput}
             sessionId={sessionId}
             onAllow={onAllowTool!}
+            onAlwaysAllow={onAlwaysAllow}
             disabled={!isLatest}
+            sandboxCategory={p.sandboxCategory}
+            sandboxReason={p.sandboxReason}
           />
         </div>
       );

@@ -1,10 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Image from "next/image";
-import { Suspense } from "react";
+
+interface BotIdentity {
+  name: string;
+  tagline: string;
+  avatar: string | null;
+}
 
 function LoginForm() {
   const router = useRouter();
@@ -15,6 +19,18 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [botIdentity, setBotIdentity] = useState<BotIdentity>({
+    name: "Claude Server Bot",
+    tagline: "Sign in to continue",
+    avatar: null,
+  });
+
+  useEffect(() => {
+    fetch("/api/bot-identity")
+      .then((r) => r.json())
+      .then((d: BotIdentity) => setBotIdentity(d))
+      .catch(() => {});
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,7 +46,11 @@ function LoginForm() {
     });
 
     if (result?.error) {
-      setError("Invalid email or password");
+      if (result.error.includes("IP_BLOCKED")) {
+        setError("Access denied — too many failed attempts. Please try again later.");
+      } else {
+        setError("Invalid email or password");
+      }
       setLoading(false);
     } else {
       router.push(callbackUrl);
@@ -40,11 +60,17 @@ function LoginForm() {
   return (
     <div className="w-full max-w-sm">
       <div className="flex flex-col items-center mb-8">
-        <div className="h-14 w-14 rounded-full overflow-hidden mb-4">
-          <Image unoptimized src="/claude-code.png" alt="Claude" width={56} height={56} className="object-cover" />
+        <div className="h-14 w-14 rounded-full overflow-hidden mb-4 border border-bot-border">
+          {botIdentity.avatar ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={botIdentity.avatar} alt={botIdentity.name} className="h-full w-full object-cover" />
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src="/claude-code.png" alt="Claude" className="h-full w-full object-cover" />
+          )}
         </div>
-        <h1 className="text-title font-semibold text-bot-text">Claude Server Bot</h1>
-        <p className="text-caption text-bot-muted mt-1">Sign in to continue</p>
+        <h1 className="text-title font-semibold text-bot-text">{botIdentity.name}</h1>
+        <p className="text-caption text-bot-muted mt-1">{botIdentity.tagline}</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">

@@ -26,6 +26,7 @@ interface MessageListProps {
   onSelectOption: (sessionId: string, choice: string) => void;
   onConfirm: (sessionId: string, value: boolean) => void;
   onAllowTool?: (sessionId: string, toolName: string, scope: "session" | "once") => void;
+  onAlwaysAllow?: (sessionId: string, toolName: string, command: string) => void;
   isRunning?: boolean;
   currentActivity?: ActivityState | null;
 }
@@ -73,6 +74,7 @@ export function MessageList({
   onSelectOption,
   onConfirm,
   onAllowTool,
+  onAlwaysAllow,
   isRunning,
   currentActivity,
 }: MessageListProps) {
@@ -102,6 +104,7 @@ export function MessageList({
               onSelectOption={onSelectOption}
               onConfirm={onConfirm}
               onAllowTool={onAllowTool}
+              onAlwaysAllow={onAlwaysAllow}
               isLatest={i === messages.length - 1}
             />
           ))}

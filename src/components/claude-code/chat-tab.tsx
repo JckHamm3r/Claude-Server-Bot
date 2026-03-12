@@ -259,6 +259,19 @@ export function ChatTab() {
       setCurrentActivity(null);
     });
 
+    socket.on("security:warn", ({ type: warnType, message: warnMessage }: { type: string; message: string }) => {
+      const msg: ChatMessage = {
+        id: crypto.randomUUID(),
+        sender_type: "claude",
+        parsed: { type: "security_warn", warnType, message: warnMessage },
+        content: warnMessage,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, msg]);
+      setIsRunning(false);
+      setCurrentActivity(null);
+    });
+
     if (socket.connected) {
       setConnected(true);
       socket.emit("claude:list_sessions");
@@ -278,6 +291,7 @@ export function ChatTab() {
       socket.off("claude:typing");
       socket.off("claude:command_started");
       socket.off("claude:command_done");
+      socket.off("security:warn");
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -486,6 +500,17 @@ export function ChatTab() {
     [emit],
   );
 
+  const handleAlwaysAllow = useCallback(
+    (sessionId: string, _toolName: string, command: string) => {
+      // Whitelist this command pattern permanently (admin only — server enforces)
+      emit("claude:always_allow_command", { pattern: command.trim().split(/\s+/)[0] });
+      // Also allow once for the current request
+      emit("claude:allow_tool", { sessionId, toolName: "Bash", scope: "once" });
+      setIsRunning(true);
+    },
+    [emit],
+  );
+
   return (
     <div className="flex h-full overflow-hidden">
       <SessionSidebar
@@ -567,6 +592,7 @@ export function ChatTab() {
             onSelectOption={handleSelectOption}
             onConfirm={handleConfirm}
             onAllowTool={handleAllowTool}
+            onAlwaysAllow={handleAlwaysAllow}
             isRunning={isRunning}
             currentActivity={currentActivity}
           />

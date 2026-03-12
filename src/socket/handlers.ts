@@ -26,6 +26,22 @@ import {
   updateUserSettings,
 } from "../lib/claude-db";
 import { getToken } from "next-auth/jwt";
+import { logActivity } from "../lib/activity-log";
+import { getAppSetting, setAppSetting, getPersonalityPrefix } from "../lib/app-settings";
+import {
+  dispatchNotification,
+  getInAppNotifications,
+  getUnreadCount,
+  markNotificationsRead,
+  markAllNotificationsRead,
+  setNotificationEmitter,
+  type InAppNotification,
+} from "../lib/notifications";
+import { getCustomizationSystemPrompt } from "../lib/customization";
+import { checkProtectedPath, checkBotConfigRequest, getSecuritySystemPrompt } from "../lib/security-guard";
+import { classifyCommand, isSandboxEnabled } from "../lib/command-sandbox";
+import { cleanupExpiredBlocks } from "../lib/ip-protection";
+import db from "../lib/db";
 
 const PROJECT_ROOT = process.env.CLAUDE_PROJECT_ROOT ?? process.cwd();
 
@@ -69,10 +85,9 @@ async function verifySocket(socket: Socket): Promise<boolean> {
     if (!token) return false;
     const email = (token.email as string) ?? "";
     if (!email) return false;
-    // Verify user exists in SQLite
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const db = (require("../lib/db") as { default: import("better-sqlite3").Database }).default;
-    const user = db.prepare("SELECT email FROM users WHERE email = ?").get(email);
+    const dbInstance = (require("../lib/db") as { default: import("better-sqlite3").Database }).default;
+    const user = dbInstance.prepare("SELECT email FROM users WHERE email = ?").get(email);
     return !!user;
   } catch {
     return false;
@@ -88,15 +103,73 @@ async function getEmailFromSocket(socket: Socket): Promise<string> {
   }
 }
 
+async function isAdminSocket(socket: Socket): Promise<boolean> {
+  try {
+    const token = await getTokenFromSocket(socket);
+    return Boolean((token as Record<string, unknown>)?.isAdmin);
+  } catch {
+    return false;
+  }
+}
+
 // ── Module-level state ──────────────────────────────────────────────────────
 
 const connectedUsers = new Map<string, { email: string; activeSession: string | null }>();
 const sessionStreamingContent = new Map<string, string>();
 const sessionListeners = new Set<string>();
 const sessionCommandSubmitter = new Map<string, string>();
+const sessionStartTimes = new Map<string, number>();
+const userSessionCommands = new Map<string, Map<string, number>>();
+
+// In-memory metrics counter (flushed to DB every minute)
+let metricsBuffer = { session_count: 0, command_count: 0, agent_count: 0, latencies: [] as number[] };
+let lastMetricsFlush = Date.now();
+
+function flushMetrics() {
+  if (
+    metricsBuffer.session_count === 0 &&
+    metricsBuffer.command_count === 0 &&
+    metricsBuffer.agent_count === 0
+  ) {
+    return;
+  }
+  const avg = metricsBuffer.latencies.length
+    ? Math.round(metricsBuffer.latencies.reduce((a, b) => a + b, 0) / metricsBuffer.latencies.length)
+    : 0;
+  try {
+    db.prepare(
+      "INSERT INTO metrics (session_count, command_count, agent_count, avg_response_ms) VALUES (?, ?, ?, ?)"
+    ).run(
+      metricsBuffer.session_count,
+      metricsBuffer.command_count,
+      metricsBuffer.agent_count,
+      avg
+    );
+    // Purge metrics older than 30 days
+    db.prepare("DELETE FROM metrics WHERE recorded_at < datetime('now', '-30 days')").run();
+  } catch {
+    // ignore
+  }
+  metricsBuffer = { session_count: 0, command_count: 0, agent_count: 0, latencies: [] };
+}
+
+setInterval(() => {
+  if (Date.now() - lastMetricsFlush > 60_000) {
+    flushMetrics();
+    lastMetricsFlush = Date.now();
+  }
+}, 60_000);
+
+// Periodic security cleanup: expire temporary IP blocks every 5 minutes
+setInterval(() => {
+  cleanupExpiredBlocks();
+}, 5 * 60_000);
 
 type PlanAction = "retry" | "skip" | "cancel" | "rollback_stop" | "rollback_continue";
 const planResumeCallbacks = new Map<string, (action: PlanAction) => void>();
+
+// Active PTY sessions
+const ptyProcesses = new Map<string, import("node-pty").IPty>();
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -115,19 +188,130 @@ function tryGitRollback(): { ok: boolean; error?: string } {
   }
 }
 
+
+function checkRateLimit(email: string, sessionId: string): { ok: boolean; reason?: string } {
+  const maxCommands = parseInt(getAppSetting("rate_limit_commands", "100"), 10);
+  const maxRuntimeMin = parseInt(getAppSetting("rate_limit_runtime_min", "30"), 10);
+  const maxConcurrent = parseInt(getAppSetting("rate_limit_concurrent", "3"), 10);
+
+  // Count active sessions for this user
+  let activeSessions = 0;
+  for (const info of Array.from(connectedUsers.values())) {
+    if (info.email === email && info.activeSession) activeSessions++;
+  }
+  if (activeSessions > maxConcurrent) {
+    return { ok: false, reason: `Concurrent session limit reached (${maxConcurrent})` };
+  }
+
+  // Check command count for this session
+  const userCmds = userSessionCommands.get(email);
+  const sessionCmds = userCmds?.get(sessionId) ?? 0;
+  if (sessionCmds >= maxCommands) {
+    return { ok: false, reason: `Command limit reached (${maxCommands} per session)` };
+  }
+
+  // Check runtime
+  const startTime = sessionStartTimes.get(sessionId);
+  if (startTime) {
+    const elapsedMin = (Date.now() - startTime) / 1000 / 60;
+    if (elapsedMin > maxRuntimeMin) {
+      return { ok: false, reason: `Session runtime limit reached (${maxRuntimeMin} min)` };
+    }
+  }
+
+  return { ok: true };
+}
+
+function incrementSessionCommands(email: string, sessionId: string) {
+  if (!userSessionCommands.has(email)) {
+    userSessionCommands.set(email, new Map());
+  }
+  const m = userSessionCommands.get(email)!;
+  m.set(sessionId, (m.get(sessionId) ?? 0) + 1);
+}
+
 // ── Main export ──────────────────────────────────────────────────────────────
 
 export function registerHandlers(io: Server) {
   const provider = getClaudeProvider();
+
+  // Wire notification emitter so dispatchNotification can push real-time events
+  setNotificationEmitter((email: string, notification: InAppNotification) => {
+    for (const [socketId, info] of Array.from(connectedUsers.entries())) {
+      if (info.email === email) {
+        io.to(socketId).emit("notification:new", { notification });
+        io.to(socketId).emit("notification:count", { unread: getUnreadCount(email) });
+      }
+    }
+  });
 
   function ensureSessionListener(sessionId: string) {
     if (sessionListeners.has(sessionId)) return;
     sessionListeners.add(sessionId);
 
     let pendingContent = sessionStreamingContent.get(sessionId) ?? "";
+    const cmdStartTime = Date.now();
 
     provider.onOutput(sessionId, async (parsed) => {
       const submittedBy = sessionCommandSubmitter.get(sessionId);
+
+      // Guard rails: intercept permission_request for protected paths
+      if (parsed.type === "permission_request") {
+        const guardEnabled = getAppSetting("guard_rails_enabled", "true") === "true";
+        if (guardEnabled && parsed.toolName) {
+          const check = checkProtectedPath(parsed.toolName, parsed.toolInput);
+          if (check.blocked) {
+            provider.denyPermission(sessionId);
+            logActivity("security_mod_blocked", submittedBy ?? null, {
+              tool: parsed.toolName,
+              input: parsed.toolInput,
+              reason: check.reason,
+            });
+            io.to(`session:${sessionId}`).emit("security:warn", {
+              type: "protected_path_blocked",
+              message: check.reason ?? "Blocked access to protected path",
+            });
+            return;
+          }
+        }
+
+        // Sandbox: classify commands in Bash tool calls
+        const sandboxEnabled = isSandboxEnabled();
+        if (sandboxEnabled && parsed.toolName === "Bash" && parsed.toolInput) {
+          const toolInput = parsed.toolInput as Record<string, unknown>;
+          const command = typeof toolInput.command === "string" ? toolInput.command : "";
+          if (command) {
+            const classification = classifyCommand(command);
+            if (classification.category === "blocked" || classification.category === "custom_blocked") {
+              provider.denyPermission(sessionId);
+              logActivity("security_command_blocked", submittedBy ?? null, {
+                command: command.slice(0, 200),
+                category: classification.category,
+                reason: classification.reason,
+              });
+              io.to(`session:${sessionId}`).emit("security:warn", {
+                type: "command_blocked",
+                message: classification.reason ?? `Command auto-blocked: ${command.slice(0, 100)}`,
+              });
+              return;
+            }
+            // For restricted/dangerous/whitelisted: augment the output
+            if (classification.category !== "safe") {
+              io.to(`session:${sessionId}`).emit("claude:output", {
+                sessionId,
+                parsed: {
+                  ...parsed,
+                  sandboxCategory: classification.category,
+                  sandboxReason: classification.reason,
+                },
+                submittedBy,
+              });
+              return;
+            }
+          }
+        }
+      }
+
       io.to(`session:${sessionId}`).emit("claude:output", { sessionId, parsed, submittedBy });
 
       if ((parsed.type === "text" || parsed.type === "streaming") && parsed.content) {
@@ -139,8 +323,18 @@ export function registerHandlers(io: Server) {
         const contentToSave = pendingContent;
         pendingContent = "";
         sessionStreamingContent.delete(sessionId);
+
+        // Record latency
+        const latency = Date.now() - cmdStartTime;
+        metricsBuffer.latencies.push(latency);
+        metricsBuffer.command_count++;
+
+        const submitterEmail = sessionCommandSubmitter.get(sessionId);
         sessionCommandSubmitter.delete(sessionId);
+
         await saveMessage(sessionId, "claude", contentToSave).catch(() => {});
+        logActivity("command_executed", submitterEmail ?? null, { sessionId, latency_ms: latency });
+
         io.to(`session:${sessionId}`).emit("claude:command_done", { sessionId });
       }
     });
@@ -155,6 +349,7 @@ export function registerHandlers(io: Server) {
     }
 
     const email = await getEmailFromSocket(socket);
+    const isAdmin = await isAdminSocket(socket);
 
     connectedUsers.set(socket.id, { email, activeSession: null });
     broadcastPresence(io);
@@ -163,15 +358,50 @@ export function registerHandlers(io: Server) {
 
     socket.on(
       "claude:create_session",
-      async ({ sessionId, skipPermissions }: { sessionId: string; skipPermissions?: boolean }) => {
+      async ({
+        sessionId,
+        skipPermissions,
+        interface_type,
+      }: {
+        sessionId: string;
+        skipPermissions?: boolean;
+        interface_type?: "ui_chat" | "customization_interface" | "system_agent";
+      }) => {
         try {
           await createSession(sessionId, email, skipPermissions ?? false);
-          provider.createSession(sessionId, { skipPermissions });
+
+          // Build system prompt based on interface_type
+          let systemPrompt: string | undefined;
+          if (interface_type === "customization_interface") {
+            systemPrompt = await getCustomizationSystemPrompt();
+            logActivity("customization_session_started", email, { sessionId });
+          } else if (interface_type === "system_agent") {
+            systemPrompt = undefined; // bare, no personality
+          } else {
+            // Default: ui_chat — personality prefix only
+            const personalityPrefix = getPersonalityPrefix();
+            systemPrompt = personalityPrefix || undefined;
+          }
+
+          // Prepend security system prompt if guard rails are enabled
+          const guardEnabled = getAppSetting("guard_rails_enabled", "true") === "true";
+          const securityPrefix = getSecuritySystemPrompt(guardEnabled);
+          if (securityPrefix) {
+            systemPrompt = systemPrompt ? securityPrefix + "\n\n" + systemPrompt : securityPrefix;
+          }
+
+          provider.createSession(sessionId, {
+            skipPermissions,
+            ...(systemPrompt ? { systemPrompt } : {}),
+          });
 
           socket.join(`session:${sessionId}`);
 
           connectedUsers.set(socket.id, { email, activeSession: sessionId });
           broadcastPresence(io);
+
+          sessionStartTimes.set(sessionId, Date.now());
+          metricsBuffer.session_count++;
 
           ensureSessionListener(sessionId);
 
@@ -204,6 +434,51 @@ export function registerHandlers(io: Server) {
       "claude:message",
       async ({ sessionId, content }: { sessionId: string; content: string }) => {
         try {
+          // Rate limiting
+          const rl = checkRateLimit(email, sessionId);
+          if (!rl.ok) {
+            socket.emit("claude:rate_limited", {
+              sessionId,
+              reason: rl.reason,
+              limits: {
+                commands: getAppSetting("rate_limit_commands", "100"),
+                runtime_min: getAppSetting("rate_limit_runtime_min", "30"),
+                concurrent: getAppSetting("rate_limit_concurrent", "3"),
+              },
+            });
+            dispatchNotification(
+              "session_limit_reached",
+              email,
+              "Session limit reached",
+              rl.reason ?? "A session limit was reached.",
+            ).catch(() => {});
+            return;
+          }
+
+          // Guard rails: check for bot-config modification attempts
+          const guardEnabled = getAppSetting("guard_rails_enabled", "true") === "true";
+          if (guardEnabled) {
+            const suspicion = checkBotConfigRequest(content);
+            if (suspicion.suspicious) {
+              logActivity("security_mod_blocked", email, { reason: suspicion.reason, message: content.slice(0, 200) });
+              io.to(`session:${sessionId}`).emit("claude:output", {
+                sessionId,
+                parsed: {
+                  type: "text",
+                  content: "I'm not able to modify bot configuration through chat. Please use the **Settings** panel to manage users, rate limits, SMTP, and other configuration. This is a security restriction to prevent unauthorized changes.",
+                },
+                submittedBy: email,
+              });
+              io.to(`session:${sessionId}`).emit("claude:command_done", { sessionId });
+              io.to(`session:${sessionId}`).emit("security:warn", {
+                type: "suspicious_input",
+                message: "Message blocked: suspected bot configuration modification request.",
+              });
+              return;
+            }
+          }
+
+          incrementSessionCommands(email, sessionId);
           await saveMessage(sessionId, "admin", content, email);
           sessionCommandSubmitter.set(sessionId, email);
           io.to(`session:${sessionId}`).emit("claude:command_started", { sessionId, submittedBy: email });
@@ -222,6 +497,7 @@ export function registerHandlers(io: Server) {
       provider.offOutput(sessionId);
       provider.closeSession(sessionId);
       sessionListeners.delete(sessionId);
+      sessionStartTimes.delete(sessionId);
     });
 
     socket.on(
@@ -281,6 +557,7 @@ export function registerHandlers(io: Server) {
       provider.closeSession(sessionId);
       sessionStreamingContent.delete(sessionId);
       sessionListeners.delete(sessionId);
+      sessionStartTimes.delete(sessionId);
       await deleteSession(sessionId).catch(() => {});
       const sessions = await listSessions(email).catch(() => []);
       socket.emit("claude:sessions", { sessions });
@@ -304,6 +581,51 @@ export function registerHandlers(io: Server) {
       },
     );
 
+    socket.on(
+      "claude:always_allow_command",
+      ({ pattern }: { pattern: string }) => {
+        if (!isAdmin) {
+          socket.emit("claude:error", { message: "Admin only" });
+          return;
+        }
+        try {
+          const current: string[] = JSON.parse(getAppSetting("sandbox_always_allowed", "[]"));
+          if (!current.includes(pattern)) {
+            current.push(pattern);
+            setAppSetting("sandbox_always_allowed", JSON.stringify(current));
+            logActivity("security_command_policy_changed", email, { action: "always_allow_added", pattern });
+          }
+          socket.emit("claude:always_allow_command_ack", { pattern, allowed: true });
+        } catch (err) {
+          socket.emit("claude:error", { message: String(err) });
+        }
+      },
+    );
+
+    // ── Kill all ──────────────────────────────────────────────────────────
+
+    socket.on("claude:kill_all", async () => {
+      try {
+        const allSessionIds = Array.from(sessionStreamingContent.keys());
+        for (const sid of allSessionIds) {
+          try { provider.interrupt(sid); } catch { /* ignore */ }
+          sessionStreamingContent.delete(sid);
+          sessionListeners.delete(sid);
+        }
+        logActivity("kill_all", email);
+        socket.emit("claude:kill_all_done", { killed: allSessionIds.length });
+        io.emit("claude:sessions_aborted");
+
+        // Notify all admins
+        const admins = db.prepare("SELECT email FROM users WHERE is_admin = 1").all() as { email: string }[];
+        for (const admin of admins) {
+          dispatchNotification("kill_all_triggered", admin.email, "Kill-all triggered", `All active sessions were terminated by ${email}.`).catch(() => {});
+        }
+      } catch (err) {
+        socket.emit("claude:error", { message: String(err) });
+      }
+    });
+
     // ── Agent handlers ────────────────────────────────────────────────────
 
     socket.on("claude:list_agents", async () => {
@@ -320,6 +642,8 @@ export function registerHandlers(io: Server) {
       }) => {
         try {
           await createAgent({ name, description, icon, model, allowed_tools }, email);
+          metricsBuffer.agent_count++;
+          logActivity("agent_created", email, { name });
           const agents = await listAgents(email);
           socket.emit("claude:agents", { agents });
         } catch (err) {
@@ -446,6 +770,7 @@ Return only the JSON object, no markdown, no explanation.`;
       async ({ sessionId, goal }: { sessionId: string; goal: string }) => {
         try {
           const plan = await createPlan(sessionId, goal, email);
+          logActivity("plan_created", email, { planId: plan.id, goal });
           const planSessionId = "plan-gen-" + plan.id;
           provider.createSession(planSessionId, { skipPermissions: true });
 
@@ -608,6 +933,7 @@ Be specific. Each step should be atomic and independently executable. Return onl
           socket.emit("claude:error", { message: "Plan not found" });
           return;
         }
+        logActivity("plan_executed", email, { planId });
         const approvedSteps = (plan.steps ?? []).filter((s) => s.status === "approved");
         await updatePlanStatus(planId, "executing");
         socket.emit("claude:plan_executing", { planId });
@@ -672,6 +998,7 @@ Be specific. Each step should be atomic and independently executable. Return onl
               await updatePlanStatus(planId, "cancelled");
               const updatedPlan = await getPlan(planId);
               socket.emit("claude:plan_updated", { plan: updatedPlan });
+              dispatchNotification("plan_failed", email, "Plan cancelled", `Plan execution was cancelled after a step failed.`).catch(() => {});
               return;
             }
             continue;
@@ -684,6 +1011,7 @@ Be specific. Each step should be atomic and independently executable. Return onl
         await updatePlanStatus(planId, "completed");
         const completedPlan = await getPlan(planId);
         socket.emit("claude:plan_completed", { plan: completedPlan });
+        dispatchNotification("plan_completed", email, "Plan completed", `Your plan has been executed successfully.`).catch(() => {});
       } catch (err) {
         socket.emit("claude:error", { message: String(err) });
       }
@@ -724,9 +1052,91 @@ Be specific. Each step should be atomic and independently executable. Return onl
       }
     });
 
+    // ── Notification handlers ─────────────────────────────────────────────
+
+    socket.on("notification:get_all", () => {
+      const notifications = getInAppNotifications(email);
+      const unread = getUnreadCount(email);
+      socket.emit("notification:list", { notifications, unread });
+    });
+
+    socket.on("notification:read", ({ ids, all }: { ids?: number[]; all?: boolean }) => {
+      if (all) {
+        markAllNotificationsRead(email);
+      } else if (Array.isArray(ids)) {
+        markNotificationsRead(email, ids);
+      }
+      socket.emit("notification:count", { unread: getUnreadCount(email) });
+    });
+
+    // ── Terminal (admin only) ────────────────────────────────────────────
+
+    socket.on(
+      "terminal:start",
+      async ({ cols, rows }: { cols: number; rows: number }) => {
+        if (!isAdmin) {
+          socket.emit("claude:error", { message: "Terminal is admin-only" });
+          return;
+        }
+        try {
+          // Lazy require to avoid issues when node-pty is not built
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const pty = require("node-pty") as typeof import("node-pty");
+          const shell = process.env.SHELL ?? "/bin/bash";
+          const ptyProcess = pty.spawn(shell, [], {
+            name: "xterm-color",
+            cols: cols ?? 80,
+            rows: rows ?? 24,
+            cwd: PROJECT_ROOT,
+            env: process.env as Record<string, string>,
+          });
+
+          ptyProcesses.set(socket.id, ptyProcess);
+
+          ptyProcess.onData((data: string) => {
+            socket.emit("terminal:output", { data });
+          });
+
+          ptyProcess.onExit(() => {
+            ptyProcesses.delete(socket.id);
+            socket.emit("terminal:close");
+          });
+        } catch (err) {
+          socket.emit("claude:error", { message: "Failed to start terminal: " + String(err) });
+        }
+      }
+    );
+
+    socket.on("terminal:input", ({ data }: { data: string }) => {
+      const pty = ptyProcesses.get(socket.id);
+      if (pty) pty.write(data);
+    });
+
+    socket.on("terminal:resize", ({ cols, rows }: { cols: number; rows: number }) => {
+      const pty = ptyProcesses.get(socket.id);
+      if (pty) pty.resize(cols, rows);
+    });
+
+    socket.on("terminal:close", () => {
+      const pty = ptyProcesses.get(socket.id);
+      if (pty) {
+        pty.kill();
+        ptyProcesses.delete(socket.id);
+      }
+    });
+
     // ── Disconnect ────────────────────────────────────────────────────────
 
     socket.on("disconnect", () => {
+      logActivity("user_logout", email);
+
+      // Kill terminal if active
+      const pty = ptyProcesses.get(socket.id);
+      if (pty) {
+        try { pty.kill(); } catch { /* ignore */ }
+        ptyProcesses.delete(socket.id);
+      }
+
       connectedUsers.delete(socket.id);
       broadcastPresence(io);
     });

@@ -11,6 +11,8 @@ interface SessionState {
   lastMessage: string;
   allowedTools: Set<string>;
   skipPermissions: boolean;
+  systemPrompt?: string;
+  pendingDeny?: boolean;
 }
 
 const sessions = new Map<string, SessionState>();
@@ -53,6 +55,12 @@ function runClaude(
     args.push("--allowed-tools", allAllowedTools.join(","));
   }
 
+  // Prepend system prompt to first message if set and no prior session
+  let fullMessage = message;
+  if (state.systemPrompt && !state.claudeSessionId) {
+    fullMessage = state.systemPrompt + "\n\n" + message;
+  }
+
   const env = { ...process.env };
   delete (env as Record<string, string | undefined>).CLAUDECODE;
 
@@ -62,7 +70,7 @@ function runClaude(
     stdio: ["pipe", "pipe", "pipe"],
   });
 
-  proc.stdin.write(message + "\n");
+  proc.stdin.write(fullMessage + "\n");
   proc.stdin.end();
 
   let buffer = "";
@@ -170,9 +178,10 @@ function handleEvent(state: SessionState, event: Record<string, unknown>): void 
 }
 
 export const subprocessProvider: ClaudeCodeProvider = {
-  createSession(sessionId, { skipPermissions } = {}) {
+  createSession(sessionId, { skipPermissions, systemPrompt } = {}) {
     const state = getOrCreate(sessionId);
     state.skipPermissions = skipPermissions ?? false;
+    if (systemPrompt) state.systemPrompt = systemPrompt;
   },
 
   sendMessage(sessionId, message, opts) {
@@ -188,6 +197,15 @@ export const subprocessProvider: ClaudeCodeProvider = {
     if (scope === "session") state.allowedTools.add(toolName);
     const extraTools = scope === "once" ? [toolName] : [];
     runClaude(state, state.lastMessage, state.skipPermissions, extraTools);
+  },
+
+  denyPermission(sessionId) {
+    // Re-run the last message with the same state — the permission denial is
+    // handled by Claude's own logic when we don't include the tool in allowed list.
+    // We emit a synthetic "done" so the UI unblocks.
+    const state = sessions.get(sessionId);
+    if (!state) return;
+    state.emitter.emit("output", { type: "done" } as import("./provider").ParsedOutput);
   },
 
   interrupt(sessionId) {

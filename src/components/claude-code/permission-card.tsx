@@ -1,11 +1,16 @@
 "use client";
 
+import { cn } from "@/lib/utils";
+
 interface PermissionCardProps {
   toolName: string;
   toolInput?: unknown;
   sessionId: string;
   onAllow: (sessionId: string, toolName: string, scope: "session" | "once") => void;
+  onAlwaysAllow?: (sessionId: string, toolName: string, command: string) => void;
   disabled?: boolean;
+  sandboxCategory?: string;
+  sandboxReason?: string;
 }
 
 function ToolInputPreview({ toolName, toolInput }: { toolName: string; toolInput: unknown }) {
@@ -63,23 +68,49 @@ function ToolInputPreview({ toolName, toolInput }: { toolName: string; toolInput
   );
 }
 
-export function PermissionCard({ toolName, toolInput, sessionId, onAllow, disabled }: PermissionCardProps) {
+export function PermissionCard({ toolName, toolInput, sessionId, onAllow, onAlwaysAllow, disabled, sandboxCategory, sandboxReason }: PermissionCardProps) {
+  const isDangerous = sandboxCategory === "dangerous";
+  const isRestricted = sandboxCategory === "restricted";
+  const hasSandboxWarning = isDangerous || isRestricted;
+
+  const borderColor = isDangerous ? "border-bot-red/40" : "border-bot-amber/40";
+  const bgColor = isDangerous ? "bg-bot-red/10" : "bg-bot-amber/10";
+  const iconColor = isDangerous ? "text-bot-red" : "text-bot-amber";
+
+  const command = toolInput && typeof toolInput === "object"
+    ? String((toolInput as Record<string, unknown>).command ?? "")
+    : "";
+
   return (
-    <div className="rounded-md border border-bot-amber/40 bg-bot-amber/10 px-3 py-2 space-y-2">
+    <div className={cn("rounded-md border px-3 py-2 space-y-2", borderColor, bgColor)}>
       <div className="flex items-center gap-2">
-        <span className="text-bot-amber text-body">⚠</span>
+        <span className={cn("text-body", iconColor)}>⚠</span>
         <span className="text-body text-bot-text">
           Claude wants to use <code className="font-mono text-bot-amber">{toolName}</code>
         </span>
       </div>
+
+      {hasSandboxWarning && sandboxReason && (
+        <div className={cn(
+          "rounded px-2 py-1.5 text-caption flex items-start gap-1.5",
+          isDangerous ? "bg-bot-red/20 text-bot-red" : "bg-bot-amber/20 text-bot-amber"
+        )}>
+          <span className="font-semibold shrink-0">{isDangerous ? "DANGER:" : "Warning:"}</span>
+          <span>{sandboxReason}</span>
+        </div>
+      )}
+
       {toolInput != null && (
         <ToolInputPreview toolName={toolName} toolInput={toolInput} />
       )}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button
           onClick={() => onAllow(sessionId, toolName, "session")}
           disabled={disabled}
-          className="rounded px-3 py-1 bg-bot-accent text-white text-caption hover:bg-bot-accent/80 disabled:opacity-50 transition-colors"
+          className={cn(
+            "rounded px-3 py-1 text-white text-caption disabled:opacity-50 transition-colors",
+            isDangerous ? "bg-bot-red hover:bg-bot-red/80" : "bg-bot-accent hover:bg-bot-accent/80"
+          )}
         >
           Allow for Session
         </button>
@@ -90,6 +121,15 @@ export function PermissionCard({ toolName, toolInput, sessionId, onAllow, disabl
         >
           Allow Once
         </button>
+        {onAlwaysAllow && (isRestricted || isDangerous) && command && (
+          <button
+            onClick={() => onAlwaysAllow(sessionId, toolName, command)}
+            disabled={disabled}
+            className="rounded px-3 py-1 border border-bot-green/40 text-caption text-bot-green hover:bg-bot-green/10 disabled:opacity-50 transition-colors"
+          >
+            Always allow
+          </button>
+        )}
       </div>
     </div>
   );

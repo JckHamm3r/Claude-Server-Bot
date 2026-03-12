@@ -103,6 +103,141 @@ db.exec(`
   );
 `);
 
+// New Phase-2 tables
+db.exec(`
+  CREATE TABLE IF NOT EXISTS bot_settings (
+    id        INTEGER PRIMARY KEY DEFAULT 1,
+    name      TEXT NOT NULL DEFAULT 'Claude Server Bot',
+    avatar    TEXT,
+    tagline   TEXT NOT NULL DEFAULT 'Your AI assistant',
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  INSERT OR IGNORE INTO bot_settings (id) VALUES (1);
+
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS metrics (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    recorded_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    session_count   INTEGER DEFAULT 0,
+    command_count   INTEGER DEFAULT 0,
+    agent_count     INTEGER DEFAULT 0,
+    avg_response_ms INTEGER DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS activity_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp  TEXT NOT NULL DEFAULT (datetime('now')),
+    event_type TEXT NOT NULL,
+    user_email TEXT,
+    details    TEXT
+  );
+`);
+
+// Seed default app_settings if missing
+const defaultAppSettings: Record<string, string> = {
+  rate_limit_commands: "100",
+  rate_limit_runtime_min: "30",
+  rate_limit_concurrent: "3",
+  personality: "professional",
+  personality_custom: "",
+  auto_update_enabled: "false",
+  // Phase 4: Security defaults
+  guard_rails_enabled: "true",
+  ip_protection_enabled: "true",
+  ip_max_attempts: "5",
+  ip_window_minutes: "10",
+  ip_block_duration_minutes: "60",
+  sandbox_enabled: "true",
+  sandbox_always_allowed: "[]",
+  sandbox_always_blocked: "[]",
+};
+const insertSetting = db.prepare(
+  "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)"
+);
+for (const [k, v] of Object.entries(defaultAppSettings)) {
+  insertSetting.run(k, v);
+}
+
+// Phase 3: Domains, SMTP, Notifications
+db.exec(`
+  CREATE TABLE IF NOT EXISTS domains (
+    id          TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+    hostname    TEXT NOT NULL UNIQUE,
+    is_primary  INTEGER NOT NULL DEFAULT 0,
+    ssl_enabled INTEGER NOT NULL DEFAULT 0,
+    verified    INTEGER NOT NULL DEFAULT 0,
+    added_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    notes       TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS smtp_settings (
+    id           INTEGER PRIMARY KEY DEFAULT 1,
+    host         TEXT NOT NULL DEFAULT '',
+    port         INTEGER NOT NULL DEFAULT 587,
+    secure       INTEGER NOT NULL DEFAULT 0,
+    username     TEXT NOT NULL DEFAULT '',
+    password     TEXT NOT NULL DEFAULT '',
+    from_name    TEXT NOT NULL DEFAULT '',
+    from_address TEXT NOT NULL DEFAULT '',
+    reply_to     TEXT NOT NULL DEFAULT '',
+    enabled      INTEGER NOT NULL DEFAULT 1,
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  INSERT OR IGNORE INTO smtp_settings (id) VALUES (1);
+
+  CREATE TABLE IF NOT EXISTS notification_preferences (
+    user_email    TEXT NOT NULL,
+    event_type    TEXT NOT NULL,
+    email_enabled INTEGER NOT NULL DEFAULT 0,
+    inapp_enabled INTEGER NOT NULL DEFAULT 0,
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_email, event_type)
+  );
+
+  CREATE TABLE IF NOT EXISTS inapp_notifications (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_email TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    title      TEXT NOT NULL,
+    body       TEXT NOT NULL,
+    read       INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_inapp_notifications_user
+    ON inapp_notifications (user_email, id DESC);
+`);
+
+// Phase 4: Security tables
+db.exec(`
+  CREATE TABLE IF NOT EXISTS login_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ip_address TEXT NOT NULL,
+    email_attempted TEXT,
+    success INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_login_attempts_ip ON login_attempts(ip_address, created_at);
+
+  CREATE TABLE IF NOT EXISTS blocked_ips (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ip_address TEXT NOT NULL UNIQUE,
+    block_reason TEXT NOT NULL,
+    block_type TEXT NOT NULL DEFAULT 'temporary',
+    failed_attempt_count INTEGER DEFAULT 0,
+    blocked_at TEXT NOT NULL DEFAULT (datetime('now')),
+    unblock_at TEXT,
+    blocked_by TEXT NOT NULL DEFAULT 'system'
+  );
+`);
+
 // Seed admin user from env if table is empty
 const userCount = (db.prepare("SELECT COUNT(*) as count FROM users").get() as { count: number }).count;
 if (userCount === 0) {

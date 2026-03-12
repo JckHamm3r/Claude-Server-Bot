@@ -15,5 +15,6 @@ export const sdkProvider: ClaudeCodeProvider = {
   onOutput() {},
   offOutput() {},
   allowTool() {},
+  denyPermission() {},
   isRunning() { return false; },
 };
