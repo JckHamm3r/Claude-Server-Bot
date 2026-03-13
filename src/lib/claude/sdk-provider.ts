@@ -53,10 +53,11 @@ async function runSDK(state: SDKSessionState, message: string): Promise<void> {
   // Set API key in env for the SDK
   process.env.ANTHROPIC_API_KEY = apiKey;
 
-  let query: typeof import("@anthropic-ai/claude-code").query;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let query: (opts: any) => Promise<any>;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const sdk = require("@anthropic-ai/claude-code") as typeof import("@anthropic-ai/claude-code");
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+    const sdk = require("@anthropic-ai/claude-code") as any;
     query = sdk.query;
   } catch {
     state.running = false;

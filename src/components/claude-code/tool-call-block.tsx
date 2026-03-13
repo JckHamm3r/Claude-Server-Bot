@@ -126,25 +126,25 @@ export function ToolCallBlock({ parsed }: ToolCallBlockProps) {
         )}
         <span className="text-bot-muted">{getToolIcon(rawToolName)}</span>
         <span className="text-caption font-mono font-medium text-bot-text">{toolName}</span>
-        {parsed.toolInput && typeof parsed.toolInput === "object" && !!(parsed.toolInput as Record<string, unknown>).command && (
+        {parsed.toolInput && typeof parsed.toolInput === "object" && !!(parsed.toolInput as Record<string, unknown>).command ? (
           <span className="text-[11px] font-mono text-bot-muted truncate max-w-[300px]">
             $ {String((parsed.toolInput as Record<string, unknown>).command).slice(0, 60)}
           </span>
-        )}
-        {parsed.toolInput && typeof parsed.toolInput === "object" && !!(parsed.toolInput as Record<string, unknown>).file_path && !(parsed.toolInput as Record<string, unknown>).command && (
+        ) : null}
+        {parsed.toolInput && typeof parsed.toolInput === "object" && !!(parsed.toolInput as Record<string, unknown>).file_path && !(parsed.toolInput as Record<string, unknown>).command ? (
           <span className="text-[11px] font-mono text-bot-muted truncate max-w-[300px]">
             {String((parsed.toolInput as Record<string, unknown>).file_path)}
           </span>
-        )}
+        ) : null}
         <span className="ml-auto shrink-0">
           <StatusBadge status={parsed.toolStatus} />
         </span>
       </button>
-      {expanded && hasDetail && (
+      {expanded && hasDetail ? (
         <div className="border-t border-bot-border/40 px-3 py-2">
           <ToolDetail parsed={parsed} />
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

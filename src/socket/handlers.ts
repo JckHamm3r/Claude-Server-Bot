@@ -148,7 +148,8 @@ setInterval(() => {
 const planResumeCallbacks = new Map<string, (action: PlanAction) => void>();
 
 // Active PTY sessions
-const ptyProcesses = new Map<string, import("node-pty").IPty>();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const ptyProcesses = new Map<string, any>();
 
 // Per-session provider tracking (for SDK vs subprocess per session)
 const sessionProviders = new Map<string, ClaudeCodeProvider>();

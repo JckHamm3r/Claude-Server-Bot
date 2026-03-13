@@ -51,7 +51,8 @@ export function registerPresenceHandlers(ctx: HandlerContext) {
       try {
         // Lazy require to avoid issues when node-pty is not built
         // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const pty = require("node-pty") as typeof import("node-pty");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const pty = require("node-pty") as any;
         const shell = process.env.SHELL ?? "/bin/bash";
         const ptyProcess = pty.spawn(shell, [], {
           name: "xterm-color",
