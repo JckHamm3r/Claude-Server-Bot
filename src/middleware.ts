@@ -24,7 +24,12 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const origin = request.nextUrl.origin;
+  // Use NEXTAUTH_URL for redirects to avoid localhost in callback URLs
+  // (request.nextUrl.origin resolves to localhost on custom servers)
+  const configuredUrl = process.env.NEXTAUTH_URL ?? "";
+  const origin = configuredUrl
+    ? configuredUrl.replace(new RegExp(`(/${prefix}/${slug})?$`), "")
+    : request.nextUrl.origin;
 
   try {
     const token = await getToken({
