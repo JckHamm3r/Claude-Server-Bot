@@ -1852,7 +1852,6 @@ const env = [
   'CLAUDE_BOT_ADMIN_HASH=' + hash,
   'CLAUDE_CLI_PATH=' + cliBin,
   'CLAUDE_PROJECT_ROOT=' + projectRoot,
-  'NEXT_PUBLIC_CLAUDE_PROJECT_ROOT=' + projectRoot,
   'DATA_DIR=' + path.join(installDir, 'data'),
   'CLAUDE_PROVIDER=subprocess',
 ].join('\n') + '\n';

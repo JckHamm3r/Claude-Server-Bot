@@ -4,11 +4,16 @@ import { getToken } from "next-auth/jwt";
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const slug = process.env.NEXT_PUBLIC_CLAUDE_BOT_SLUG ?? "";
+  const prefix = process.env.NEXT_PUBLIC_CLAUDE_BOT_PATH_PREFIX ?? "c";
+  const basePath = slug ? `/${prefix}/${slug}` : "";
 
   // Always allow these paths (public or static assets)
   if (
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/_next") ||
+    pathname === "/login" ||
+    pathname === "/setup" ||
     pathname === "/favicon.ico" ||
     pathname === "/claude-code.png" ||
     pathname === "/api/bot-identity" ||
@@ -19,7 +24,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const baseUrl = process.env.NEXTAUTH_URL ?? request.nextUrl.origin;
+  const origin = request.nextUrl.origin;
 
   try {
     const token = await getToken({
@@ -28,9 +33,9 @@ export async function middleware(request: NextRequest) {
     });
 
     if (!token) {
-      // Not authenticated → redirect to login
-      const loginUrl = new URL("/login", baseUrl);
-      loginUrl.searchParams.set("callbackUrl", `${baseUrl}${pathname}`);
+      // Not authenticated → redirect to login (include basePath)
+      const loginUrl = new URL(`${basePath}/login`, origin);
+      loginUrl.searchParams.set("callbackUrl", `${origin}${basePath}${pathname}`);
       return NextResponse.redirect(loginUrl);
     }
 
@@ -43,12 +48,12 @@ export async function middleware(request: NextRequest) {
     // We store setup_complete in a cookie to avoid DB lookups in middleware (edge runtime)
     const setupComplete = request.cookies.get("bot_setup_complete")?.value === "1";
     if (!setupComplete && pathname !== "/setup") {
-      const setupUrl = new URL("/setup", baseUrl);
+      const setupUrl = new URL(`${basePath}/setup`, origin);
       return NextResponse.redirect(setupUrl);
     }
 
   } catch {
-    const loginUrl = new URL("/login", baseUrl);
+    const loginUrl = new URL(`${basePath}/login`, origin);
     return NextResponse.redirect(loginUrl);
   }
 
@@ -57,6 +62,7 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
+    "/",
     "/((?!_next/static|_next/image|favicon.ico|claude-code.png|api/auth).*)",
   ],
 };

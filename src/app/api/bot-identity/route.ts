@@ -9,16 +9,24 @@ interface BotSettingsRow {
   avatar: string | null;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const row = db
     .prepare("SELECT name, tagline, avatar FROM bot_settings WHERE id = 1")
     .get() as BotSettingsRow | undefined;
 
-  return NextResponse.json({
+  const response: Record<string, unknown> = {
     name: row?.name ?? "Claude Server Bot",
     tagline: row?.tagline ?? "Your AI assistant",
     avatar: row?.avatar ?? null,
-  });
+  };
+
+  // Only expose projectRoot to authenticated users
+  const session = await getServerSession(authOptions);
+  if (session?.user) {
+    response.projectRoot = process.env.CLAUDE_PROJECT_ROOT ?? "";
+  }
+
+  return NextResponse.json(response);
 }
 
 export async function POST(request: NextRequest) {

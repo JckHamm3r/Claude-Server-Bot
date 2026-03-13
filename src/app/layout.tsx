@@ -2,6 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { NextAuthProvider } from "@/providers/session-provider";
 
+// Force all pages to be dynamically rendered so middleware auth checks always run
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: "Claude Server Bot",
   description: "Claude Code interface for your server",
