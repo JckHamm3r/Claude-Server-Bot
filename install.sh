@@ -870,6 +870,51 @@ step_prerequisites() {
     info "openssl found"
   fi
 
+  # Build tools (required for native modules like better-sqlite3)
+  local need_build_tools=false
+  if ! command -v make &>/dev/null || ! command -v g++ &>/dev/null; then
+    need_build_tools=true
+  fi
+
+  if $need_build_tools; then
+    if $UNATTENDED; then
+      info "Installing build tools (required for native modules)..."
+      case "$PKG_MGR" in
+        apt)  sudo apt-get install -y build-essential python3 ;;
+        dnf)  sudo dnf groupinstall -y "Development Tools" && sudo dnf install -y python3 ;;
+        yum)  sudo yum groupinstall -y "Development Tools" && sudo yum install -y python3 ;;
+        brew) xcode-select --install 2>/dev/null || true ;;
+        *)    warn "Please install build tools (make, g++) manually." ;;
+      esac
+    else
+      warn "Build tools (make, g++) are required for native modules but not found."
+      local build_result
+      prompt_yn "  Install build tools now? (required)" "y" && build_result=0 || build_result=$?
+      if [ "$build_result" -eq 0 ]; then
+        info "Installing build tools..."
+        case "$PKG_MGR" in
+          apt)  sudo apt-get install -y build-essential python3 ;;
+          dnf)  sudo dnf groupinstall -y "Development Tools" && sudo dnf install -y python3 ;;
+          yum)  sudo yum groupinstall -y "Development Tools" && sudo yum install -y python3 ;;
+          brew) xcode-select --install 2>/dev/null || true ;;
+          *)    warn "Please install build tools (make, g++) manually." ;;
+        esac
+      elif [ "$build_result" -eq 2 ]; then
+        return  # go back
+      else
+        error "Build tools are required for native modules. Please install manually and re-run."
+        exit 1
+      fi
+    fi
+    if command -v make &>/dev/null && command -v g++ &>/dev/null; then
+      info "Build tools installed"
+    else
+      warn "Build tools may be incomplete — native module compilation could fail."
+    fi
+  else
+    info "Build tools found (make, g++)"
+  fi
+
   # Disk space check
   local avail_kb
   avail_kb=$(df -k . | awk 'NR==2 {print $4}')
@@ -1528,6 +1573,15 @@ step_build() {
   stop_spinner
   info "Dependencies installed"
 
+  # Rebuild native modules (better-sqlite3 requires compilation)
+  local rebuild_log
+  rebuild_log="$(mktemp)"
+  if ! pnpm rebuild better-sqlite3 > "$rebuild_log" 2>&1; then
+    warn "Native module rebuild had issues (may still work)."
+    $VERBOSE && tail -10 "$rebuild_log"
+  fi
+  rm -f "$rebuild_log"
+
   # Generate .env
   generate_env
 
@@ -1593,6 +1647,9 @@ upgrade_in_place() {
   pnpm install --frozen-lockfile --reporter=silent 2>&1
   stop_spinner
   info "Dependencies installed"
+
+  # Rebuild native modules
+  pnpm rebuild better-sqlite3 2>&1 || true
 
   # Source SLUG and PATH_PREFIX from existing .env if not already set
   if [ -z "${SLUG:-}" ] && [ -f "$target_dir/.env" ]; then
