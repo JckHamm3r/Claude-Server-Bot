@@ -1630,21 +1630,29 @@ step_build() {
   info "Dependencies installed"
 
   # Rebuild native modules (better-sqlite3 requires compilation)
+  echo "  Compiling native modules..."
+  start_spinner
   local sqlite3_dir
   sqlite3_dir="$(find node_modules/.pnpm -path '*/better-sqlite3/binding.gyp' -printf '%h' -quit 2>/dev/null)"
   if [ -n "$sqlite3_dir" ]; then
     local rebuild_log
     rebuild_log="$(mktemp)"
     if ! npx --yes node-gyp rebuild --directory="$sqlite3_dir" > "$rebuild_log" 2>&1; then
+      stop_spinner
       warn "Native module rebuild failed. Last 10 lines:"
       tail -10 "$rebuild_log"
+    else
+      stop_spinner
+      info "Native modules compiled"
     fi
     rm -f "$rebuild_log"
   else
+    stop_spinner
     warn "Could not locate better-sqlite3 for native rebuild."
   fi
 
   # Generate .env
+  echo "  Generating configuration..."
   generate_env
 
   # Build
@@ -1711,11 +1719,15 @@ upgrade_in_place() {
   info "Dependencies installed"
 
   # Rebuild native modules (better-sqlite3 requires compilation)
+  echo "  Compiling native modules..."
+  start_spinner
   local sqlite3_dir
   sqlite3_dir="$(find node_modules/.pnpm -path '*/better-sqlite3/binding.gyp' -printf '%h' -quit 2>/dev/null)"
   if [ -n "$sqlite3_dir" ]; then
-    npx --yes node-gyp rebuild --directory="$sqlite3_dir" 2>&1 || warn "Native module rebuild had issues."
+    npx --yes node-gyp rebuild --directory="$sqlite3_dir" > /dev/null 2>&1 || warn "Native module rebuild had issues."
   fi
+  stop_spinner
+  info "Native modules compiled"
 
   # Source SLUG and PATH_PREFIX from existing .env if not already set
   if [ -z "${SLUG:-}" ] && [ -f "$target_dir/.env" ]; then
