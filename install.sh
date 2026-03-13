@@ -1854,7 +1854,7 @@ const env = [
   'NEXT_PUBLIC_CLAUDE_BOT_SLUG=' + slug,
   'CLAUDE_BOT_NAME=' + botName,
   'CLAUDE_BOT_ADMIN_EMAIL=' + email,
-  'CLAUDE_BOT_ADMIN_HASH=' + hash,
+  "CLAUDE_BOT_ADMIN_HASH='" + hash + "'",
   'CLAUDE_CLI_PATH=' + cliBin,
   'CLAUDE_PROJECT_ROOT=' + projectRoot,
   'DATA_DIR=' + path.join(installDir, 'data'),
@@ -2162,12 +2162,12 @@ After=network.target
 Type=simple
 User=$USER
 WorkingDirectory=$INSTALL_DIR
-EnvironmentFile=$INSTALL_DIR/.env
 ExecStart=$pnpm_bin start
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
+Environment=NODE_ENV=production
 Environment=PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$(dirname "$node_bin")
 
 [Install]

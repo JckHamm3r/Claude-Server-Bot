@@ -578,6 +578,7 @@ export function updateUserSettings(
   if (data.setup_complete !== undefined) { fields.push("setup_complete = ?"); values.push(data.setup_complete ? 1 : 0); }
   fields.push("updated_at = datetime('now')");
   values.push(email);
+  db.prepare("INSERT OR IGNORE INTO user_settings (email) VALUES (?)").run(email);
   db.prepare(`UPDATE user_settings SET ${fields.join(", ")} WHERE email = ?`).run(...values as Parameters<typeof db.prepare>[0][]);
   return rowToSettings(db.prepare("SELECT * FROM user_settings WHERE email = ?").get(email) as Record<string, unknown>);
 }
