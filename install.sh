@@ -782,7 +782,7 @@ step_prerequisites() {
       error "Node.js 20+ required but got $(node --version). Please upgrade manually and re-run."
       exit 1
     fi
-    ok "Node.js installed: $(node --version)"
+    info "Node.js installed: $(node --version)"
   else
     info "Node $(node --version)"
   fi
@@ -833,7 +833,7 @@ step_prerequisites() {
       error "Failed to install git. Please install manually and re-run."
       exit 1
     fi
-    ok "git installed: $(git --version | awk '{print $3}')"
+    info "git installed: $(git --version | awk '{print $3}')"
   else
     info "git $(git --version | awk '{print $3}')"
   fi
@@ -861,7 +861,7 @@ step_prerequisites() {
       error "Failed to install openssl. Please install manually and re-run."
       exit 1
     fi
-    ok "openssl installed"
+    info "openssl installed"
   else
     info "openssl found"
   fi
