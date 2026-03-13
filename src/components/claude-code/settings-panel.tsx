@@ -21,6 +21,7 @@ import { SmtpSection } from "@/components/claude-code/settings/smtp-section";
 import { NotificationsSection } from "@/components/claude-code/settings/notifications-section";
 import { CustomizationSection } from "@/components/claude-code/settings/customization-section";
 import { SecuritySection } from "@/components/claude-code/settings/security-section";
+import { TemplatesSection } from "@/components/claude-code/settings/templates-section";
 
 type SectionKey =
   | "general"
@@ -37,7 +38,10 @@ type SectionKey =
   | "smtp"
   | "notifications"
   | "customization"
-  | "security";
+  | "security"
+  | "api_key"
+  | "templates"
+  | "budgets";
 
 export function SettingsPanel() {
   const [settings, setSettings] = useState<ClaudeUserSettings | null>(null);
@@ -416,6 +420,9 @@ export function SettingsPanel() {
     { key: "smtp", label: "Email / SMTP", adminOnly: true },
     { key: "customization", label: "Customization", adminOnly: true },
     { key: "security", label: "Security", adminOnly: true },
+    { key: "templates", label: "Templates", adminOnly: true },
+    { key: "budgets", label: "Budgets", adminOnly: true },
+    { key: "api_key", label: "API Key (SDK)", adminOnly: true },
   ];
   const sections = allSections.filter((s) => !s.adminOnly || isAdmin);
 
@@ -957,6 +964,215 @@ export function SettingsPanel() {
 
         {activeSection === "security" && <SecuritySection />}
 
+        {/* ── Templates ── */}
+        {activeSection === "templates" && <TemplatesSection />}
+
+        {/* ── Budgets ── */}
+        {activeSection === "budgets" && <BudgetSection />}
+
+        {/* ── API Key ── */}
+        {activeSection === "api_key" && <ApiKeySection />}
+
+      </div>
+    </div>
+  );
+}
+
+function BudgetSection() {
+  const [sessionLimit, setSessionLimit] = useState("0");
+  const [dailyLimit, setDailyLimit] = useState("0");
+  const [monthlyLimit, setMonthlyLimit] = useState("0");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    const socket = getSocket();
+    const handle = ({ settings: s }: { settings: Record<string, string> }) => {
+      setSessionLimit(s.budget_limit_session_usd ?? "0");
+      setDailyLimit(s.budget_limit_daily_usd ?? "0");
+      setMonthlyLimit(s.budget_limit_monthly_usd ?? "0");
+    };
+    socket.on("claude:app_settings", handle);
+    socket.emit("claude:get_app_settings");
+    return () => { socket.off("claude:app_settings", handle); };
+  }, []);
+
+  const handleSave = () => {
+    setSaving(true);
+    const socket = getSocket();
+    socket.emit("claude:set_app_setting", { key: "budget_limit_session_usd", value: sessionLimit });
+    socket.emit("claude:set_app_setting", { key: "budget_limit_daily_usd", value: dailyLimit });
+    socket.emit("claude:set_app_setting", { key: "budget_limit_monthly_usd", value: monthlyLimit });
+    setTimeout(() => { setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 2000); }, 300);
+  };
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-subtitle font-semibold text-bot-text">Budget Limits</h2>
+      <p className="text-caption text-bot-muted">Set spending limits for Claude usage. Set to 0 to disable.</p>
+
+      <div className="space-y-4">
+        <div>
+          <label className="mb-1 block text-caption font-medium text-bot-muted">Per-session limit (USD)</label>
+          <input type="number" step="0.01" min="0" value={sessionLimit} onChange={(e) => setSessionLimit(e.target.value)}
+            className="w-48 rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent" />
+        </div>
+        <div>
+          <label className="mb-1 block text-caption font-medium text-bot-muted">Daily limit (USD)</label>
+          <input type="number" step="0.01" min="0" value={dailyLimit} onChange={(e) => setDailyLimit(e.target.value)}
+            className="w-48 rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent" />
+        </div>
+        <div>
+          <label className="mb-1 block text-caption font-medium text-bot-muted">Monthly limit (USD)</label>
+          <input type="number" step="0.01" min="0" value={monthlyLimit} onChange={(e) => setMonthlyLimit(e.target.value)}
+            className="w-48 rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent" />
+        </div>
+      </div>
+
+      <button onClick={handleSave} disabled={saving}
+        className="rounded-md bg-bot-accent px-4 py-2 text-body font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors">
+        {saving ? "Saving..." : saved ? "Saved!" : "Save Budget Limits"}
+      </button>
+    </div>
+  );
+}
+
+function ApiKeySection() {
+  const [hasKey, setHasKey] = useState(false);
+  const [maskedKey, setMaskedKey] = useState("");
+  const [inputKey, setInputKey] = useState("");
+  const [showInput, setShowInput] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/app-settings/api-key")
+      .then((r) => r.json())
+      .then((data: { hasKey: boolean; maskedKey: string }) => {
+        setHasKey(data.hasKey);
+        setMaskedKey(data.maskedKey);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function handleSave() {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/app-settings/api-key", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: inputKey }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setHasKey(data.hasKey);
+        setMaskedKey(data.maskedKey);
+        setInputKey("");
+        setShowInput(false);
+        setMessage({ ok: true, text: "API key saved. SDK provider is now available." });
+      } else {
+        setMessage({ ok: false, text: data.error ?? "Failed to save" });
+      }
+    } catch (err) {
+      setMessage({ ok: false, text: String(err) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleClear() {
+    setSaving(true);
+    try {
+      await fetch("/api/app-settings/api-key", { method: "DELETE" });
+      setHasKey(false);
+      setMaskedKey("");
+      setMessage({ ok: true, text: "API key cleared. SDK provider is no longer available." });
+    } catch (err) {
+      setMessage({ ok: false, text: String(err) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) return <div className="text-bot-muted text-caption">Loading...</div>;
+
+  return (
+    <div className="space-y-4">
+      <h3 className="text-subtitle font-semibold text-bot-text">Anthropic API Key</h3>
+      <p className="text-caption text-bot-muted">
+        Configure an API key to enable the SDK provider. This allows sessions to use the Anthropic API directly
+        instead of the Claude CLI subprocess.
+      </p>
+
+      <div className="space-y-3">
+        <div className="flex items-center gap-3">
+          <div className={cn(
+            "h-2 w-2 rounded-full",
+            hasKey ? "bg-bot-green" : "bg-bot-muted",
+          )} />
+          <span className="text-body text-bot-text">
+            {hasKey ? `SDK Available (${maskedKey})` : "CLI Only (no API key)"}
+          </span>
+        </div>
+
+        {!showInput && (
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowInput(true)}
+              className="rounded-md bg-bot-accent px-3 py-1.5 text-caption font-medium text-white hover:bg-bot-accent/80 transition-colors"
+            >
+              {hasKey ? "Update Key" : "Add API Key"}
+            </button>
+            {hasKey && (
+              <button
+                onClick={handleClear}
+                disabled={saving}
+                className="rounded-md border border-bot-red/40 px-3 py-1.5 text-caption font-medium text-bot-red hover:bg-bot-red/10 transition-colors disabled:opacity-50"
+              >
+                Remove Key
+              </button>
+            )}
+          </div>
+        )}
+
+        {showInput && (
+          <div className="space-y-2">
+            <input
+              type="password"
+              value={inputKey}
+              onChange={(e) => setInputKey(e.target.value)}
+              placeholder="sk-ant-..."
+              className="w-full rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text placeholder-bot-muted outline-none focus:border-bot-accent transition-colors font-mono"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={handleSave}
+                disabled={saving || !inputKey.trim()}
+                className="rounded-md bg-bot-accent px-3 py-1.5 text-caption font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors"
+              >
+                {saving ? "Saving…" : "Save"}
+              </button>
+              <button
+                onClick={() => { setShowInput(false); setInputKey(""); }}
+                className="rounded-md border border-bot-border px-3 py-1.5 text-caption text-bot-muted hover:bg-bot-elevated transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {message && (
+          <div className={cn(
+            "rounded-md px-3 py-2 text-caption",
+            message.ok ? "bg-bot-green/10 text-bot-green" : "bg-bot-red/10 text-bot-red",
+          )}>
+            {message.text}
+          </div>
+        )}
       </div>
     </div>
   );

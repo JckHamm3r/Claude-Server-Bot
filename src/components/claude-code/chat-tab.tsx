@@ -4,14 +4,23 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { getSocket } from "@/lib/socket";
 import type { ParsedOutput } from "@/lib/claude/provider";
 import type { ClaudeSession } from "@/lib/claude-db";
+import { DEFAULT_MODEL } from "@/lib/models";
 import { SessionSidebar } from "./session-sidebar";
 import { MessageList, type ChatMessage, type ActivityState } from "./message-list";
 import { ChatInput } from "./chat-input";
 import { ChatToolbar } from "./chat-toolbar";
 import { NewSessionDialog } from "./new-session-dialog";
 import { SkipPermissionsBanner } from "./skip-permissions-banner";
+import { SessionSearchBar } from "./session-search-bar";
+import { GlobalSearchDialog } from "./global-search-dialog";
 
 type PresenceUser = { email: string; activeSession: string | null };
+
+interface SessionUsage {
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cost_usd: number;
+}
 
 export function ChatTab() {
   const [sessions, setSessions] = useState<ClaudeSession[]>([]);
@@ -26,7 +35,11 @@ export function ChatTab() {
   const [presenceUsers, setPresenceUsers] = useState<PresenceUser[]>([]);
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
   const [commandRunner, setCommandRunner] = useState<string | null>(null);
+  const [sessionModel, setSessionModel] = useState(DEFAULT_MODEL);
+  const [sessionUsage, setSessionUsage] = useState<SessionUsage | null>(null);
   const typingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const [loadingMessages, setLoadingMessages] = useState(false);
 
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
   const lastUserMsgRef = useRef<string>("");
@@ -34,15 +47,81 @@ export function ChatTab() {
   const initializedSessionsRef = useRef<Set<string>>(new Set());
   const freshSessionsRef = useRef<Set<string>>(new Set());
   const autoAcceptRef = useRef(false);
+  const streamingMsgIdRef = useRef<string | null>(null);
 
   // Pending message queue (typed while Claude is running)
   const pendingQueueRef = useRef<string[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
 
+  // Watchdog timer: if isRunning stays true for too long, force-reset
+  const doneWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Pending interactive message (options/confirm/permission_request)
+  const [pendingInteraction, setPendingInteraction] = useState<{ type: string; messageId: string } | null>(null);
+
+  // Search state
+  const [showSessionSearch, setShowSessionSearch] = useState(false);
+  const [showGlobalSearch, setShowGlobalSearch] = useState(false);
+  const [searchHighlights, setSearchHighlights] = useState<Set<string>>(new Set());
+  const [activeHighlight, setActiveHighlight] = useState<string | null>(null);
+
   // Keep autoAcceptRef in sync
   useEffect(() => {
     autoAcceptRef.current = autoAccept;
   }, [autoAccept]);
+
+  // Browser tab title badge: show count of sessions needing attention
+  useEffect(() => {
+    const needsAttention = sessions.filter((s) => s.status === "needs_attention").length;
+    const baseTitle = "Claude Bot";
+    document.title = needsAttention > 0 ? `(${needsAttention}) ${baseTitle}` : baseTitle;
+  }, [sessions]);
+
+  // Watchdog: force-reset isRunning if no "done" arrives within 5.5min
+  useEffect(() => {
+    if (isRunning) {
+      if (doneWatchdogRef.current) clearTimeout(doneWatchdogRef.current);
+      doneWatchdogRef.current = setTimeout(() => {
+        setIsRunning(false);
+        setCurrentActivity(null);
+        drainPending();
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            sender_type: "claude",
+            parsed: { type: "error", message: "Response timed out. You can retry your message." },
+            content: "Response timed out. You can retry your message.",
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+      }, 330_000); // 5.5 minutes
+    } else {
+      if (doneWatchdogRef.current) {
+        clearTimeout(doneWatchdogRef.current);
+        doneWatchdogRef.current = null;
+      }
+    }
+    return () => {
+      if (doneWatchdogRef.current) clearTimeout(doneWatchdogRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRunning]);
+
+  // Keyboard shortcuts for search
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "f") {
+        e.preventDefault();
+        setShowGlobalSearch(true);
+      } else if ((e.metaKey || e.ctrlKey) && e.key === "f" && activeSession) {
+        e.preventDefault();
+        setShowSessionSearch(true);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeSession]);
 
   const emit = useCallback((event: string, data?: unknown) => {
     socketRef.current?.emit(event, data);
@@ -50,17 +129,19 @@ export function ChatTab() {
 
   // Internal send — always dispatches immediately (no queue check)
   const sendImmediate = useCallback(
-    (content: string, sessionId: string) => {
+    (content: string, sessionId: string, attachments?: string[]) => {
+      streamingMsgIdRef.current = null;
       lastUserMsgRef.current = content;
       const msg: ChatMessage = {
         id: crypto.randomUUID(),
         sender_type: "admin",
         content,
         timestamp: new Date().toISOString(),
+        metadata: attachments?.length ? { attachments } : undefined,
       };
       setMessages((prev) => [...prev, msg]);
       setIsRunning(true);
-      emit("claude:message", { sessionId, content });
+      emit("claude:message", { sessionId, content, attachments });
     },
     [emit],
   );
@@ -92,7 +173,15 @@ export function ChatTab() {
         socket.emit("claude:create_session", {
           sessionId: session.id,
           skipPermissions: session.skip_permissions,
+          model: session.model,
+          provider_type: session.provider_type,
         });
+        // Re-fetch authoritative messages from server on reconnect
+        setMessages([]);
+        setLoadingMessages(true);
+        socket.emit("claude:get_messages", { sessionId: session.id });
+        // Sync running state after reconnect
+        socket.emit("claude:get_session_state", { sessionId: session.id });
       }
     });
 
@@ -112,6 +201,13 @@ export function ChatTab() {
 
     socket.on("claude:sessions", ({ sessions: s }: { sessions: ClaudeSession[] }) => {
       setSessions(s);
+    });
+
+    // Session status updates (background persistence)
+    socket.on("claude:session_status", ({ sessionId, status }: { sessionId: string; status: string }) => {
+      setSessions((prev) =>
+        prev.map((s) => (s.id === sessionId ? { ...s, status: status as ClaudeSession["status"] } : s)),
+      );
     });
 
     socket.on("claude:presence_update", ({ presence }: { presence: PresenceUser[] }) => {
@@ -142,25 +238,36 @@ export function ChatTab() {
     });
 
     socket.on("claude:command_done", ({ sessionId }: { sessionId: string }) => {
-      if (activeSessionRef.current?.id === sessionId) setCommandRunner(null);
+      if (activeSessionRef.current?.id === sessionId) {
+        setCommandRunner(null);
+        // Refresh session usage
+        socket.emit("claude:get_usage", { sessionId });
+      }
     });
 
     socket.on(
       "claude:messages",
       ({ sessionId, messages: msgs }: { sessionId: string; messages: ChatMessage[] }) => {
         if (activeSessionRef.current?.id === sessionId) {
-          setMessages((prev) => (prev.length === 0 ? msgs : prev));
+          setMessages(msgs);
+          setLoadingMessages(false);
         }
       },
     );
 
     socket.on(
       "claude:session_ready",
-      ({ running }: { sessionId: string; running?: boolean }) => {
+      ({ sessionId: readySessionId, running, status }: { sessionId: string; running?: boolean; status?: string }) => {
         if (running) {
           setIsRunning(true);
         } else {
           setIsRunning(false);
+        }
+        // Update session status from server
+        if (status) {
+          setSessions((prev) =>
+            prev.map((s) => (s.id === readySessionId ? { ...s, status: status as ClaudeSession["status"] } : s)),
+          );
         }
       },
     );
@@ -171,8 +278,10 @@ export function ChatTab() {
         if (!activeSessionRef.current || activeSessionRef.current.id !== sessionId) return;
 
         if (parsed.type === "done") {
+          streamingMsgIdRef.current = null;
           setIsRunning(false);
           setCurrentActivity(null);
+          setPendingInteraction(null);
           setMessages((prev) => [
             ...prev,
             {
@@ -198,6 +307,57 @@ export function ChatTab() {
           return;
         }
 
+        // Tool call events: add to message list for rich rendering
+        if (parsed.type === "tool_call") {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: parsed.toolCallId ?? crypto.randomUUID(),
+              sender_type: "claude",
+              parsed,
+              content: "",
+              timestamp: new Date().toISOString(),
+            },
+          ]);
+          setIsRunning(true);
+          return;
+        }
+
+        // Tool result events: update matching tool_call message
+        if (parsed.type === "tool_result") {
+          setMessages((prev) => {
+            const idx = parsed.toolCallId
+              ? prev.findIndex((m) => m.id === parsed.toolCallId || m.parsed?.toolCallId === parsed.toolCallId)
+              : -1;
+            if (idx >= 0) {
+              const updated = [...prev];
+              updated[idx] = {
+                ...updated[idx],
+                parsed: {
+                  ...updated[idx].parsed!,
+                  type: "tool_result",
+                  toolStatus: parsed.toolStatus,
+                  toolResult: parsed.toolResult,
+                  exitCode: parsed.exitCode,
+                },
+              };
+              return updated;
+            }
+            // If no matching tool_call found, add as standalone
+            return [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                sender_type: "claude",
+                parsed,
+                content: "",
+                timestamp: new Date().toISOString(),
+              },
+            ];
+          });
+          return;
+        }
+
         // Auto-accept: when a confirm prompt arrives, automatically say yes
         if (parsed.type === "confirm" && autoAcceptRef.current) {
           socket.emit("claude:confirm", { sessionId, value: true });
@@ -207,17 +367,41 @@ export function ChatTab() {
 
         setIsRunning(parsed.type !== "error");
 
+        // Track interactive messages
+        if (parsed.type === "options" || parsed.type === "confirm" || parsed.type === "permission_request") {
+          const interactionId = crypto.randomUUID();
+          setPendingInteraction({ type: parsed.type, messageId: interactionId });
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: interactionId,
+              sender_type: "claude" as const,
+              parsed,
+              content: parsed.content ?? parsed.prompt ?? "",
+              timestamp: new Date().toISOString(),
+            },
+          ]);
+          return;
+        }
+
         if (parsed.type === "streaming") {
           setMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (last?.parsed?.type === "streaming") {
-              const updated = { ...last, content: parsed.content ?? "", parsed };
-              return [...prev.slice(0, -1), updated];
+            const refId = streamingMsgIdRef.current;
+            if (refId) {
+              const idx = prev.findIndex((m) => m.id === refId);
+              if (idx >= 0) {
+                const updated = [...prev];
+                updated[idx] = { ...updated[idx], content: parsed.content ?? "", parsed };
+                return updated;
+              }
             }
+            // No existing streaming message found — create one
+            const newId = crypto.randomUUID();
+            streamingMsgIdRef.current = newId;
             return [
               ...prev,
               {
-                id: crypto.randomUUID(),
+                id: newId,
                 sender_type: "claude" as const,
                 parsed,
                 content: parsed.content ?? "",
@@ -228,25 +412,89 @@ export function ChatTab() {
           return;
         }
 
-        // Final text: replace last streaming message if present
+        // Final text: replace streaming message by ref ID if present
         setMessages((prev) => {
-          const last = prev[prev.length - 1];
+          const refId = streamingMsgIdRef.current;
+          const idx = refId ? prev.findIndex((m) => m.id === refId) : -1;
           const finalMsg: ChatMessage = {
-            id: last?.parsed?.type === "streaming" ? last.id : crypto.randomUUID(),
+            id: idx >= 0 ? prev[idx].id : crypto.randomUUID(),
             sender_type: "claude",
             parsed,
             content: parsed.content ?? parsed.message ?? "",
             timestamp: new Date().toISOString(),
           };
-          if (last?.parsed?.type === "streaming") {
-            return [...prev.slice(0, -1), finalMsg];
+          streamingMsgIdRef.current = null;
+          if (idx >= 0) {
+            const updated = [...prev];
+            updated[idx] = finalMsg;
+            return updated;
           }
           return [...prev, finalMsg];
         });
       },
     );
 
+    // Token usage events
+    socket.on("claude:usage", ({ sessionId, usage }: { sessionId: string; usage: { input_tokens: number; output_tokens: number; cost_usd?: number } }) => {
+      if (activeSessionRef.current?.id !== sessionId) return;
+      // Update the last claude message with usage metadata
+      setMessages((prev) => {
+        const updated = [...prev];
+        for (let i = updated.length - 1; i >= 0; i--) {
+          if (updated[i].sender_type === "claude" && updated[i].parsed?.type !== "done") {
+            updated[i] = { ...updated[i], metadata: { ...updated[i].metadata, usage } };
+            break;
+          }
+        }
+        return updated;
+      });
+      // Update session-level usage
+      setSessionUsage((prev) => ({
+        total_input_tokens: (prev?.total_input_tokens ?? 0) + (usage.input_tokens ?? 0),
+        total_output_tokens: (prev?.total_output_tokens ?? 0) + (usage.output_tokens ?? 0),
+        total_cost_usd: (prev?.total_cost_usd ?? 0) + (usage.cost_usd ?? 0),
+      }));
+    });
+
+    socket.on("claude:session_usage", ({ sessionId, usage }: { sessionId: string; usage: SessionUsage }) => {
+      if (activeSessionRef.current?.id === sessionId) {
+        setSessionUsage(usage);
+      }
+    });
+
+    // Model change events
+    socket.on("claude:model_changed", ({ sessionId, model }: { sessionId: string; model: string }) => {
+      if (activeSessionRef.current?.id === sessionId) {
+        setSessionModel(model);
+      }
+    });
+
+    // Message edit/delete events
+    socket.on("claude:messages_updated", ({ sessionId, messages: msgs }: { sessionId: string; messages: ChatMessage[] }) => {
+      if (activeSessionRef.current?.id === sessionId) {
+        setMessages(msgs);
+        setIsRunning(true); // The edited message is being re-sent
+      }
+    });
+
+    socket.on("claude:message_deleted", ({ sessionId, messageId }: { sessionId: string; messageId: string }) => {
+      if (activeSessionRef.current?.id === sessionId) {
+        setMessages((prev) => prev.filter((m) => m.id !== messageId));
+      }
+    });
+
+    // Reconnection state sync
+    socket.on("claude:session_state", ({ sessionId, running }: { sessionId: string; running: boolean }) => {
+      if (activeSessionRef.current?.id !== sessionId) return;
+      setIsRunning(running);
+      if (!running) {
+        setCurrentActivity(null);
+        drainPending();
+      }
+    });
+
     socket.on("claude:error", ({ message }: { message: string }) => {
+      streamingMsgIdRef.current = null;
       const msg: ChatMessage = {
         id: crypto.randomUUID(),
         sender_type: "claude",
@@ -287,11 +535,18 @@ export function ChatTab() {
       socket.off("claude:session_ready");
       socket.off("claude:output");
       socket.off("claude:error");
+      socket.off("claude:session_state");
       socket.off("claude:presence_update");
       socket.off("claude:typing");
       socket.off("claude:command_started");
       socket.off("claude:command_done");
+      socket.off("claude:usage");
+      socket.off("claude:session_usage");
+      socket.off("claude:model_changed");
+      socket.off("claude:messages_updated");
+      socket.off("claude:message_deleted");
       socket.off("security:warn");
+      socket.off("claude:session_status");
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -299,8 +554,12 @@ export function ChatTab() {
   // When active session changes, load messages and init subprocess (once per session)
   useEffect(() => {
     if (!activeSession || !connected) return;
+    // Update model from session
+    setSessionModel(activeSession.model ?? DEFAULT_MODEL);
+    setSessionUsage(null);
     if (!freshSessionsRef.current.has(activeSession.id)) {
       emit("claude:get_messages", { sessionId: activeSession.id });
+      emit("claude:get_usage", { sessionId: activeSession.id });
     }
     freshSessionsRef.current.delete(activeSession.id);
     if (!initializedSessionsRef.current.has(activeSession.id)) {
@@ -308,12 +567,15 @@ export function ChatTab() {
       emit("claude:create_session", {
         sessionId: activeSession.id,
         skipPermissions: activeSession.skip_permissions,
+        model: activeSession.model,
+        provider_type: activeSession.provider_type,
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSession, connected]);
 
   const handleSelectSession = useCallback((session: ClaudeSession) => {
+    streamingMsgIdRef.current = null;
     setMessages([]);
     setCurrentActivity(null);
     setCommandRunner(null);
@@ -326,8 +588,10 @@ export function ChatTab() {
   }, [emit]);
 
   const handleCreateSession = useCallback(
-    (name: string, skipPermissions: boolean) => {
+    (name: string, skipPermissions: boolean, model?: string, providerType?: string, templateId?: string) => {
       const id = crypto.randomUUID();
+      const sessionModelValue = model ?? DEFAULT_MODEL;
+      const sessionProviderType = providerType ?? "subprocess";
       const optimistic: ClaudeSession = {
         id,
         name: name || null,
@@ -336,17 +600,28 @@ export function ChatTab() {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         skip_permissions: skipPermissions,
+        model: sessionModelValue,
+        provider_type: sessionProviderType,
+        status: "idle",
       };
       setSessions((prev) => [optimistic, ...prev]);
       setMessages([]);
       setCurrentActivity(null);
       pendingQueueRef.current = [];
       setPendingCount(0);
+      setSessionModel(sessionModelValue);
+      setSessionUsage(null);
       activeSessionRef.current = optimistic;
       setActiveSession(optimistic);
       freshSessionsRef.current.add(id);
       initializedSessionsRef.current.add(id);
-      emit("claude:create_session", { sessionId: id, skipPermissions });
+      emit("claude:create_session", {
+        sessionId: id,
+        skipPermissions,
+        model: sessionModelValue,
+        provider_type: sessionProviderType,
+        templateId,
+      });
       emit("claude:set_active_session", { sessionId: id });
       if (name) {
         emit("claude:rename_session", { sessionId: id, name });
@@ -355,13 +630,22 @@ export function ChatTab() {
     [emit],
   );
 
+  const handleModelChange = useCallback(
+    (model: string) => {
+      if (!activeSession) return;
+      setSessionModel(model);
+      emit("claude:set_model", { sessionId: activeSession.id, model });
+    },
+    [activeSession, emit],
+  );
+
   const handleSend = useCallback(
-    (content: string) => {
+    (content: string, attachments?: string[]) => {
       if (!activeSession) {
         handleCreateSession("", false);
         return;
       }
-      // If Claude is running, queue the message
+      // If Claude is running, queue the message (attachments not queued)
       if (isRunning) {
         pendingQueueRef.current = [...pendingQueueRef.current, content];
         setPendingCount(pendingQueueRef.current.length);
@@ -381,7 +665,7 @@ export function ChatTab() {
         );
       }
 
-      sendImmediate(content, activeSession.id);
+      sendImmediate(content, activeSession.id, attachments);
     },
     [activeSession, isRunning, sendImmediate, handleCreateSession, messages, emit],
   );
@@ -459,12 +743,15 @@ export function ChatTab() {
     emit("claude:create_session", {
       sessionId: activeSession.id,
       skipPermissions: activeSession.skip_permissions,
+      model: activeSession.model,
+      provider_type: activeSession.provider_type,
     });
   }, [activeSession, emit]);
 
   const handleSelectOption = useCallback(
     (sessionId: string, choice: string) => {
       emit("claude:select_option", { sessionId, choice });
+      setPendingInteraction(null);
       const msg: ChatMessage = {
         id: crypto.randomUUID(),
         sender_type: "admin",
@@ -480,6 +767,7 @@ export function ChatTab() {
   const handleConfirm = useCallback(
     (sessionId: string, value: boolean) => {
       emit("claude:confirm", { sessionId, value });
+      setPendingInteraction(null);
       const msg: ChatMessage = {
         id: crypto.randomUUID(),
         sender_type: "admin",
@@ -495,6 +783,7 @@ export function ChatTab() {
   const handleAllowTool = useCallback(
     (sessionId: string, toolName: string, scope: "session" | "once") => {
       emit("claude:allow_tool", { sessionId, toolName, scope });
+      setPendingInteraction(null);
       setIsRunning(true);
     },
     [emit],
@@ -509,6 +798,22 @@ export function ChatTab() {
       setIsRunning(true);
     },
     [emit],
+  );
+
+  const handleEditMessage = useCallback(
+    (messageId: string, newContent: string) => {
+      if (!activeSession) return;
+      emit("claude:edit_message", { sessionId: activeSession.id, messageId, newContent });
+    },
+    [activeSession, emit],
+  );
+
+  const handleDeleteMessage = useCallback(
+    (messageId: string) => {
+      if (!activeSession) return;
+      emit("claude:delete_message", { sessionId: activeSession.id, messageId });
+    },
+    [activeSession, emit],
   );
 
   return (
@@ -562,7 +867,28 @@ export function ChatTab() {
           isRunning={isRunning}
           autoAccept={autoAccept}
           onAutoAcceptChange={setAutoAccept}
+          model={activeSession ? sessionModel : undefined}
+          onModelChange={activeSession ? handleModelChange : undefined}
+          sessionUsage={sessionUsage}
+          onSearch={activeSession ? () => setShowSessionSearch(true) : undefined}
+          onGlobalSearch={() => setShowGlobalSearch(true)}
+          sessionId={activeSession?.id}
         />
+
+        {showSessionSearch && activeSession && (
+          <SessionSearchBar
+            sessionId={activeSession.id}
+            onClose={() => {
+              setShowSessionSearch(false);
+              setSearchHighlights(new Set());
+              setActiveHighlight(null);
+            }}
+            onHighlightsChange={(highlights, activeId) => {
+              setSearchHighlights(highlights);
+              setActiveHighlight(activeId);
+            }}
+          />
+        )}
 
         {!connected && (
           <div className="px-4 py-2 text-caption text-bot-amber border-b border-bot-border bg-bot-amber/5 flex items-center gap-2">
@@ -593,8 +919,14 @@ export function ChatTab() {
             onConfirm={handleConfirm}
             onAllowTool={handleAllowTool}
             onAlwaysAllow={handleAlwaysAllow}
+            onEditMessage={handleEditMessage}
+            onDeleteMessage={handleDeleteMessage}
             isRunning={isRunning}
             currentActivity={currentActivity}
+            searchHighlights={searchHighlights}
+            activeHighlight={activeHighlight}
+            pendingInteraction={pendingInteraction}
+            loadingMessages={loadingMessages}
           />
         )}
 
@@ -610,6 +942,7 @@ export function ChatTab() {
           disabled={!connected || !activeSession}
           isRunning={isRunning}
           pendingCount={pendingCount}
+          sessionId={activeSession?.id}
           onTypingStart={() => activeSession && emit("claude:typing_start", { sessionId: activeSession.id })}
           onTypingStop={() => activeSession && emit("claude:typing_stop", { sessionId: activeSession.id })}
         />
@@ -619,6 +952,17 @@ export function ChatTab() {
         <NewSessionDialog
           onClose={() => setShowNewDialog(false)}
           onCreate={handleCreateSession}
+        />
+      )}
+
+      {showGlobalSearch && (
+        <GlobalSearchDialog
+          onClose={() => setShowGlobalSearch(false)}
+          onNavigate={(sessionId, _messageId) => {
+            // Navigate to the session
+            const target = sessions.find((s) => s.id === sessionId);
+            if (target) handleSelectSession(target);
+          }}
         />
       )}
     </div>

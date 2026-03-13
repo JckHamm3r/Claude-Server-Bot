@@ -5,12 +5,14 @@ import { getToken } from "next-auth/jwt";
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Always allow these paths
+  // Always allow these paths (public or static assets)
   if (
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/_next") ||
     pathname === "/favicon.ico" ||
     pathname === "/claude-code.png" ||
+    pathname === "/api/bot-identity" ||
+    pathname === "/api/health/ping" ||
     pathname.endsWith(".png") ||
     pathname.endsWith(".ico")
   ) {

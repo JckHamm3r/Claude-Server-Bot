@@ -14,7 +14,7 @@ export async function POST() {
   // Return response with cookie to signal setup is done
   const response = NextResponse.json({ ok: true });
   response.cookies.set("bot_setup_complete", "1", {
-    httpOnly: false,
+    httpOnly: true,
     path: "/",
     maxAge: 60 * 60 * 24 * 365, // 1 year
     sameSite: "lax",

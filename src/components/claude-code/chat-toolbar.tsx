@@ -1,7 +1,21 @@
 "use client";
 
-import { Square, RotateCcw, Trash2, Zap } from "lucide-react";
+import { useState } from "react";
+import { Square, RotateCcw, Trash2, Zap, Search, Download, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ModelSelector } from "./model-selector";
+
+interface SessionUsage {
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cost_usd: number;
+}
+
+interface BudgetLimits {
+  session_usd: number;
+  daily_usd: number;
+  monthly_usd: number;
+}
 
 interface ChatToolbarProps {
   onInterrupt: () => void;
@@ -10,6 +24,61 @@ interface ChatToolbarProps {
   isRunning: boolean;
   autoAccept: boolean;
   onAutoAcceptChange: (value: boolean) => void;
+  model?: string;
+  onModelChange?: (model: string) => void;
+  sessionUsage?: SessionUsage | null;
+  onSearch?: () => void;
+  onGlobalSearch?: () => void;
+  sessionId?: string;
+  budgetLimits?: BudgetLimits | null;
+}
+
+function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + "k";
+  return String(n);
+}
+
+function ExportDropdown({ sessionId }: { sessionId: string }) {
+  const [open, setOpen] = useState(false);
+
+  const handleExport = (format: "markdown" | "json") => {
+    setOpen(false);
+    window.open(`/api/claude-code/export?sessionId=${sessionId}&format=${format}`, "_blank");
+  };
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated transition-colors"
+        title="Export session"
+      >
+        <Download className="h-3.5 w-3.5" />
+        Export
+        <ChevronDown className="h-3 w-3" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-lg border border-bot-border bg-bot-elevated shadow-lg overflow-hidden">
+            <button
+              onClick={() => handleExport("markdown")}
+              className="flex w-full items-center gap-2 px-3 py-2 text-caption text-bot-text hover:bg-bot-surface transition-colors"
+            >
+              Export as Markdown
+            </button>
+            <button
+              onClick={() => handleExport("json")}
+              className="flex w-full items-center gap-2 px-3 py-2 text-caption text-bot-text hover:bg-bot-surface transition-colors"
+            >
+              Export as JSON
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 export function ChatToolbar({
@@ -19,6 +88,13 @@ export function ChatToolbar({
   isRunning,
   autoAccept,
   onAutoAcceptChange,
+  model,
+  onModelChange,
+  sessionUsage,
+  onSearch,
+  onGlobalSearch,
+  sessionId,
+  budgetLimits,
 }: ChatToolbarProps) {
   return (
     <div className="flex items-center gap-2 border-b border-bot-border bg-bot-surface px-4 py-2">
@@ -32,7 +108,58 @@ export function ChatToolbar({
         Interrupt
       </button>
 
+      {model && onModelChange && (
+        <ModelSelector
+          value={model}
+          onChange={onModelChange}
+          compact
+          disabled={isRunning}
+        />
+      )}
+
       <div className="ml-auto flex items-center gap-2">
+        {sessionUsage && sessionUsage.total_input_tokens > 0 && (() => {
+          const cost = sessionUsage.total_cost_usd;
+          const sessionLimit = budgetLimits?.session_usd ?? 0;
+          const pct = sessionLimit > 0 ? cost / sessionLimit : 0;
+          const costColor = pct >= 1 ? "text-bot-red" : pct >= 0.8 ? "text-bot-amber" : pct >= 0.5 ? "text-bot-amber/70" : "text-bot-muted";
+          const tooltip = `Input: ${sessionUsage.total_input_tokens} | Output: ${sessionUsage.total_output_tokens} | Cost: $${cost.toFixed(4)}${sessionLimit > 0 ? ` (limit: $${sessionLimit.toFixed(2)})` : ""}`;
+          return (
+            <span className={cn("text-[11px] font-mono", costColor)} title={tooltip}>
+              {formatTokenCount(sessionUsage.total_input_tokens + sessionUsage.total_output_tokens)} tokens
+              {cost > 0 && (
+                <span className="ml-1">${cost.toFixed(3)}</span>
+              )}
+              {sessionLimit > 0 && (
+                <span className="ml-0.5 opacity-50">/ ${sessionLimit.toFixed(0)}</span>
+              )}
+            </span>
+          );
+        })()}
+
+        {onSearch && (
+          <button
+            onClick={onSearch}
+            className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated transition-colors"
+            title="Search in session (Ctrl+F)"
+          >
+            <Search className="h-3.5 w-3.5" />
+          </button>
+        )}
+
+        {onGlobalSearch && (
+          <button
+            onClick={onGlobalSearch}
+            className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated transition-colors"
+            title="Search all sessions (Ctrl+Shift+F)"
+          >
+            <Search className="h-3.5 w-3.5" />
+            All
+          </button>
+        )}
+
+        {sessionId && <ExportDropdown sessionId={sessionId} />}
+
         <button
           onClick={() => onAutoAcceptChange(!autoAccept)}
           className={cn(

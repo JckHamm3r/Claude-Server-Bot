@@ -6,7 +6,8 @@ export function getSocket(): Socket {
   if (socket) return socket;
 
   const slug = process.env.NEXT_PUBLIC_CLAUDE_BOT_SLUG ?? "";
-  const socketPath = slug ? `/c/${slug}/socket.io` : "/socket.io";
+  const prefix = process.env.NEXT_PUBLIC_CLAUDE_BOT_PATH_PREFIX ?? "c";
+  const socketPath = slug ? `/${prefix}/${slug}/socket.io` : "/socket.io";
 
   socket = io({
     path: socketPath,

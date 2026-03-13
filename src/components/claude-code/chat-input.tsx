@@ -1,15 +1,17 @@
 "use client";
 
 import { useRef, KeyboardEvent, useState, useEffect, useCallback } from "react";
-import { Send, Clock } from "lucide-react";
+import { Send, Clock, Paperclip } from "lucide-react";
+import { AttachmentPreview, type PendingAttachment } from "./attachment-preview";
 
 interface ChatInputProps {
-  onSend: (message: string) => void;
+  onSend: (message: string, attachments?: string[]) => void;
   disabled?: boolean;
   isRunning?: boolean;
   pendingCount?: number;
   onTypingStart?: () => void;
   onTypingStop?: () => void;
+  sessionId?: string;
 }
 
 // ── Slash command palette ────────────────────────────────────────────────────
@@ -35,11 +37,16 @@ export function ChatInput({
   pendingCount = 0,
   onTypingStart,
   onTypingStop,
+  sessionId,
 }: ChatInputProps) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
+
+  // ── Attachment state ───────────────────────────────────────────────────
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
 
   // ── Slash palette state ──────────────────────────────────────────────────
   const [slashOpen, setSlashOpen] = useState(false);
@@ -80,6 +87,16 @@ export function ChatInput({
       if (atDebounceRef.current) clearTimeout(atDebounceRef.current);
     };
   }, [atOpen, atQuery]);
+
+  // Cleanup preview URLs on unmount
+  useEffect(() => {
+    return () => {
+      attachments.forEach((a) => {
+        if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -125,6 +142,70 @@ export function ChatInput({
       el.style.height = Math.min(el.scrollHeight, 180) + "px";
     }, 0);
   }
+
+  const addFiles = useCallback((files: FileList | File[]) => {
+    const newAttachments: PendingAttachment[] = [];
+    for (const file of Array.from(files)) {
+      const id = crypto.randomUUID();
+      const previewUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined;
+      newAttachments.push({ id, file, previewUrl });
+    }
+    setAttachments((prev) => [...prev, ...newAttachments]);
+  }, []);
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => {
+      const att = prev.find((a) => a.id === id);
+      if (att?.previewUrl) URL.revokeObjectURL(att.previewUrl);
+      return prev.filter((a) => a.id !== id);
+    });
+  }, []);
+
+  const uploadAttachments = useCallback(async (): Promise<string[]> => {
+    if (attachments.length === 0 || !sessionId) return [];
+
+    const uploadIds: string[] = [];
+    const updated = [...attachments];
+
+    for (let i = 0; i < updated.length; i++) {
+      const att = updated[i];
+      if (att.uploadId) {
+        uploadIds.push(att.uploadId);
+        continue;
+      }
+
+      updated[i] = { ...att, uploading: true };
+      setAttachments([...updated]);
+
+      try {
+        const formData = new FormData();
+        formData.append("file", att.file);
+        formData.append("sessionId", sessionId);
+
+        const res = await fetch("/api/claude-code/upload", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({ error: "Upload failed" }));
+          updated[i] = { ...att, uploading: false, error: data.error };
+          setAttachments([...updated]);
+          continue;
+        }
+
+        const data = await res.json();
+        updated[i] = { ...att, uploading: false, uploadId: data.id };
+        setAttachments([...updated]);
+        uploadIds.push(data.id);
+      } catch {
+        updated[i] = { ...att, uploading: false, error: "Upload failed" };
+        setAttachments([...updated]);
+      }
+    }
+
+    return uploadIds;
+  }, [attachments, sessionId]);
 
   // ── Event handlers ────────────────────────────────────────────────────────
 
@@ -221,13 +302,25 @@ export function ChatInput({
     }
   };
 
-  const submit = () => {
+  const submit = async () => {
     const trimmed = value.trim();
-    if (!trimmed || disabled) return;
+    if ((!trimmed && attachments.length === 0) || disabled) return;
     stopTyping();
     closePalettes();
-    onSend(trimmed);
+
+    // Upload attachments first
+    const uploadIds = await uploadAttachments();
+    // Clear any errored attachments
+    const hasErrors = attachments.some((a) => a.error);
+    if (hasErrors && uploadIds.length === 0 && !trimmed) return;
+
+    onSend(trimmed || "(attached files)", uploadIds.length > 0 ? uploadIds : undefined);
     setValue("");
+    // Cleanup previews
+    attachments.forEach((a) => {
+      if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+    });
+    setAttachments([]);
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
@@ -238,6 +331,27 @@ export function ChatInput({
     if (!el) return;
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 180) + "px";
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.files.length > 0) {
+      addFiles(e.dataTransfer.files);
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const files = e.clipboardData.files;
+    if (files.length > 0) {
+      e.preventDefault();
+      addFiles(files);
+    }
   };
 
   const willQueue = isRunning && !disabled;
@@ -323,13 +437,43 @@ export function ChatInput({
           </div>
         )}
 
-        <div className="flex items-end gap-2">
+        {/* Attachment previews */}
+        <AttachmentPreview attachments={attachments} onRemove={removeAttachment} />
+
+        <div
+          className="flex items-end gap-2"
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+        >
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files) addFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+
+          {/* Attach button */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={disabled}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-bot-muted hover:text-bot-text hover:bg-bot-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Attach file"
+          >
+            <Paperclip className="h-4 w-4" />
+          </button>
+
           <textarea
             ref={textareaRef}
             value={value}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
             onInput={handleInput}
+            onPaste={handlePaste}
             rows={1}
             placeholder={placeholder}
             disabled={disabled}
@@ -342,7 +486,7 @@ export function ChatInput({
           />
           <button
             onClick={submit}
-            disabled={disabled || !value.trim()}
+            disabled={disabled || (!value.trim() && attachments.length === 0)}
             className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
               willQueue
                 ? "bg-bot-amber text-white hover:bg-bot-amber/80"

@@ -673,14 +673,14 @@ export function SecuritySection() {
                         </td>
                         <td className="px-3 py-2 text-bot-muted">{e.user_email ?? "—"}</td>
                         <td className="px-3 py-2 text-bot-muted truncate max-w-[200px]">
-                          {e.details ? JSON.stringify(JSON.parse(e.details)).slice(0, 80) : "—"}
+                          {e.details ? (() => { try { return JSON.stringify(JSON.parse(e.details)).slice(0, 80); } catch { return e.details.slice(0, 80); } })() : "—"}
                         </td>
                       </tr>
                       {expandedEvent === e.id && e.details && (
                         <tr key={`${e.id}-detail`} className="bg-bot-surface">
                           <td colSpan={4} className="px-3 py-2">
                             <pre className="text-caption font-mono text-bot-text whitespace-pre-wrap break-all">
-                              {JSON.stringify(JSON.parse(e.details), null, 2)}
+                              {(() => { try { return JSON.stringify(JSON.parse(e.details), null, 2); } catch { return e.details; } })()}
                             </pre>
                           </td>
                         </tr>

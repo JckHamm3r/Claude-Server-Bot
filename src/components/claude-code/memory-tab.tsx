@@ -42,7 +42,6 @@ export function MemoryTab() {
 
   // Load file content when active file changes
   const loadFile = useCallback((file: string) => {
-    setActiveFile(file);
     setLoadingFile(true);
     setLoadError(null);
     setSaveState("idle");
@@ -127,7 +126,7 @@ export function MemoryTab() {
               return (
                 <li key={file}>
                   <button
-                    onClick={() => loadFile(file)}
+                    onClick={() => setActiveFile(file)}
                     className={[
                       "w-full text-left px-3 py-2 text-caption transition-colors",
                       isActive

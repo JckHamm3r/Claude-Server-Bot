@@ -19,7 +19,8 @@ app.prepare().then(() => {
   });
 
   const slug = process.env.CLAUDE_BOT_SLUG ?? "";
-  const socketPath = slug ? `/c/${slug}/socket.io` : "/socket.io";
+  const prefix = process.env.CLAUDE_BOT_PATH_PREFIX ?? "c";
+  const socketPath = slug ? `/${prefix}/${slug}/socket.io` : "/socket.io";
 
   const io = new Server(httpServer, {
     path: socketPath,

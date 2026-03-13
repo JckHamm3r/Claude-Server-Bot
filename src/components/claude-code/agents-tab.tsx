@@ -46,8 +46,8 @@ export function AgentsTab() {
     }) => {
       // Only apply if we're showing versions for the same agent
       setVersions(v);
-      // Update the versionAgent reference in case agent changed
-      setVersionAgent((prev) => (prev?.id === agentId ? prev : prev));
+      // If the response is for a different agent than currently shown, clear it
+      setVersionAgent((prev) => (prev?.id === agentId ? prev : null));
     };
 
     socket.on("claude:agents", handleAgents);

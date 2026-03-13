@@ -142,7 +142,7 @@ db.exec(`
 const defaultAppSettings: Record<string, string> = {
   rate_limit_commands: "100",
   rate_limit_runtime_min: "30",
-  rate_limit_concurrent: "3",
+  rate_limit_concurrent: "0",
   personality: "professional",
   personality_custom: "",
   auto_update_enabled: "false",
@@ -155,6 +155,11 @@ const defaultAppSettings: Record<string, string> = {
   sandbox_enabled: "true",
   sandbox_always_allowed: "[]",
   sandbox_always_blocked: "[]",
+  anthropic_api_key: "",
+  upload_max_size_bytes: "10485760",
+  budget_limit_session_usd: "0",
+  budget_limit_daily_usd: "0",
+  budget_limit_monthly_usd: "0",
 };
 const insertSetting = db.prepare(
   "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)"
@@ -238,6 +243,48 @@ db.exec(`
   );
 `);
 
+// Phase 3: Uploads table
+db.exec(`
+  CREATE TABLE IF NOT EXISTS uploads (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    stored_name TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    uploaded_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_uploads_session ON uploads(session_id);
+`);
+
+// Chat improvements: add model + provider_type columns to sessions
+try { db.exec("ALTER TABLE sessions ADD COLUMN model TEXT NOT NULL DEFAULT 'claude-sonnet-4-6'"); } catch { /* column already exists */ }
+try { db.exec("ALTER TABLE sessions ADD COLUMN provider_type TEXT NOT NULL DEFAULT 'subprocess'"); } catch { /* column already exists */ }
+
+// Session status tracking for background persistence
+try { db.exec("ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'idle'"); } catch { /* column already exists */ }
+// Reset stale statuses on startup (server restart means no subprocess is running)
+db.exec("UPDATE sessions SET status = 'idle' WHERE status IN ('running', 'needs_attention')");
+
+// Session templates table
+db.exec(`
+  CREATE TABLE IF NOT EXISTS session_templates (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    system_prompt TEXT,
+    model TEXT NOT NULL DEFAULT 'claude-sonnet-4-6',
+    skip_permissions INTEGER NOT NULL DEFAULT 0,
+    provider_type TEXT NOT NULL DEFAULT 'subprocess',
+    icon TEXT,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
 // Seed admin user from env if table is empty
 const userCount = (db.prepare("SELECT COUNT(*) as count FROM users").get() as { count: number }).count;
 if (userCount === 0) {
@@ -247,6 +294,46 @@ if (userCount === 0) {
     db.prepare("INSERT INTO users (email, hash, is_admin) VALUES (?, ?, 1)").run(adminEmail, adminHash);
     console.log(`[db] Seeded admin user: ${adminEmail}`);
   }
+}
+
+// Phase 5: Full-Text Search for messages
+try {
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+      content,
+      content=messages,
+      content_rowid=rowid
+    );
+  `);
+
+  // Triggers to keep FTS in sync
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages BEGIN
+      INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
+    END;
+  `);
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
+      INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+    END;
+  `);
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE OF content ON messages BEGIN
+      INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+      INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
+    END;
+  `);
+
+  // One-time rebuild of FTS index from existing data
+  // Only runs if the FTS table is empty but messages exist
+  const ftsCount = (db.prepare("SELECT COUNT(*) as count FROM messages_fts").get() as { count: number }).count;
+  const msgCount = (db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number }).count;
+  if (ftsCount === 0 && msgCount > 0) {
+    db.exec("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')");
+    console.log("[db] Rebuilt FTS index for", msgCount, "messages");
+  }
+} catch (err) {
+  console.error("[db] FTS5 setup failed (may not be available):", err);
 }
 
 export default db;

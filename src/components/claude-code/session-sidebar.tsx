@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { AlertTriangle, MessageSquare, Plus, Search, Tag, Trash2, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, Loader2, MessageSquare, Plus, Search, Tag, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ClaudeSession } from "@/lib/claude-db";
 
@@ -169,7 +169,13 @@ export function SessionSidebar({
               onClick={() => editingId !== session.id && onSelect(session)}
             >
               <div className="relative mt-0.5 shrink-0">
-                <MessageSquare className="h-4 w-4" />
+                {session.status === "running" ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-bot-accent" />
+                ) : session.status === "needs_attention" ? (
+                  <AlertCircle className="h-4 w-4 text-bot-amber animate-pulse" />
+                ) : (
+                  <MessageSquare className="h-4 w-4" />
+                )}
                 {session.skip_permissions && (
                   <span title="Skip Permissions mode" className="absolute -right-1.5 -top-1.5">
                     <AlertTriangle className="h-3 w-3 text-bot-red" />

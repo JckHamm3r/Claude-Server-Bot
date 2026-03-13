@@ -11,6 +11,7 @@ export interface ChatMessage {
   content?: string;
   parsed?: ParsedOutput;
   timestamp: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ActivityState {
@@ -27,8 +28,14 @@ interface MessageListProps {
   onConfirm: (sessionId: string, value: boolean) => void;
   onAllowTool?: (sessionId: string, toolName: string, scope: "session" | "once") => void;
   onAlwaysAllow?: (sessionId: string, toolName: string, command: string) => void;
+  onEditMessage?: (messageId: string, newContent: string) => void;
+  onDeleteMessage?: (messageId: string) => void;
   isRunning?: boolean;
   currentActivity?: ActivityState | null;
+  searchHighlights?: Set<string>;
+  activeHighlight?: string | null;
+  pendingInteraction?: { type: string; messageId: string } | null;
+  loadingMessages?: boolean;
 }
 
 function ActivityStrip({ activity, isRunning }: { activity: ActivityState | null; isRunning: boolean }) {
@@ -75,8 +82,14 @@ export function MessageList({
   onConfirm,
   onAllowTool,
   onAlwaysAllow,
+  onEditMessage,
+  onDeleteMessage,
   isRunning,
   currentActivity,
+  searchHighlights,
+  activeHighlight,
+  pendingInteraction,
+  loadingMessages,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -85,6 +98,18 @@ export function MessageList({
   }, [messages, currentActivity, isRunning]);
 
   if (messages.length === 0 && !isRunning) {
+    if (loadingMessages) {
+      return (
+        <div className="flex flex-1 items-center justify-center text-body text-bot-muted">
+          <span className="flex gap-1 items-center">
+            <span className="h-1.5 w-1.5 rounded-full bg-bot-muted animate-bounce [animation-delay:0ms]" />
+            <span className="h-1.5 w-1.5 rounded-full bg-bot-muted animate-bounce [animation-delay:150ms]" />
+            <span className="h-1.5 w-1.5 rounded-full bg-bot-muted animate-bounce [animation-delay:300ms]" />
+            <span className="ml-2">Loading messages…</span>
+          </span>
+        </div>
+      );
+    }
     return (
       <div className="flex flex-1 items-center justify-center text-body text-bot-muted">
         Start a conversation with Claude Code.
@@ -96,18 +121,38 @@ export function MessageList({
     <div className="flex flex-1 flex-col overflow-hidden">
       <div className="flex-1 overflow-y-auto py-4">
         <div className="mx-auto max-w-3xl px-4 space-y-1">
-          {messages.map((msg, i) => (
-            <MessageItem
-              key={msg.id}
-              message={msg}
-              sessionId={sessionId}
-              onSelectOption={onSelectOption}
-              onConfirm={onConfirm}
-              onAllowTool={onAllowTool}
-              onAlwaysAllow={onAlwaysAllow}
-              isLatest={i === messages.length - 1}
-            />
-          ))}
+          {messages.map((msg, i) => {
+            const isHighlighted = searchHighlights?.has(msg.id);
+            const isActive = activeHighlight === msg.id;
+            return (
+              <div
+                key={msg.id}
+                id={`msg-${msg.id}`}
+                className={
+                  isActive
+                    ? "rounded-lg ring-2 ring-bot-accent bg-bot-accent/5"
+                    : isHighlighted
+                    ? "rounded-lg bg-bot-amber/5"
+                    : ""
+                }
+                ref={isActive ? (el) => el?.scrollIntoView({ behavior: "smooth", block: "center" }) : undefined}
+              >
+                <MessageItem
+                  message={msg}
+                  sessionId={sessionId}
+                  onSelectOption={onSelectOption}
+                  onConfirm={onConfirm}
+                  onAllowTool={onAllowTool}
+                  onAlwaysAllow={onAlwaysAllow}
+                  onEdit={onEditMessage}
+                  onDelete={onDeleteMessage}
+                  isLatest={i === messages.length - 1}
+                  isRunning={isRunning}
+                  isInteractive={pendingInteraction?.messageId === msg.id}
+                />
+              </div>
+            );
+          })}
 
           {/* Generic typing indicator when running but no text/streaming yet */}
           {isRunning && !currentActivity && (() => {

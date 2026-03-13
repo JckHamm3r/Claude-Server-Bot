@@ -2,6 +2,8 @@ import db from "./db";
 
 // ==================== SESSIONS ====================
 
+export type SessionStatus = 'idle' | 'running' | 'needs_attention';
+
 export interface ClaudeSession {
   id: string;
   name: string | null;
@@ -10,6 +12,9 @@ export interface ClaudeSession {
   created_at: string;
   updated_at: string;
   skip_permissions: boolean;
+  model: string;
+  provider_type: string;
+  status: SessionStatus;
 }
 
 export interface ClaudeMessage {
@@ -23,15 +28,27 @@ export interface ClaudeMessage {
   metadata: Record<string, unknown>;
 }
 
+function safeJsonParse<T>(val: unknown, fallback: T): T {
+  if (val == null || val === "") return fallback;
+  try {
+    return JSON.parse(val as string);
+  } catch {
+    return fallback;
+  }
+}
+
 function rowToSession(row: Record<string, unknown>): ClaudeSession {
   return {
     id: row.id as string,
     name: row.name as string | null,
-    tags: JSON.parse((row.tags as string) || "[]"),
+    tags: safeJsonParse(row.tags, [] as string[]),
     created_by: row.created_by as string,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
     skip_permissions: Boolean(row.skip_permissions),
+    model: (row.model as string) ?? "claude-sonnet-4-6",
+    provider_type: (row.provider_type as string) ?? "subprocess",
+    status: (row.status as SessionStatus) ?? "idle",
   };
 }
 
@@ -44,46 +61,52 @@ function rowToMessage(row: Record<string, unknown>): ClaudeMessage {
     content: row.content as string,
     message_type: row.message_type as "chat" | "system" | "error",
     timestamp: row.timestamp as string,
-    metadata: JSON.parse((row.metadata as string) || "{}"),
+    metadata: safeJsonParse(row.metadata, {} as Record<string, unknown>),
   };
 }
 
-export async function createSession(
+export function createSession(
   id: string,
   createdBy: string,
   skipPermissions = false,
-): Promise<ClaudeSession> {
+  model = "claude-sonnet-4-6",
+  providerType = "subprocess",
+): ClaudeSession {
   db.prepare(`
-    INSERT INTO sessions (id, created_by, skip_permissions)
-    VALUES (?, ?, ?)
+    INSERT INTO sessions (id, created_by, skip_permissions, model, provider_type)
+    VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET updated_at = datetime('now')
-  `).run(id, createdBy, skipPermissions ? 1 : 0);
+  `).run(id, createdBy, skipPermissions ? 1 : 0, model, providerType);
   const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(id) as Record<string, unknown>;
   return rowToSession(row);
 }
 
-export async function getSession(id: string): Promise<ClaudeSession | null> {
+export function updateSessionModel(id: string, model: string): void {
+  db.prepare("UPDATE sessions SET model = ?, updated_at = datetime('now') WHERE id = ?").run(model, id);
+}
+
+export function getSession(id: string): ClaudeSession | null {
   const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(id) as Record<string, unknown> | undefined;
   return row ? rowToSession(row) : null;
 }
 
-export async function listSessions(createdBy: string): Promise<ClaudeSession[]> {
+export function listSessions(createdBy: string): ClaudeSession[] {
   const rows = db.prepare("SELECT * FROM sessions WHERE created_by = ? ORDER BY updated_at DESC").all(createdBy) as Record<string, unknown>[];
   return rows.map(rowToSession);
 }
 
-export async function renameSession(id: string, name: string): Promise<void> {
+export function renameSession(id: string, name: string): void {
   db.prepare("UPDATE sessions SET name = ?, updated_at = datetime('now') WHERE id = ?").run(name, id);
 }
 
-export async function saveMessage(
+export function saveMessage(
   sessionId: string,
   senderType: "admin" | "claude",
   content: string,
   senderId?: string,
   messageType: "chat" | "system" | "error" = "chat",
   metadata?: Record<string, unknown>,
-): Promise<ClaudeMessage> {
+): ClaudeMessage {
   const id = require("crypto").randomUUID();
   db.prepare(`
     INSERT INTO messages (id, session_id, sender_type, sender_id, content, message_type, metadata)
@@ -94,17 +117,198 @@ export async function saveMessage(
   return rowToMessage(row);
 }
 
-export async function getMessages(sessionId: string): Promise<ClaudeMessage[]> {
+export function getMessages(sessionId: string): ClaudeMessage[] {
   const rows = db.prepare("SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC").all(sessionId) as Record<string, unknown>[];
   return rows.map(rowToMessage);
 }
 
-export async function deleteSession(id: string): Promise<void> {
+export function deleteSession(id: string): void {
   db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
 }
 
-export async function updateSessionTags(id: string, tags: string[]): Promise<void> {
+export function updateSessionTags(id: string, tags: string[]): void {
   db.prepare("UPDATE sessions SET tags = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(tags), id);
+}
+
+// ==================== SESSION STATUS ====================
+
+export function updateSessionStatus(id: string, status: SessionStatus): void {
+  db.prepare("UPDATE sessions SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, id);
+}
+
+// ==================== MESSAGE EDIT / DELETE ====================
+
+export function deleteMessage(messageId: string): void {
+  db.prepare("DELETE FROM messages WHERE id = ?").run(messageId);
+}
+
+export function deleteMessagesAfter(sessionId: string, timestamp: string): void {
+  db.prepare("DELETE FROM messages WHERE session_id = ? AND timestamp > ?").run(sessionId, timestamp);
+}
+
+export function updateMessageContent(messageId: string, content: string): void {
+  db.prepare("UPDATE messages SET content = ? WHERE id = ?").run(content, messageId);
+}
+
+export function getMessage(messageId: string): ClaudeMessage | null {
+  const row = db.prepare("SELECT * FROM messages WHERE id = ?").get(messageId) as Record<string, unknown> | undefined;
+  return row ? rowToMessage(row) : null;
+}
+
+// ==================== TOKEN USAGE ====================
+
+export interface SessionTokenUsage {
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cost_usd: number;
+  message_count: number;
+}
+
+export function getSessionTokenUsage(sessionId: string): SessionTokenUsage {
+  const rows = db.prepare("SELECT metadata FROM messages WHERE session_id = ? AND sender_type = 'claude'").all(sessionId) as { metadata: string }[];
+  let totalInput = 0;
+  let totalOutput = 0;
+  let totalCost = 0;
+  let count = 0;
+  for (const row of rows) {
+    try {
+      const meta = JSON.parse(row.metadata);
+      if (meta.usage) {
+        totalInput += meta.usage.input_tokens ?? 0;
+        totalOutput += meta.usage.output_tokens ?? 0;
+        totalCost += meta.usage.cost_usd ?? 0;
+        count++;
+      }
+    } catch { /* skip */ }
+  }
+  return { total_input_tokens: totalInput, total_output_tokens: totalOutput, total_cost_usd: totalCost, message_count: count };
+}
+
+export function getGlobalTokenUsage(opts?: { since?: string; userId?: string }): SessionTokenUsage {
+  let query = "SELECT m.metadata FROM messages m";
+  const conditions: string[] = ["m.sender_type = 'claude'"];
+  const params: unknown[] = [];
+
+  if (opts?.userId) {
+    query += " JOIN sessions s ON m.session_id = s.id";
+    conditions.push("s.created_by = ?");
+    params.push(opts.userId);
+  }
+  if (opts?.since) {
+    conditions.push("m.timestamp >= ?");
+    params.push(opts.since);
+  }
+
+  query += " WHERE " + conditions.join(" AND ");
+  const rows = db.prepare(query).all(...params) as { metadata: string }[];
+
+  let totalInput = 0;
+  let totalOutput = 0;
+  let totalCost = 0;
+  let count = 0;
+  for (const row of rows) {
+    try {
+      const meta = JSON.parse(row.metadata);
+      if (meta.usage) {
+        totalInput += meta.usage.input_tokens ?? 0;
+        totalOutput += meta.usage.output_tokens ?? 0;
+        totalCost += meta.usage.cost_usd ?? 0;
+        count++;
+      }
+    } catch { /* skip */ }
+  }
+  return { total_input_tokens: totalInput, total_output_tokens: totalOutput, total_cost_usd: totalCost, message_count: count };
+}
+
+// ==================== SESSION TEMPLATES ====================
+
+export interface SessionTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  system_prompt: string | null;
+  model: string;
+  skip_permissions: boolean;
+  provider_type: string;
+  icon: string | null;
+  is_default: boolean;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+function rowToTemplate(row: Record<string, unknown>): SessionTemplate {
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    description: row.description as string | null,
+    system_prompt: row.system_prompt as string | null,
+    model: (row.model as string) ?? "claude-sonnet-4-6",
+    skip_permissions: Boolean(row.skip_permissions),
+    provider_type: (row.provider_type as string) ?? "subprocess",
+    icon: row.icon as string | null,
+    is_default: Boolean(row.is_default),
+    created_by: row.created_by as string,
+    created_at: row.created_at as string,
+    updated_at: row.updated_at as string,
+  };
+}
+
+export function listTemplates(): SessionTemplate[] {
+  const rows = db.prepare("SELECT * FROM session_templates ORDER BY is_default DESC, name ASC").all() as Record<string, unknown>[];
+  return rows.map(rowToTemplate);
+}
+
+export function getTemplate(id: string): SessionTemplate | null {
+  const row = db.prepare("SELECT * FROM session_templates WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+  return row ? rowToTemplate(row) : null;
+}
+
+export function createTemplate(
+  data: { name: string; description?: string; system_prompt?: string; model?: string; skip_permissions?: boolean; provider_type?: string; icon?: string; is_default?: boolean },
+  createdBy: string,
+): SessionTemplate {
+  const id = require("crypto").randomUUID();
+  db.prepare(`
+    INSERT INTO session_templates (id, name, description, system_prompt, model, skip_permissions, provider_type, icon, is_default, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    data.name,
+    data.description ?? null,
+    data.system_prompt ?? null,
+    data.model ?? "claude-sonnet-4-6",
+    data.skip_permissions ? 1 : 0,
+    data.provider_type ?? "subprocess",
+    data.icon ?? null,
+    data.is_default ? 1 : 0,
+    createdBy,
+  );
+  return rowToTemplate(db.prepare("SELECT * FROM session_templates WHERE id = ?").get(id) as Record<string, unknown>);
+}
+
+export function updateTemplate(
+  id: string,
+  data: Partial<{ name: string; description: string; system_prompt: string; model: string; skip_permissions: boolean; provider_type: string; icon: string; is_default: boolean }>,
+): SessionTemplate {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  if (data.name !== undefined) { fields.push("name = ?"); values.push(data.name); }
+  if (data.description !== undefined) { fields.push("description = ?"); values.push(data.description); }
+  if (data.system_prompt !== undefined) { fields.push("system_prompt = ?"); values.push(data.system_prompt); }
+  if (data.model !== undefined) { fields.push("model = ?"); values.push(data.model); }
+  if (data.skip_permissions !== undefined) { fields.push("skip_permissions = ?"); values.push(data.skip_permissions ? 1 : 0); }
+  if (data.provider_type !== undefined) { fields.push("provider_type = ?"); values.push(data.provider_type); }
+  if (data.icon !== undefined) { fields.push("icon = ?"); values.push(data.icon); }
+  if (data.is_default !== undefined) { fields.push("is_default = ?"); values.push(data.is_default ? 1 : 0); }
+  fields.push("updated_at = datetime('now')");
+  values.push(id);
+  db.prepare(`UPDATE session_templates SET ${fields.join(", ")} WHERE id = ?`).run(...values as Parameters<typeof db.prepare>[0][]);
+  return rowToTemplate(db.prepare("SELECT * FROM session_templates WHERE id = ?").get(id) as Record<string, unknown>);
+}
+
+export function deleteTemplate(id: string): void {
+  db.prepare("DELETE FROM session_templates WHERE id = ?").run(id);
 }
 
 // ==================== AGENTS ====================
@@ -140,7 +344,7 @@ function rowToAgent(row: Record<string, unknown>): ClaudeAgent {
     description: row.description as string,
     icon: row.icon as string | null,
     model: row.model as string,
-    allowed_tools: JSON.parse((row.allowed_tools as string) || "[]"),
+    allowed_tools: safeJsonParse(row.allowed_tools, [] as string[]),
     status: row.status as "active" | "disabled" | "archived",
     current_version: row.current_version as number,
     created_by: row.created_by as string,
@@ -154,27 +358,27 @@ function rowToAgentVersion(row: Record<string, unknown>): ClaudeAgentVersion {
     id: row.id as string,
     agent_id: row.agent_id as string,
     version_number: row.version_number as number,
-    config_snapshot: JSON.parse((row.config_snapshot as string) || "{}"),
+    config_snapshot: safeJsonParse(row.config_snapshot, {} as ClaudeAgentVersion["config_snapshot"]),
     change_description: row.change_description as string | null,
     created_by: row.created_by as string,
     created_at: row.created_at as string,
   };
 }
 
-export async function listAgents(createdBy: string): Promise<ClaudeAgent[]> {
+export function listAgents(createdBy: string): ClaudeAgent[] {
   const rows = db.prepare("SELECT * FROM agents WHERE created_by = ? AND status != 'archived' ORDER BY updated_at DESC").all(createdBy) as Record<string, unknown>[];
   return rows.map(rowToAgent);
 }
 
-export async function getAgent(id: string): Promise<ClaudeAgent | null> {
+export function getAgent(id: string): ClaudeAgent | null {
   const row = db.prepare("SELECT * FROM agents WHERE id = ?").get(id) as Record<string, unknown> | undefined;
   return row ? rowToAgent(row) : null;
 }
 
-export async function createAgent(
+export function createAgent(
   data: { name: string; description: string; icon?: string; model: string; allowed_tools: string[] },
   createdBy: string,
-): Promise<ClaudeAgent> {
+): ClaudeAgent {
   const id = require("crypto").randomUUID();
   db.prepare(`
     INSERT INTO agents (id, name, description, icon, model, allowed_tools, created_by)
@@ -190,12 +394,12 @@ export async function createAgent(
   return agent;
 }
 
-export async function updateAgent(
+export function updateAgent(
   id: string,
   data: Partial<{ name: string; description: string; icon: string; model: string; allowed_tools: string[]; status: string }>,
   updatedBy: string,
   changeDescription?: string,
-): Promise<ClaudeAgent> {
+): ClaudeAgent {
   const fields: string[] = [];
   const values: unknown[] = [];
   if (data.name !== undefined) { fields.push("name = ?"); values.push(data.name); }
@@ -217,11 +421,11 @@ export async function updateAgent(
   return agent;
 }
 
-export async function deleteAgent(id: string): Promise<void> {
+export function deleteAgent(id: string): void {
   db.prepare("DELETE FROM agents WHERE id = ?").run(id);
 }
 
-export async function getAgentVersions(agentId: string): Promise<ClaudeAgentVersion[]> {
+export function getAgentVersions(agentId: string): ClaudeAgentVersion[] {
   const rows = db.prepare("SELECT * FROM agent_versions WHERE agent_id = ? ORDER BY version_number DESC").all(agentId) as Record<string, unknown>[];
   return rows.map(rowToAgentVersion);
 }
@@ -281,44 +485,44 @@ function rowToPlanStep(row: Record<string, unknown>): ClaudePlanStep {
   };
 }
 
-export async function createPlan(sessionId: string, goal: string, createdBy: string): Promise<ClaudePlan> {
+export function createPlan(sessionId: string, goal: string, createdBy: string): ClaudePlan {
   const id = require("crypto").randomUUID();
   db.prepare("INSERT INTO plans (id, session_id, goal, created_by) VALUES (?, ?, ?, ?)").run(id, sessionId, goal, createdBy);
   return rowToPlan(db.prepare("SELECT * FROM plans WHERE id = ?").get(id) as Record<string, unknown>);
 }
 
-export async function getPlan(id: string): Promise<ClaudePlan | null> {
+export function getPlan(id: string): ClaudePlan | null {
   const row = db.prepare("SELECT * FROM plans WHERE id = ?").get(id) as Record<string, unknown> | undefined;
   if (!row) return null;
   const plan = rowToPlan(row);
-  plan.steps = await getPlanSteps(id);
+  plan.steps = getPlanSteps(id);
   return plan;
 }
 
-export async function updatePlanStatus(id: string, status: ClaudePlan["status"]): Promise<void> {
+export function updatePlanStatus(id: string, status: ClaudePlan["status"]): void {
   db.prepare("UPDATE plans SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, id);
 }
 
-export async function listPlans(sessionId: string): Promise<ClaudePlan[]> {
+export function listPlans(sessionId: string): ClaudePlan[] {
   const rows = db.prepare("SELECT * FROM plans WHERE session_id = ? ORDER BY created_at DESC").all(sessionId) as Record<string, unknown>[];
   return rows.map(rowToPlan);
 }
 
-export async function addPlanStep(planId: string, step: { step_order: number; summary: string; details?: string }): Promise<ClaudePlanStep> {
+export function addPlanStep(planId: string, step: { step_order: number; summary: string; details?: string }): ClaudePlanStep {
   const id = require("crypto").randomUUID();
   db.prepare("INSERT INTO plan_steps (id, plan_id, step_order, summary, details) VALUES (?, ?, ?, ?, ?)").run(id, planId, step.step_order, step.summary, step.details ?? null);
   return rowToPlanStep(db.prepare("SELECT * FROM plan_steps WHERE id = ?").get(id) as Record<string, unknown>);
 }
 
-export async function getPlanSteps(planId: string): Promise<ClaudePlanStep[]> {
+export function getPlanSteps(planId: string): ClaudePlanStep[] {
   const rows = db.prepare("SELECT * FROM plan_steps WHERE plan_id = ? ORDER BY step_order ASC").all(planId) as Record<string, unknown>[];
   return rows.map(rowToPlanStep);
 }
 
-export async function updatePlanStep(
+export function updatePlanStep(
   id: string,
   data: Partial<{ summary: string; details: string; status: ClaudePlanStep["status"]; step_order: number; result: string; error: string; approved_by: string; executed_at: string }>,
-): Promise<ClaudePlanStep> {
+): ClaudePlanStep {
   const fields: string[] = [];
   const values: unknown[] = [];
   if (data.summary !== undefined) { fields.push("summary = ?"); values.push(data.summary); }
@@ -356,16 +560,16 @@ function rowToSettings(row: Record<string, unknown>): ClaudeUserSettings {
   };
 }
 
-export async function getUserSettings(email: string): Promise<ClaudeUserSettings> {
+export function getUserSettings(email: string): ClaudeUserSettings {
   db.prepare("INSERT OR IGNORE INTO user_settings (email) VALUES (?)").run(email);
   const row = db.prepare("SELECT * FROM user_settings WHERE email = ?").get(email) as Record<string, unknown>;
   return rowToSettings(row);
 }
 
-export async function updateUserSettings(
+export function updateUserSettings(
   email: string,
   data: Partial<{ full_trust_mode: boolean; custom_default_context: string | null; auto_naming_enabled: boolean; setup_complete: boolean }>,
-): Promise<ClaudeUserSettings> {
+): ClaudeUserSettings {
   const fields: string[] = [];
   const values: unknown[] = [];
   if (data.full_trust_mode !== undefined) { fields.push("full_trust_mode = ?"); values.push(data.full_trust_mode ? 1 : 0); }
@@ -376,4 +580,115 @@ export async function updateUserSettings(
   values.push(email);
   db.prepare(`UPDATE user_settings SET ${fields.join(", ")} WHERE email = ?`).run(...values as Parameters<typeof db.prepare>[0][]);
   return rowToSettings(db.prepare("SELECT * FROM user_settings WHERE email = ?").get(email) as Record<string, unknown>);
+}
+
+// ==================== UPLOADS ====================
+
+export interface ClaudeUpload {
+  id: string;
+  session_id: string;
+  original_name: string;
+  stored_name: string;
+  mime_type: string;
+  size_bytes: number;
+  uploaded_by: string;
+  created_at: string;
+}
+
+function rowToUpload(row: Record<string, unknown>): ClaudeUpload {
+  return {
+    id: row.id as string,
+    session_id: row.session_id as string,
+    original_name: row.original_name as string,
+    stored_name: row.stored_name as string,
+    mime_type: row.mime_type as string,
+    size_bytes: row.size_bytes as number,
+    uploaded_by: row.uploaded_by as string,
+    created_at: row.created_at as string,
+  };
+}
+
+export function createUpload(data: {
+  id: string;
+  sessionId: string;
+  originalName: string;
+  storedName: string;
+  mimeType: string;
+  sizeBytes: number;
+  uploadedBy: string;
+}): ClaudeUpload {
+  db.prepare(`
+    INSERT INTO uploads (id, session_id, original_name, stored_name, mime_type, size_bytes, uploaded_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(data.id, data.sessionId, data.originalName, data.storedName, data.mimeType, data.sizeBytes, data.uploadedBy);
+  const row = db.prepare("SELECT * FROM uploads WHERE id = ?").get(data.id) as Record<string, unknown>;
+  return rowToUpload(row);
+}
+
+export function getUpload(id: string): ClaudeUpload | null {
+  const row = db.prepare("SELECT * FROM uploads WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+  return row ? rowToUpload(row) : null;
+}
+
+export function getSessionUploads(sessionId: string): ClaudeUpload[] {
+  const rows = db.prepare("SELECT * FROM uploads WHERE session_id = ? ORDER BY created_at ASC").all(sessionId) as Record<string, unknown>[];
+  return rows.map(rowToUpload);
+}
+
+export function deleteUpload(id: string): void {
+  db.prepare("DELETE FROM uploads WHERE id = ?").run(id);
+}
+
+export function deleteSessionUploads(sessionId: string): void {
+  db.prepare("DELETE FROM uploads WHERE session_id = ?").run(sessionId);
+}
+
+// ==================== SEARCH ====================
+
+export interface SearchResult {
+  messageId: string;
+  sessionId: string;
+  sessionName: string | null;
+  senderType: string;
+  content: string;
+  snippet: string;
+  timestamp: string;
+}
+
+export function searchMessages(query: string, limit = 50): SearchResult[] {
+  try {
+    const rows = db.prepare(`
+      SELECT m.id as messageId, m.session_id as sessionId, s.name as sessionName,
+             m.sender_type as senderType, m.content, m.timestamp,
+             snippet(messages_fts, 0, '<mark>', '</mark>', '...', 40) as snippet
+      FROM messages_fts
+      JOIN messages m ON messages_fts.rowid = m.rowid
+      LEFT JOIN sessions s ON m.session_id = s.id
+      WHERE messages_fts MATCH ?
+      ORDER BY rank
+      LIMIT ?
+    `).all(query, limit) as SearchResult[];
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
+export function searchSessionMessages(sessionId: string, query: string, limit = 50): SearchResult[] {
+  try {
+    const rows = db.prepare(`
+      SELECT m.id as messageId, m.session_id as sessionId, s.name as sessionName,
+             m.sender_type as senderType, m.content, m.timestamp,
+             snippet(messages_fts, 0, '<mark>', '</mark>', '...', 40) as snippet
+      FROM messages_fts
+      JOIN messages m ON messages_fts.rowid = m.rowid
+      LEFT JOIN sessions s ON m.session_id = s.id
+      WHERE messages_fts MATCH ? AND m.session_id = ?
+      ORDER BY rank
+      LIMIT ?
+    `).all(query, sessionId, limit) as SearchResult[];
+    return rows;
+  } catch {
+    return [];
+  }
 }

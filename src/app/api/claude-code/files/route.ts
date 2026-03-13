@@ -23,7 +23,7 @@ function walkSync(dir: string, base: string, results: string[], limit: number): 
   }
   for (const entry of entries) {
     if (results.length >= limit) return;
-    if (entry.name.startsWith(".") && entry.name !== ".env.local") continue;
+    if (entry.name.startsWith(".")) continue;
     if (entry.isDirectory()) {
       if (EXCLUDE_DIRS.has(entry.name)) continue;
       walkSync(path.join(dir, entry.name), base, results, limit);
