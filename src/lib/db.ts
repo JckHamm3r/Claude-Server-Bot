@@ -285,14 +285,17 @@ db.exec(`
   );
 `);
 
-// Seed admin user from env if table is empty
-const userCount = (db.prepare("SELECT COUNT(*) as count FROM users").get() as { count: number }).count;
-if (userCount === 0) {
-  const adminEmail = process.env.CLAUDE_BOT_ADMIN_EMAIL;
-  const adminHash = process.env.CLAUDE_BOT_ADMIN_HASH;
-  if (adminEmail && adminHash) {
+// Seed or sync admin user from env
+const adminEmail = process.env.CLAUDE_BOT_ADMIN_EMAIL;
+const adminHash = process.env.CLAUDE_BOT_ADMIN_HASH;
+if (adminEmail && adminHash) {
+  const existing = db.prepare("SELECT hash FROM users WHERE email = ?").get(adminEmail) as { hash: string } | undefined;
+  if (!existing) {
     db.prepare("INSERT INTO users (email, hash, is_admin) VALUES (?, ?, 1)").run(adminEmail, adminHash);
     console.log(`[db] Seeded admin user: ${adminEmail}`);
+  } else if (existing.hash !== adminHash) {
+    db.prepare("UPDATE users SET hash = ? WHERE email = ?").run(adminHash, adminEmail);
+    console.log(`[db] Synced admin password from env: ${adminEmail}`);
   }
 }
 
