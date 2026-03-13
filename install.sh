@@ -999,9 +999,7 @@ step_account() {
 step_project() {
   step "[5/$TOTAL_STEPS] Where should ${BOT_NAME} work?"
   echo ""
-  echo -e "  Two directories are needed:"
-  echo -e "    ${BOLD}1.${NC} Project dir  — Your code/files that Claude will read and edit"
-  echo -e "    ${BOLD}2.${NC} Install dir  — Where the bot application itself gets installed"
+  echo -e "  ${DIM}This is the directory containing your code/files that Claude will read and edit.${NC}"
 
   if [ "$PLATFORM" = "wsl" ]; then
     echo ""
@@ -1010,11 +1008,12 @@ step_project() {
 
   echo ""
 
-  local default_project="$HOME"
+  # Default to current working directory instead of $HOME
+  local default_project="$PWD"
   if [ -n "$CLI_PROJECT_ROOT" ]; then
     PROJECT_ROOT="$CLI_PROJECT_ROOT"
   else
-    if ! prompt_input "Project directory (your code/files Claude will work on)" "$default_project"; then
+    if ! prompt_input "Project directory" "$default_project"; then
       return
     fi
     PROJECT_ROOT="$REPLY"
@@ -1039,19 +1038,14 @@ step_project() {
     hint "No CLAUDE.md found — you can create one from the chat later (/init)"
   fi
 
-  # Install directory
-  echo ""
-  local default_install="$HOME/claude-server-bot"
+  # Install directory — auto-set, no prompt needed
   if [ -n "$CLI_INSTALL_DIR" ]; then
     INSTALL_DIR="$CLI_INSTALL_DIR"
   else
-    if ! prompt_input "Install directory (where the bot app is installed)" "$default_install"; then
-      return
-    fi
-    INSTALL_DIR="$REPLY"
+    INSTALL_DIR="$HOME/claude-server-bot"
   fi
   INSTALL_DIR="${INSTALL_DIR/#\~/$HOME}"
-  info "Install directory: $INSTALL_DIR"
+  info "Install location: $INSTALL_DIR"
 
   NEXT_STEP=6
 }
