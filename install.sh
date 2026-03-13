@@ -398,6 +398,21 @@ get_local_ip() {
   esac
 }
 
+get_public_ip() {
+  # Try AWS metadata first (IMDSv2), then common IP echo services
+  local token
+  token=$(curl -sf -X PUT -H "X-aws-ec2-metadata-token-ttl-seconds: 5" \
+    http://169.254.169.254/latest/api/token 2>/dev/null) || true
+  if [ -n "$token" ]; then
+    curl -sf -H "X-aws-ec2-metadata-token: $token" \
+      http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null && return
+  fi
+  # Fallback to external services
+  curl -sf --max-time 3 https://api.ipify.org 2>/dev/null && return
+  curl -sf --max-time 3 https://ifconfig.me 2>/dev/null && return
+  echo ""
+}
+
 get_clipboard_cmd() {
   if [ "$PLATFORM" = "macos" ]; then
     command -v pbcopy 2>/dev/null && return
@@ -1274,7 +1289,48 @@ step_network() {
     BASE_URL="http://$DOMAIN"
   else
     local server_ip
-    server_ip="$(get_local_ip)"
+    local public_ip
+    local private_ip
+    private_ip="$(get_local_ip)"
+    public_ip="$(get_public_ip)"
+
+    if $UNATTENDED; then
+      # Prefer public IP in unattended mode
+      server_ip="${public_ip:-$private_ip}"
+    else
+      echo ""
+      if [ -n "$public_ip" ] && [ "$public_ip" != "$private_ip" ]; then
+        echo -e "  ${BOLD}Which IP address should the bot use?${NC}"
+        echo -e "  ${BOLD}1)${NC} Public IP:  ${GREEN}$public_ip${NC}  (for remote access)"
+        echo -e "  ${BOLD}2)${NC} Private IP: $private_ip  (for local/VPN access only)"
+        echo -e "  ${BOLD}3)${NC} Enter a custom IP or hostname"
+        echo ""
+        if ! prompt_input "Choice" "1"; then
+          return
+        fi
+        case "$REPLY" in
+          1) server_ip="$public_ip" ;;
+          2) server_ip="$private_ip" ;;
+          3)
+            if ! prompt_input "IP address or hostname" ""; then
+              return
+            fi
+            server_ip="$REPLY"
+            ;;
+          *) server_ip="$public_ip" ;;
+        esac
+      elif [ -n "$public_ip" ]; then
+        # Public and private are the same
+        server_ip="$public_ip"
+      else
+        echo -e "  ${YELLOW}Could not detect public IP.${NC}"
+        if ! prompt_input "Server IP address or hostname" "$private_ip"; then
+          return
+        fi
+        server_ip="$REPLY"
+      fi
+    fi
+
     BASE_URL="http://${server_ip}:${PORT}"
   fi
 
