@@ -1426,7 +1426,7 @@ step_build() {
   if [ -z "$CLAUDE_BIN" ]; then
     if $UNATTENDED; then
       echo "  Installing Claude CLI..."
-      npm install -g @anthropic-ai/claude-code
+      sudo npm install -g @anthropic-ai/claude-code
       CLAUDE_BIN="$(command -v claude 2>/dev/null || echo "claude")"
     else
       warn "Claude CLI not found."
@@ -1434,7 +1434,7 @@ step_build() {
       prompt_yn "Install Claude CLI now?" "y" && install_cli_result=0 || install_cli_result=$?
       if [ "$install_cli_result" -eq 0 ]; then
         echo "  Installing @anthropic-ai/claude-code..."
-        npm install -g @anthropic-ai/claude-code
+        sudo npm install -g @anthropic-ai/claude-code
         CLAUDE_BIN="$(command -v claude 2>/dev/null || echo "claude")"
         if [ -n "$CLAUDE_BIN" ] && [ "$CLAUDE_BIN" != "claude" ]; then
           info "Claude CLI installed at $CLAUDE_BIN"
@@ -1447,7 +1447,7 @@ step_build() {
         echo -e "  ${YELLOW}╔══════════════════════════════════════════════════════════════╗${NC}"
         echo -e "  ${YELLOW}║  Claude Server Bot requires the Claude CLI to function.     ║${NC}"
         echo -e "  ${YELLOW}║  Install it before using the app:                           ║${NC}"
-        echo -e "  ${YELLOW}║    npm install -g @anthropic-ai/claude-code                 ║${NC}"
+        echo -e "  ${YELLOW}║    sudo npm install -g @anthropic-ai/claude-code                 ║${NC}"
         echo -e "  ${YELLOW}╚══════════════════════════════════════════════════════════════╝${NC}"
         echo ""
         CLAUDE_BIN="claude"
