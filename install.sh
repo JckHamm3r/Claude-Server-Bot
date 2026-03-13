@@ -717,30 +717,75 @@ step_prerequisites() {
   fi
 
   # Node.js
+  local need_node=false
   if ! command -v node &>/dev/null; then
-    error "Node.js not found."
-    echo ""
-    echo "  Install Node.js 20+:"
-    case "$PLATFORM" in
-      macos)
-        echo "    brew install node"
-        ;;
-      *)
-        echo "    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -"
-        echo "    sudo apt-get install -y nodejs"
-        ;;
-    esac
-    echo ""
-    echo "  Then re-run this installer."
-    exit 1
+    need_node=true
+  else
+    local node_major
+    node_major=$(node --version | sed 's/v//' | cut -d. -f1)
+    if [ "$node_major" -lt 20 ]; then
+      need_node=true
+      warn "Node.js 20+ required (found $(node --version))."
+    fi
   fi
-  local node_major
-  node_major=$(node --version | sed 's/v//' | cut -d. -f1)
-  if [ "$node_major" -lt 20 ]; then
-    error "Node.js 20+ required (found $(node --version)). Please upgrade and re-run."
-    exit 1
+
+  if $need_node; then
+    local do_install=false
+    if $UNATTENDED; then
+      do_install=true
+    else
+      warn "Node.js 20+ not found."
+      local node_result
+      prompt_yn "  Install Node.js 20 now?" "y" && node_result=0 || node_result=$?
+      if [ "$node_result" -eq 0 ]; then
+        do_install=true
+      elif [ "$node_result" -eq 2 ]; then
+        return  # go back
+      else
+        error "Node.js 20+ is required. Please install manually and re-run."
+        exit 1
+      fi
+    fi
+
+    if $do_install; then
+      info "Installing Node.js 20..."
+      case "$PKG_MGR" in
+        apt)
+          curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+          sudo apt-get install -y nodejs
+          ;;
+        dnf)
+          curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
+          sudo dnf install -y nodejs
+          ;;
+        yum)
+          curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
+          sudo yum install -y nodejs
+          ;;
+        brew)
+          brew install node@20
+          ;;
+        *)
+          error "No supported package manager found. Please install Node.js 20+ manually and re-run."
+          exit 1
+          ;;
+      esac
+    fi
+
+    if ! command -v node &>/dev/null; then
+      error "Failed to install Node.js. Please install manually and re-run."
+      exit 1
+    fi
+    local node_major
+    node_major=$(node --version | sed 's/v//' | cut -d. -f1)
+    if [ "$node_major" -lt 20 ]; then
+      error "Node.js 20+ required but got $(node --version). Please upgrade manually and re-run."
+      exit 1
+    fi
+    ok "Node.js installed: $(node --version)"
+  else
+    info "Node $(node --version)"
   fi
-  info "Node $(node --version)"
 
   # pnpm
   if ! command -v pnpm &>/dev/null; then
@@ -767,17 +812,59 @@ step_prerequisites() {
 
   # git
   if ! command -v git &>/dev/null; then
-    error "git not found. Install git first and re-run."
-    exit 1
+    if $UNATTENDED; then
+      info "Installing git..."
+      install_pkg git
+    else
+      warn "git not found."
+      local git_result
+      prompt_yn "  Install git now?" "y" && git_result=0 || git_result=$?
+      if [ "$git_result" -eq 0 ]; then
+        info "Installing git..."
+        install_pkg git
+      elif [ "$git_result" -eq 2 ]; then
+        return  # go back
+      else
+        error "git is required. Please install manually and re-run."
+        exit 1
+      fi
+    fi
+    if ! command -v git &>/dev/null; then
+      error "Failed to install git. Please install manually and re-run."
+      exit 1
+    fi
+    ok "git installed: $(git --version | awk '{print $3}')"
+  else
+    info "git $(git --version | awk '{print $3}')"
   fi
-  info "git $(git --version | awk '{print $3}')"
 
   # openssl
   if ! command -v openssl &>/dev/null; then
-    error "openssl not found. Install openssl and re-run."
-    exit 1
+    if $UNATTENDED; then
+      info "Installing openssl..."
+      install_pkg openssl
+    else
+      warn "openssl not found."
+      local openssl_result
+      prompt_yn "  Install openssl now?" "y" && openssl_result=0 || openssl_result=$?
+      if [ "$openssl_result" -eq 0 ]; then
+        info "Installing openssl..."
+        install_pkg openssl
+      elif [ "$openssl_result" -eq 2 ]; then
+        return  # go back
+      else
+        error "openssl is required. Please install manually and re-run."
+        exit 1
+      fi
+    fi
+    if ! command -v openssl &>/dev/null; then
+      error "Failed to install openssl. Please install manually and re-run."
+      exit 1
+    fi
+    ok "openssl installed"
+  else
+    info "openssl found"
   fi
-  info "openssl found"
 
   # Disk space check
   local avail_kb
