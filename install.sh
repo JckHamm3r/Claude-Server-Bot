@@ -741,9 +741,9 @@ step_prerequisites() {
     if $UNATTENDED; then
       do_install=true
     else
-      warn "Node.js 20+ not found."
+      warn "Node.js 20+ is required but not found."
       local node_result
-      prompt_yn "  Install Node.js 20 now?" "y" && node_result=0 || node_result=$?
+      prompt_yn "  Install Node.js 20 now? (required)" "y" && node_result=0 || node_result=$?
       if [ "$node_result" -eq 0 ]; then
         do_install=true
       elif [ "$node_result" -eq 2 ]; then
@@ -801,7 +801,7 @@ step_prerequisites() {
       sudo npm install -g pnpm
     else
       local pnpm_result
-      prompt_yn "pnpm not found. Install it now?" "y" && pnpm_result=0 || pnpm_result=$?
+      prompt_yn "pnpm is required but not found. Install it now? (required)" "y" && pnpm_result=0 || pnpm_result=$?
       if [ "$pnpm_result" -eq 0 ]; then
         echo "  Installing pnpm..."
         sudo npm install -g pnpm
@@ -823,9 +823,9 @@ step_prerequisites() {
       info "Installing git..."
       install_pkg git
     else
-      warn "git not found."
+      warn "git is required but not found."
       local git_result
-      prompt_yn "  Install git now?" "y" && git_result=0 || git_result=$?
+      prompt_yn "  Install git now? (required)" "y" && git_result=0 || git_result=$?
       if [ "$git_result" -eq 0 ]; then
         info "Installing git..."
         install_pkg git
@@ -851,9 +851,9 @@ step_prerequisites() {
       info "Installing openssl..."
       install_pkg openssl
     else
-      warn "openssl not found."
+      warn "openssl is required but not found."
       local openssl_result
-      prompt_yn "  Install openssl now?" "y" && openssl_result=0 || openssl_result=$?
+      prompt_yn "  Install openssl now? (required)" "y" && openssl_result=0 || openssl_result=$?
       if [ "$openssl_result" -eq 0 ]; then
         info "Installing openssl..."
         install_pkg openssl
@@ -985,7 +985,7 @@ step_account() {
   else
     ADMIN_PASSWORD=""
     for _ in $(seq 1 5); do
-      ADMIN_PASSWORD=$(openssl rand -base64 64 | tr -dc 'a-zA-Z0-9_-+=.' | head -c32)
+      ADMIN_PASSWORD=$(openssl rand -base64 64 2>/dev/null | tr -dc 'a-zA-Z0-9_+=.\-' | head -c32)
       [ ${#ADMIN_PASSWORD} -eq 32 ] && break
     done
     if [ ${#ADMIN_PASSWORD} -ne 32 ]; then
