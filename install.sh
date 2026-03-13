@@ -1246,9 +1246,9 @@ step_network() {
 # ─── Step 7: Confirmation Summary ─────────────────────────────────────────
 step_confirm() {
   # Generate slug, path prefix, and secrets now
-  SLUG=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c12)
+  SLUG=$(openssl rand -base64 12 2>/dev/null | tr -dc 'a-zA-Z0-9' | head -c12)
   BOT_PATH_PREFIX=$(echo "$BOT_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
-  NEXTAUTH_SECRET=$(openssl rand -base64 32)
+  NEXTAUTH_SECRET=$(openssl rand -base64 32 2>/dev/null)
 
   local full_url="$BASE_URL/$BOT_PATH_PREFIX/$SLUG"
   local mode_display=""
