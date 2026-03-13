@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Claude Server Bot — Interactive Installer
+#  Claude Server Bot — Interactive Installer v2.0.1
 #
 #  Usage:
 #    bash install.sh                          # Interactive mode
