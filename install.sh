@@ -1211,16 +1211,14 @@ step_network() {
       case "$CLI_HTTPS" in
         letsencrypt) USE_HTTPS=true; HTTPS_METHOD="letsencrypt"; SETUP_NGINX=true ;;
         cloudflare)  USE_HTTPS=true; HTTPS_METHOD="cloudflare"; SETUP_CF_TUNNEL=true ;;
-        selfsigned)  USE_HTTPS=true; HTTPS_METHOD="selfsigned" ;;
-        none)        USE_HTTPS=false ;;
+        *)           USE_HTTPS=true; HTTPS_METHOD="selfsigned" ;;
       esac
     else
       echo ""
       echo -e "  ${BOLD}How do you want to handle HTTPS?${NC}"
       echo -e "  ${BOLD}1)${NC} nginx + Let's Encrypt (recommended)"
       echo -e "  ${BOLD}2)${NC} Cloudflare Tunnel (no port exposure needed)"
-      echo -e "  ${BOLD}3)${NC} Self-signed certificate (encrypts traffic, browser warning)"
-      echo -e "  ${BOLD}4)${NC} No HTTPS (HTTP only — ${RED}passwords sent in plaintext${NC})"
+      echo -e "  ${BOLD}3)${NC} Self-signed certificate (browser warning, but encrypted)"
       echo ""
       if ! prompt_input "Choice" "1"; then
         return
@@ -1237,12 +1235,9 @@ step_network() {
           HTTPS_METHOD="cloudflare"
           SETUP_CF_TUNNEL=true
           ;;
-        3)
+        *)
           USE_HTTPS=true
           HTTPS_METHOD="selfsigned"
-          ;;
-        4)
-          USE_HTTPS=false
           ;;
       esac
     fi
@@ -1288,11 +1283,9 @@ step_network() {
     fi
   fi
 
-  # Compute BASE_URL
-  if $USE_HTTPS && [ -n "$DOMAIN" ]; then
+  # Compute BASE_URL (always HTTPS)
+  if [ -n "$DOMAIN" ]; then
     BASE_URL="https://$DOMAIN"
-  elif [ -n "$DOMAIN" ]; then
-    BASE_URL="http://$DOMAIN"
   else
     local server_ip
     local public_ip
@@ -1337,25 +1330,11 @@ step_network() {
       fi
     fi
 
-    # Offer self-signed HTTPS for IP-only access
-    if ! $USE_HTTPS && ! $UNATTENDED; then
-      echo ""
-      warn "Without HTTPS, login passwords are sent in plaintext."
-      local ss_result
-      prompt_yn "Generate a self-signed certificate? (encrypts traffic, browser warning)" "y" && ss_result=0 || ss_result=$?
-      if [ "$ss_result" -eq 0 ]; then
-        USE_HTTPS=true
-        HTTPS_METHOD="selfsigned"
-      elif [ "$ss_result" -eq 2 ]; then
-        return
-      fi
-    fi
+    # Always use HTTPS — self-signed when no domain
+    USE_HTTPS=true
+    HTTPS_METHOD="${HTTPS_METHOD:-selfsigned}"
 
-    if $USE_HTTPS; then
-      BASE_URL="https://${server_ip}:${PORT}"
-    else
-      BASE_URL="http://${server_ip}:${PORT}"
-    fi
+    BASE_URL="https://${server_ip}:${PORT}"
   fi
 
   info "Base URL: $BASE_URL"
