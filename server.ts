@@ -1,4 +1,6 @@
-import { createServer } from "http";
+import { createServer as createHttpServer } from "http";
+import { createServer as createHttpsServer } from "https";
+import { readFileSync, existsSync } from "fs";
 import { parse } from "url";
 import next from "next";
 import { Server } from "socket.io";
@@ -14,9 +16,21 @@ app.prepare().then(() => {
     registerHandlers: (io: Server) => void;
   };
 
-  const httpServer = createServer((req, res) => {
+  const handler = (req: import("http").IncomingMessage, res: import("http").ServerResponse) => {
     handle(req, res, parse(req.url ?? "/", true));
-  });
+  };
+
+  // Use HTTPS if cert files are configured and exist
+  const certPath = process.env.SSL_CERT_PATH ?? "";
+  const keyPath = process.env.SSL_KEY_PATH ?? "";
+  const useHttps = certPath && keyPath && existsSync(certPath) && existsSync(keyPath);
+
+  const httpServer = useHttps
+    ? createHttpsServer(
+        { cert: readFileSync(certPath), key: readFileSync(keyPath) },
+        handler
+      )
+    : createHttpServer(handler);
 
   const slug = process.env.CLAUDE_BOT_SLUG ?? "";
   const prefix = process.env.CLAUDE_BOT_PATH_PREFIX ?? "c";
@@ -31,6 +45,6 @@ app.prepare().then(() => {
 
   const port = parseInt(process.env.PORT ?? "3000", 10);
   httpServer.listen(port, () => {
-    console.log(`> Ready on port ${port} [${process.env.NODE_ENV}]`);
+    console.log(`> Ready on port ${port} [${useHttps ? "HTTPS" : "HTTP"}] [${process.env.NODE_ENV}]`);
   });
 });

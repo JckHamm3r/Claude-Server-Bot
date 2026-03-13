@@ -1211,6 +1211,7 @@ step_network() {
       case "$CLI_HTTPS" in
         letsencrypt) USE_HTTPS=true; HTTPS_METHOD="letsencrypt"; SETUP_NGINX=true ;;
         cloudflare)  USE_HTTPS=true; HTTPS_METHOD="cloudflare"; SETUP_CF_TUNNEL=true ;;
+        selfsigned)  USE_HTTPS=true; HTTPS_METHOD="selfsigned" ;;
         none)        USE_HTTPS=false ;;
       esac
     else
@@ -1218,7 +1219,8 @@ step_network() {
       echo -e "  ${BOLD}How do you want to handle HTTPS?${NC}"
       echo -e "  ${BOLD}1)${NC} nginx + Let's Encrypt (recommended)"
       echo -e "  ${BOLD}2)${NC} Cloudflare Tunnel (no port exposure needed)"
-      echo -e "  ${BOLD}3)${NC} No HTTPS (HTTP only)"
+      echo -e "  ${BOLD}3)${NC} Self-signed certificate (encrypts traffic, browser warning)"
+      echo -e "  ${BOLD}4)${NC} No HTTPS (HTTP only — ${RED}passwords sent in plaintext${NC})"
       echo ""
       if ! prompt_input "Choice" "1"; then
         return
@@ -1236,6 +1238,10 @@ step_network() {
           SETUP_CF_TUNNEL=true
           ;;
         3)
+          USE_HTTPS=true
+          HTTPS_METHOD="selfsigned"
+          ;;
+        4)
           USE_HTTPS=false
           ;;
       esac
@@ -1331,7 +1337,25 @@ step_network() {
       fi
     fi
 
-    BASE_URL="http://${server_ip}:${PORT}"
+    # Offer self-signed HTTPS for IP-only access
+    if ! $USE_HTTPS && ! $UNATTENDED; then
+      echo ""
+      warn "Without HTTPS, login passwords are sent in plaintext."
+      local ss_result
+      prompt_yn "Generate a self-signed certificate? (encrypts traffic, browser warning)" "y" && ss_result=0 || ss_result=$?
+      if [ "$ss_result" -eq 0 ]; then
+        USE_HTTPS=true
+        HTTPS_METHOD="selfsigned"
+      elif [ "$ss_result" -eq 2 ]; then
+        return
+      fi
+    fi
+
+    if $USE_HTTPS; then
+      BASE_URL="https://${server_ip}:${PORT}"
+    else
+      BASE_URL="http://${server_ip}:${PORT}"
+    fi
   fi
 
   info "Base URL: $BASE_URL"
@@ -1357,6 +1381,7 @@ step_confirm() {
     case "$HTTPS_METHOD" in
       letsencrypt) https_display="Let's Encrypt" ;;
       cloudflare)  https_display="Cloudflare Tunnel" ;;
+      selfsigned)  https_display="Self-signed certificate" ;;
     esac
   fi
   local service_display="Manual"
@@ -1867,6 +1892,14 @@ step_service() {
   step "[9/$TOTAL_STEPS] Setting up ${BOT_NAME} service..."
   mascot working
 
+  # Self-signed certificate (direct HTTPS, no nginx needed)
+  if $USE_HTTPS && [ "$HTTPS_METHOD" = "selfsigned" ] && ! $SETUP_NGINX; then
+    local cert_host=""
+    # Extract host from BASE_URL
+    cert_host=$(echo "$BASE_URL" | sed -E 's|https?://||;s|:.*||')
+    generate_selfsigned_cert "$cert_host"
+  fi
+
   # nginx config
   if $SETUP_NGINX; then
     setup_nginx
@@ -1905,6 +1938,44 @@ step_service() {
   fi
 
   NEXT_STEP=10
+}
+
+generate_selfsigned_cert() {
+  local cert_dir="$INSTALL_DIR/certs"
+  mkdir -p "$cert_dir"
+
+  local cert_cn="${DOMAIN:-$1}"
+  [ -z "$cert_cn" ] && cert_cn="localhost"
+
+  echo "  Generating self-signed certificate for $cert_cn..."
+
+  # Build SAN extension for IP addresses and hostnames
+  local san="DNS:$cert_cn,DNS:localhost"
+  # If it looks like an IP address, add it as IP SAN
+  if [[ "$cert_cn" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    san="IP:$cert_cn,IP:127.0.0.1,DNS:localhost"
+  fi
+
+  openssl req -x509 -newkey rsa:2048 -nodes \
+    -keyout "$cert_dir/key.pem" \
+    -out "$cert_dir/cert.pem" \
+    -days 365 \
+    -subj "/CN=$cert_cn" \
+    -addext "subjectAltName=$san" \
+    2>/dev/null
+
+  chmod 600 "$cert_dir/key.pem"
+  chmod 644 "$cert_dir/cert.pem"
+
+  # Add SSL paths to .env
+  if [ -f "$INSTALL_DIR/.env" ]; then
+    echo "SSL_CERT_PATH=$cert_dir/cert.pem" >> "$INSTALL_DIR/.env"
+    echo "SSL_KEY_PATH=$cert_dir/key.pem" >> "$INSTALL_DIR/.env"
+  fi
+
+  info "Self-signed certificate generated (valid 365 days)"
+  hint "  Browser will show a security warning — this is expected."
+  hint "  Certificate: $cert_dir/cert.pem"
 }
 
 setup_nginx() {
