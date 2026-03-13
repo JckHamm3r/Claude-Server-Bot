@@ -4,15 +4,17 @@ import { useEffect, useRef, useState } from "react";
 import { MessageSquare } from "lucide-react";
 import Image from "next/image";
 import { getSocket } from "@/lib/socket";
+import { getAvatarPath, type AvatarState } from "@/lib/avatar-state";
 
 interface BubbleProps {
   onOpen: () => void;
   isRunning: boolean;
+  avatarState?: AvatarState;
 }
 
 const STORAGE_KEY = "claude-bubble-pos";
 
-export function ClaudeBubble({ onOpen, isRunning }: BubbleProps) {
+export function ClaudeBubble({ onOpen, isRunning, avatarState }: BubbleProps) {
   const [pos, setPos] = useState({ right: 32, bottom: 32 });
   const dragging = useRef(false);
   const startRef = useRef({ x: 0, y: 0, right: 32, bottom: 32 });
@@ -88,7 +90,7 @@ export function ClaudeBubble({ onOpen, isRunning }: BubbleProps) {
       <div className="relative">
         <Image
           unoptimized
-          src="/claude-code.png"
+          src={getAvatarPath(avatarState ?? (isRunning ? "working" : "waiting"))}
           alt="Claude"
           width={36}
           height={36}

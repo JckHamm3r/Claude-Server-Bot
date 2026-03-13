@@ -16,6 +16,7 @@ export async function middleware(request: NextRequest) {
     pathname === "/setup" ||
     pathname === "/favicon.ico" ||
     pathname === "/claude-code.png" ||
+    pathname.startsWith("/avatars/") ||
     pathname === "/api/bot-identity" ||
     pathname === "/api/health/ping" ||
     pathname.endsWith(".png") ||

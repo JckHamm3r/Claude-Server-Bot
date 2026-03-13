@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { getSocket } from "@/lib/socket";
 import type { ParsedOutput } from "@/lib/claude/provider";
 import type { ClaudeSession } from "@/lib/claude-db";
 import { DEFAULT_MODEL } from "@/lib/models";
+import type { AvatarState } from "@/lib/avatar-state";
 import { SessionSidebar } from "./session-sidebar";
 import { MessageList, type ChatMessage, type ActivityState } from "./message-list";
 import { ChatInput } from "./chat-input";
@@ -59,11 +60,23 @@ export function ChatTab() {
   // Pending interactive message (options/confirm/permission_request)
   const [pendingInteraction, setPendingInteraction] = useState<{ type: string; messageId: string } | null>(null);
 
+  // Track whether last event was an error (for avatar state)
+  const [hasError, setHasError] = useState(false);
+
   // Search state
   const [showSessionSearch, setShowSessionSearch] = useState(false);
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
   const [searchHighlights, setSearchHighlights] = useState<Set<string>>(new Set());
   const [activeHighlight, setActiveHighlight] = useState<string | null>(null);
+
+  // Compute avatar state from current interaction state
+  const avatarState: AvatarState = useMemo(() => {
+    if (hasError) return "error";
+    if (pendingInteraction) return "questioning";
+    if (currentActivity) return "working";
+    if (isRunning) return "thinking";
+    return "waiting";
+  }, [hasError, pendingInteraction, currentActivity, isRunning]);
 
   // Keep autoAcceptRef in sync
   useEffect(() => {
@@ -141,6 +154,7 @@ export function ChatTab() {
       };
       setMessages((prev) => [...prev, msg]);
       setIsRunning(true);
+      setHasError(false);
       emit("claude:message", { sessionId, content, attachments });
     },
     [emit],
@@ -505,6 +519,7 @@ export function ChatTab() {
       setMessages((prev) => [...prev, msg]);
       setIsRunning(false);
       setCurrentActivity(null);
+      setHasError(true);
     });
 
     socket.on("security:warn", ({ type: warnType, message: warnMessage }: { type: string; message: string }) => {
@@ -927,6 +942,7 @@ export function ChatTab() {
             activeHighlight={activeHighlight}
             pendingInteraction={pendingInteraction}
             loadingMessages={loadingMessages}
+            avatarState={avatarState}
           />
         )}
 

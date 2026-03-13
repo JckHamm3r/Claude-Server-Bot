@@ -163,7 +163,7 @@ export default function SetupPage() {
         {/* Header */}
         <div className="flex flex-col items-center mb-8">
           <div className="h-14 w-14 rounded-full overflow-hidden mb-4">
-            <Image unoptimized src="/claude-code.png" alt="Claude" width={56} height={56} className="object-cover" />
+            <Image unoptimized src="/avatars/waiting.png" alt="Claude" width={56} height={56} className="object-cover" />
           </div>
           <h1 className="text-title font-semibold text-bot-text">Setup Wizard</h1>
           <p className="text-caption text-bot-muted mt-1">Let&apos;s get Claude Server Bot ready</p>

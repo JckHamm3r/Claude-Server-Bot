@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import Image from "next/image";
 import { MessageItem } from "./message-item";
 import type { ParsedOutput } from "@/lib/claude/provider";
+import { getAvatarPath, type AvatarState } from "@/lib/avatar-state";
 
 export interface ChatMessage {
   id: string;
@@ -36,6 +37,7 @@ interface MessageListProps {
   activeHighlight?: string | null;
   pendingInteraction?: { type: string; messageId: string } | null;
   loadingMessages?: boolean;
+  avatarState?: AvatarState;
 }
 
 function ActivityStrip({ activity, isRunning }: { activity: ActivityState | null; isRunning: boolean }) {
@@ -90,6 +92,7 @@ export function MessageList({
   activeHighlight,
   pendingInteraction,
   loadingMessages,
+  avatarState,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -149,6 +152,7 @@ export function MessageList({
                   isLatest={i === messages.length - 1}
                   isRunning={isRunning}
                   isInteractive={pendingInteraction?.messageId === msg.id}
+                  avatarState={avatarState}
                 />
               </div>
             );
@@ -161,7 +165,7 @@ export function MessageList({
           })() && (
             <div className="flex gap-3 py-2 justify-start">
               <div className="mt-1 h-6 w-6 shrink-0 rounded-full overflow-hidden">
-                <Image unoptimized src="/claude-code.png" alt="Claude" width={24} height={24} className="object-cover" />
+                <Image unoptimized src={getAvatarPath(avatarState ?? "thinking")} alt="Claude" width={24} height={24} className="object-cover" />
               </div>
               <div className="rounded-2xl rounded-bl-sm bg-bot-elevated px-3 py-2.5 flex items-center gap-1">
                 <span className="h-1.5 w-1.5 rounded-full bg-bot-muted animate-bounce [animation-delay:0ms]" />

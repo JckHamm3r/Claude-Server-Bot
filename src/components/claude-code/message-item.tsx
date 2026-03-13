@@ -7,6 +7,7 @@ import { useState } from "react";
 import { Copy, Check, CheckCircle2, Pencil, Trash2, X, FileText } from "lucide-react";
 import Image from "next/image";
 import type { ParsedOutput } from "@/lib/claude/provider";
+import { getAvatarPath, type AvatarState } from "@/lib/avatar-state";
 import { OptionsButtons } from "./options-buttons";
 import { ConfirmButtons } from "./confirm-buttons";
 import { DiffView } from "./diff-view";
@@ -34,6 +35,7 @@ interface MessageItemProps {
   isLatest?: boolean;
   isRunning?: boolean;
   isInteractive?: boolean;
+  avatarState?: AvatarState;
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -84,6 +86,7 @@ export function MessageItem({
   isLatest,
   isRunning,
   isInteractive,
+  avatarState,
 }: MessageItemProps) {
   const isUser = message.sender_type === "admin";
   const [isEditing, setIsEditing] = useState(false);
@@ -341,7 +344,7 @@ export function MessageItem({
       onMouseLeave={() => setIsHovered(false)}
     >
       <div className="mt-1 h-7 w-7 shrink-0 rounded-full overflow-hidden">
-        <Image unoptimized src="/claude-code.png" alt="Claude" width={28} height={28} className="object-cover" />
+        <Image unoptimized src={getAvatarPath((isLatest && isRunning) ? (avatarState ?? "waiting") : "waiting")} alt="Claude" width={28} height={28} className="object-cover" />
       </div>
       <div className="min-w-0 flex-1 rounded-2xl rounded-bl-sm bg-bot-elevated px-4 py-2.5 text-body text-bot-text max-w-[90%]">
         <ReactMarkdown

@@ -502,7 +502,7 @@ export function SettingsPanel() {
                       <img src={botAvatar} alt="Bot avatar" className="h-full w-full object-cover" />
                     ) : (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src="/claude-code.png" alt="Default avatar" className="h-full w-full object-cover" />
+                      <img src="/avatars/waiting.png" alt="Default avatar" className="h-full w-full object-cover" />
                     )}
                   </div>
                   <div className="flex gap-2">

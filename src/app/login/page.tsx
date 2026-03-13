@@ -69,7 +69,7 @@ function LoginForm() {
             <img src={botIdentity.avatar} alt={botIdentity.name} className="h-full w-full object-cover" />
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src="/claude-code.png" alt="Claude" className="h-full w-full object-cover" />
+            <img src="/avatars/waiting.png" alt="Claude" className="h-full w-full object-cover" />
           )}
         </div>
         <h1 className="text-title font-semibold text-bot-text">{botIdentity.name}</h1>
