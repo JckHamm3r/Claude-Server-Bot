@@ -115,11 +115,15 @@ export default function SetupPage() {
 
   async function handleComplete() {
     try {
-      await fetch(`${bp}/api/setup/complete`, { method: "POST" });
-    } catch {
-      // ignore
+      const res = await fetch(`${bp}/api/setup/complete`, { method: "POST" });
+      if (!res.ok) {
+        console.error("[setup] complete failed:", res.status, await res.text());
+      }
+    } catch (err) {
+      console.error("[setup] complete error:", err);
     }
-    router.push("/");
+    // Full page reload ensures middleware sees the new cookie
+    window.location.href = bp || "/";
   }
 
   // Determine if step 2 (init) should be shown
