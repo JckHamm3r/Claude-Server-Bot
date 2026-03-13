@@ -26,7 +26,10 @@ function LoginForm() {
   });
 
   useEffect(() => {
-    fetch("/api/bot-identity")
+    const slug = process.env.NEXT_PUBLIC_CLAUDE_BOT_SLUG ?? "";
+    const prefix = process.env.NEXT_PUBLIC_CLAUDE_BOT_PATH_PREFIX ?? "c";
+    const bp = slug ? `/${prefix}/${slug}` : "";
+    fetch(`${bp}/api/bot-identity`)
       .then((r) => r.json())
       .then((d: BotIdentity) => setBotIdentity(d))
       .catch(() => {});
