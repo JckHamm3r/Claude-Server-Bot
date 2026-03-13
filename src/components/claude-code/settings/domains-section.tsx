@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Globe, Plus, X, CheckCircle2 } from "lucide-react";
+import { Globe, Plus, X, CheckCircle2, RefreshCw, Loader2, AlertTriangle } from "lucide-react";
 
 interface Domain {
   id: string;
@@ -13,10 +13,16 @@ interface Domain {
   notes: string | null;
 }
 
+interface SetupResult {
+  ok: boolean;
+  error?: string;
+}
+
 export function DomainsSection() {
   const [domains, setDomains] = useState<Domain[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
+  const [settingUp, setSettingUp] = useState<string | null>(null);
   const [newHostname, setNewHostname] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -41,11 +47,17 @@ export function DomainsSection() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ hostname: newHostname.trim() }),
       });
-      const data = await res.json() as { ok?: boolean; error?: string };
+      const data = await res.json() as { ok?: boolean; error?: string; setup?: SetupResult };
       if (data.ok) {
         setNewHostname("");
         load();
-        setMsg({ ok: true, text: "Domain added." });
+        if (data.setup?.ok) {
+          setMsg({ ok: true, text: "Domain added — nginx and SSL configured successfully." });
+        } else if (data.setup?.error) {
+          setMsg({ ok: false, text: `Domain saved but setup failed: ${data.setup.error}. You can retry with the Setup SSL button.` });
+        } else {
+          setMsg({ ok: true, text: "Domain added." });
+        }
       } else {
         setMsg({ ok: false, text: data.error ?? "Failed to add domain" });
       }
@@ -53,6 +65,29 @@ export function DomainsSection() {
       setMsg({ ok: false, text: "Network error" });
     } finally {
       setAdding(false);
+    }
+  };
+
+  const handleRetrySetup = async (id: string) => {
+    setSettingUp(id);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/settings/domains", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json() as { ok?: boolean; setup?: SetupResult };
+      if (data.setup?.ok) {
+        setMsg({ ok: true, text: "SSL setup completed successfully." });
+      } else {
+        setMsg({ ok: false, text: `Setup failed: ${data.setup?.error ?? "unknown error"}` });
+      }
+      load();
+    } catch {
+      setMsg({ ok: false, text: "Network error during setup" });
+    } finally {
+      setSettingUp(null);
     }
   };
 
@@ -70,7 +105,7 @@ export function DomainsSection() {
       <div>
         <h3 className="text-body font-semibold text-bot-text mb-1">Custom Domains</h3>
         <p className="text-caption text-bot-muted mb-4">
-          Manage the domains this bot is served from. SSL and nginx configuration is handled via the install script.
+          Add a domain to automatically configure nginx and SSL.
         </p>
 
         {loading ? (
@@ -84,7 +119,7 @@ export function DomainsSection() {
                 <tr>
                   <th className="text-left px-3 py-2 text-bot-muted font-medium">Hostname</th>
                   <th className="text-left px-3 py-2 text-bot-muted font-medium">SSL</th>
-                  <th className="text-left px-3 py-2 text-bot-muted font-medium">Verified</th>
+                  <th className="text-left px-3 py-2 text-bot-muted font-medium">Status</th>
                   <th className="px-3 py-2" />
                 </tr>
               </thead>
@@ -104,10 +139,24 @@ export function DomainsSection() {
                       }
                     </td>
                     <td className="px-3 py-2">
-                      {d.verified
-                        ? <CheckCircle2 className="w-4 h-4 text-bot-green" />
-                        : <span className="text-bot-muted">—</span>
-                      }
+                      {d.verified ? (
+                        <CheckCircle2 className="w-4 h-4 text-bot-green" />
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 text-bot-amber" />
+                          <button
+                            onClick={() => handleRetrySetup(d.id)}
+                            disabled={settingUp === d.id}
+                            className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-bot-accent/10 text-bot-accent hover:bg-bot-accent/20 disabled:opacity-50 transition-colors"
+                          >
+                            {settingUp === d.id ? (
+                              <><Loader2 className="w-3 h-3 animate-spin" /> Setting up…</>
+                            ) : (
+                              <><RefreshCw className="w-3 h-3" /> Setup SSL</>
+                            )}
+                          </button>
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-right">
                       <button
@@ -121,6 +170,12 @@ export function DomainsSection() {
                 ))}
               </tbody>
             </table>
+            {/* Show notes for failed domains */}
+            {domains.filter(d => !d.verified && d.notes).map(d => (
+              <div key={d.id + "-note"} className="px-3 py-2 text-[11px] text-bot-red bg-bot-surface border-t border-bot-border">
+                <span className="font-medium">{d.hostname}:</span> {d.notes}
+              </div>
+            ))}
           </div>
         )}
 
@@ -138,7 +193,11 @@ export function DomainsSection() {
             disabled={adding || !newHostname.trim()}
             className="flex items-center gap-1 px-3 py-1.5 rounded text-caption font-medium bg-bot-accent text-white hover:opacity-90 disabled:opacity-50"
           >
-            <Plus className="w-3.5 h-3.5" /> Add
+            {adding ? (
+              <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Setting up…</>
+            ) : (
+              <><Plus className="w-3.5 h-3.5" /> Add</>
+            )}
           </button>
         </div>
 

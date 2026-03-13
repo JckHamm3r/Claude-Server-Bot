@@ -638,9 +638,6 @@ validate_unattended() {
   [ -z "$CLI_MODE" ] && missing+=("--mode")
   [ -z "$CLI_BOT_NAME" ] && missing+=("--bot-name")
   [ -z "$CLI_EMAIL" ] && missing+=("--email")
-  if [ "$CLI_MODE" = "vps" ] && [ -z "$CLI_DOMAIN" ]; then
-    missing+=("--domain (required for VPS mode)")
-  fi
   if [ ${#missing[@]} -gt 0 ]; then
     error "Missing required fields for unattended mode:"
     for field in "${missing[@]}"; do
@@ -1002,7 +999,9 @@ step_account() {
 step_project() {
   step "[5/$TOTAL_STEPS] Where should ${BOT_NAME} work?"
   echo ""
-  echo -e "  ${DIM}This is the project directory Claude will have access to.${NC}"
+  echo -e "  Two directories are needed:"
+  echo -e "    ${BOLD}1.${NC} Project dir  — Your code/files that Claude will read and edit"
+  echo -e "    ${BOLD}2.${NC} Install dir  — Where the bot application itself gets installed"
 
   if [ "$PLATFORM" = "wsl" ]; then
     echo ""
@@ -1015,7 +1014,7 @@ step_project() {
   if [ -n "$CLI_PROJECT_ROOT" ]; then
     PROJECT_ROOT="$CLI_PROJECT_ROOT"
   else
-    if ! prompt_input "Project directory" "$default_project"; then
+    if ! prompt_input "Project directory (your code/files Claude will work on)" "$default_project"; then
       return
     fi
     PROJECT_ROOT="$REPLY"
@@ -1046,7 +1045,7 @@ step_project() {
   if [ -n "$CLI_INSTALL_DIR" ]; then
     INSTALL_DIR="$CLI_INSTALL_DIR"
   else
-    if ! prompt_input "Installation directory" "$default_install"; then
+    if ! prompt_input "Install directory (where the bot app is installed)" "$default_install"; then
       return
     fi
     INSTALL_DIR="$REPLY"
@@ -1112,18 +1111,20 @@ step_network() {
     DOMAIN="$CLI_DOMAIN"
   elif [ "$DEPLOY_MODE" = "vps" ]; then
     echo ""
-    while true; do
-      if ! prompt_input "Domain name (required for VPS)" ""; then
+    local has_domain_result
+    prompt_yn "Do you have a domain name? (can be configured later in Settings)" "n" && has_domain_result=0 || has_domain_result=$?
+    if [ "$has_domain_result" -eq 2 ]; then
+      return
+    elif [ "$has_domain_result" -eq 0 ]; then
+      if ! prompt_input "Domain" ""; then
         return
       fi
       DOMAIN="$REPLY"
-      if [ -n "$DOMAIN" ]; then break; fi
-      error "A domain name is required for VPS mode."
-    done
+    fi
   else
     echo ""
     local has_domain_result
-    prompt_yn "Do you have a domain name?" "n" && has_domain_result=0 || has_domain_result=$?
+    prompt_yn "Do you have a domain name? (can be configured later in Settings)" "n" && has_domain_result=0 || has_domain_result=$?
     if [ "$has_domain_result" -eq 2 ]; then
       return  # go back
     elif [ "$has_domain_result" -eq 0 ]; then
@@ -1277,7 +1278,7 @@ step_confirm() {
   echo -e "  ${BOLD}╠══════════════════════════════════════════════════════════════╣${NC}"
   printf "  ${BOLD}║${NC}  Bot Name:      ${GREEN}%-41s${NC}${BOLD}║${NC}\n" "$BOT_NAME"
   printf "  ${BOLD}║${NC}  Mode:          %-41s${BOLD}║${NC}\n" "$mode_display"
-  printf "  ${BOLD}║${NC}  Domain:        %-41s${BOLD}║${NC}\n" "${DOMAIN:-N/A}"
+  printf "  ${BOLD}║${NC}  Domain:        %-41s${BOLD}║${NC}\n" "${DOMAIN:-None (IP access)}"
   printf "  ${BOLD}║${NC}  HTTPS:         %-41s${BOLD}║${NC}\n" "$https_display"
   printf "  ${BOLD}║${NC}  Port:          %-41s${BOLD}║${NC}\n" "$PORT"
   printf "  ${BOLD}║${NC}  Admin Email:   %-41s${BOLD}║${NC}\n" "$ADMIN_EMAIL"
@@ -1287,6 +1288,10 @@ step_confirm() {
   printf "  ${BOLD}║${NC}  URL:           %-41s${BOLD}║${NC}\n" "$full_url"
   echo -e "  ${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
   echo ""
+
+  if [ -z "$DOMAIN" ]; then
+    hint "  No domain — access via IP address. Add a domain later in Settings."
+  fi
 
   if $DRY_RUN; then
     echo ""
@@ -1954,10 +1959,16 @@ setup_systemd() {
     sudo systemctl stop "${SERVICE_NAME}.service" 2>/dev/null || true
   fi
 
-  # Sudoers for service restart
+  # Sudoers for service restart and domain setup
   local sudoers_file="/etc/sudoers.d/claude-bot"
-  echo "$USER ALL=(ALL) NOPASSWD: /bin/systemctl restart ${SERVICE_NAME}.service" | sudo tee "$sudoers_file" > /dev/null
+  echo "$USER ALL=(ALL) NOPASSWD: /bin/systemctl restart ${SERVICE_NAME}.service, /usr/local/bin/setup-domain.sh" | sudo tee "$sudoers_file" > /dev/null
   sudo chmod 0440 "$sudoers_file"
+
+  # Install domain setup script for post-install domain configuration via Settings UI
+  if [ -f "$INSTALL_DIR/scripts/setup-domain.sh" ]; then
+    sudo cp "$INSTALL_DIR/scripts/setup-domain.sh" /usr/local/bin/setup-domain.sh
+    sudo chmod +x /usr/local/bin/setup-domain.sh
+  fi
 
   local pnpm_bin node_bin
   pnpm_bin=$(command -v pnpm)

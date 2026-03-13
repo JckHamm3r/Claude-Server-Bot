@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import db from "@/lib/db";
+import { execFile } from "child_process";
+import { promisify } from "util";
+
+const execFileAsync = promisify(execFile);
 
 interface DomainRow {
   id: string;
@@ -18,6 +22,13 @@ function requireAdmin(email: string): boolean {
     .prepare("SELECT is_admin FROM users WHERE email = ?")
     .get(email) as { is_admin: number } | undefined;
   return Boolean(user?.is_admin);
+}
+
+function getAdminEmail(): string {
+  const row = db
+    .prepare("SELECT email FROM users WHERE is_admin = 1 LIMIT 1")
+    .get() as { email: string } | undefined;
+  return row?.email ?? "";
 }
 
 export async function GET() {
@@ -87,7 +98,101 @@ export async function POST(request: NextRequest) {
     "INSERT INTO domains (hostname, notes) VALUES (?, ?)"
   ).run(hostname, body.notes ?? null);
 
-  return NextResponse.json({ ok: true });
+  // Attempt to auto-configure nginx + SSL via setup-domain.sh
+  let setupResult: { ok: boolean; error?: string } = { ok: false, error: "Setup script not available" };
+  try {
+    const { stdout } = await execFileAsync("sudo", [
+      "/usr/local/bin/setup-domain.sh",
+      hostname,
+      process.env.PORT || "3000",
+      process.env.CLAUDE_BOT_PATH_PREFIX || "",
+      process.env.CLAUDE_BOT_SLUG || "",
+      process.cwd(),
+      getAdminEmail(),
+    ], { timeout: 120000 });
+
+    setupResult = JSON.parse(stdout.trim());
+    if (setupResult.ok) {
+      db.prepare("UPDATE domains SET ssl_enabled = 1, verified = 1 WHERE hostname = ?").run(hostname);
+    } else {
+      db.prepare("UPDATE domains SET notes = ? WHERE hostname = ?").run(
+        `Setup failed: ${setupResult.error ?? "unknown error"}`,
+        hostname
+      );
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    setupResult = { ok: false, error: message };
+    db.prepare("UPDATE domains SET notes = ? WHERE hostname = ?").run(
+      `Setup failed: ${message}`,
+      hostname
+    );
+  }
+
+  return NextResponse.json({
+    ok: true,
+    setup: setupResult,
+  });
+}
+
+// POST to retry setup for an existing domain
+export async function PUT(request: NextRequest) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (!requireAdmin(session.user.email)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  let body: { id?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const id = body.id;
+  if (!id) {
+    return NextResponse.json({ error: "Missing id" }, { status: 400 });
+  }
+
+  const domain = db.prepare("SELECT hostname FROM domains WHERE id = ?").get(id) as { hostname: string } | undefined;
+  if (!domain) {
+    return NextResponse.json({ error: "Domain not found" }, { status: 404 });
+  }
+
+  let setupResult: { ok: boolean; error?: string } = { ok: false, error: "Setup script not available" };
+  try {
+    const { stdout } = await execFileAsync("sudo", [
+      "/usr/local/bin/setup-domain.sh",
+      domain.hostname,
+      process.env.PORT || "3000",
+      process.env.CLAUDE_BOT_PATH_PREFIX || "",
+      process.env.CLAUDE_BOT_SLUG || "",
+      process.cwd(),
+      getAdminEmail(),
+    ], { timeout: 120000 });
+
+    setupResult = JSON.parse(stdout.trim());
+    if (setupResult.ok) {
+      db.prepare("UPDATE domains SET ssl_enabled = 1, verified = 1, notes = NULL WHERE hostname = ?").run(domain.hostname);
+    } else {
+      db.prepare("UPDATE domains SET notes = ? WHERE hostname = ?").run(
+        `Setup failed: ${setupResult.error ?? "unknown error"}`,
+        domain.hostname
+      );
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    setupResult = { ok: false, error: message };
+    db.prepare("UPDATE domains SET notes = ? WHERE hostname = ?").run(
+      `Setup failed: ${message}`,
+      domain.hostname
+    );
+  }
+
+  return NextResponse.json({ ok: true, setup: setupResult });
 }
 
 export async function DELETE(request: NextRequest) {
