@@ -241,7 +241,7 @@ start_spinner() {
     while true; do
       local char="${chars:$((i % ${#chars})):1}"
       local msg="${all_messages[$((msg_i % ${#all_messages[@]}))]}"
-      printf "\r  ${CYAN}%s${NC} ${DIM}%s${NC}   " "$char" "$msg"
+      printf "\r  ${CYAN}%s${NC} ${DIM}%s${NC}   \033[K" "$char" "$msg"
       i=$((i + 1))
       if (( i % 8 == 0 )); then
         msg_i=$((msg_i + 1))
@@ -1854,7 +1854,7 @@ const env = [
   'NEXT_PUBLIC_CLAUDE_BOT_SLUG=' + slug,
   'CLAUDE_BOT_NAME=' + botName,
   'CLAUDE_BOT_ADMIN_EMAIL=' + email,
-  "CLAUDE_BOT_ADMIN_HASH='" + hash + "'",
+  'CLAUDE_BOT_ADMIN_HASH=' + hash,
   'CLAUDE_CLI_PATH=' + cliBin,
   'CLAUDE_PROJECT_ROOT=' + projectRoot,
   'DATA_DIR=' + path.join(installDir, 'data'),
