@@ -13,7 +13,7 @@ set -euo pipefail
 #  Do NOT pipe directly to bash (curl | bash) — interactive prompts need stdin.
 # ─────────────────────────────────────────────────────────────────────────────
 
-REPO_URL="https://github.com/e-space-main/claude-server-bot.git"
+REPO_URL="https://github.com/JckHamm3r/Claude-Server-Bot.git"
 REPO_BRANCH="main"
 SERVICE_NAME="claude-bot"
 DEFAULT_PORT=3000
