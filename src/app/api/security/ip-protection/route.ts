@@ -33,12 +33,21 @@ export async function POST(request: Request) {
     setAppSetting("ip_protection_enabled", body.ip_protection_enabled ? "true" : "false");
   }
   if (typeof body.ip_max_attempts === "number") {
+    if (body.ip_max_attempts < 1 || body.ip_max_attempts > 100) {
+      return NextResponse.json({ error: "ip_max_attempts must be between 1 and 100" }, { status: 400 });
+    }
     setAppSetting("ip_max_attempts", String(body.ip_max_attempts));
   }
   if (typeof body.ip_window_minutes === "number") {
+    if (body.ip_window_minutes < 1 || body.ip_window_minutes > 1440) {
+      return NextResponse.json({ error: "ip_window_minutes must be between 1 and 1440" }, { status: 400 });
+    }
     setAppSetting("ip_window_minutes", String(body.ip_window_minutes));
   }
   if (typeof body.ip_block_duration_minutes === "number") {
+    if (body.ip_block_duration_minutes < 1 || body.ip_block_duration_minutes > 10080) {
+      return NextResponse.json({ error: "ip_block_duration_minutes must be between 1 and 10080" }, { status: 400 });
+    }
     setAppSetting("ip_block_duration_minutes", String(body.ip_block_duration_minutes));
   }
 

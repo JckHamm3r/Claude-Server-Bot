@@ -31,6 +31,8 @@ cleanup() {
   if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR" ]; then
     rm -rf "$BACKUP_DIR"
   fi
+  # Release update lock
+  rmdir "${UPDATE_LOCKDIR:-/tmp/claude-bot-update.lock}" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -49,6 +51,11 @@ rollback() {
   if [ -f "$BACKUP_DIR/pnpm-lock.yaml" ]; then
     cp "$BACKUP_DIR/pnpm-lock.yaml" pnpm-lock.yaml
     pnpm install --reporter=silent 2>/dev/null || true
+  fi
+
+  # Preserve any uncommitted changes before resetting
+  if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+    git stash 2>/dev/null && warn "Uncommitted changes have been stashed (recover with: git stash pop)"
   fi
 
   # Reset git to old commit
@@ -145,6 +152,15 @@ migrate_env() {
 # ═══════════════════════════════════════════════════════════════════════════════
 #  MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
+# Acquire update lock (atomic via mkdir)
+UPDATE_LOCKDIR="/tmp/claude-bot-update.lock"
+if ! mkdir "$UPDATE_LOCKDIR" 2>/dev/null; then
+  echo ""
+  error "Another update is in progress (lock: $UPDATE_LOCKDIR)"
+  echo "  If no update is running, remove the lock: rmdir $UPDATE_LOCKDIR"
+  exit 1
+fi
+
 echo ""
 echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
 echo -e "${BOLD}       Claude Server Bot — Updater${NC}"

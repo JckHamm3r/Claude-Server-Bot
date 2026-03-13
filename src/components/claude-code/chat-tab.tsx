@@ -8,7 +8,7 @@ import { DEFAULT_MODEL } from "@/lib/models";
 import type { AvatarState } from "@/lib/avatar-state";
 import { SessionSidebar } from "./session-sidebar";
 import { MessageList, type ChatMessage, type ActivityState } from "./message-list";
-import { ChatInput } from "./chat-input";
+import { ChatInput, type ChatInputHandle } from "./chat-input";
 import { ChatToolbar } from "./chat-toolbar";
 import { NewSessionDialog } from "./new-session-dialog";
 import { SkipPermissionsBanner } from "./skip-permissions-banner";
@@ -44,6 +44,7 @@ export function ChatTab() {
   const [loadingSessions, setLoadingSessions] = useState(true);
 
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
+  const chatInputRef = useRef<ChatInputHandle>(null);
   const lastUserMsgRef = useRef<string>("");
   const activeSessionRef = useRef<ClaudeSession | null>(null);
   const initializedSessionsRef = useRef<Set<string>>(new Set());
@@ -122,20 +123,43 @@ export function ChatTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRunning]);
 
-  // Keyboard shortcuts for search
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "f") {
+      const mod = e.metaKey || e.ctrlKey;
+
+      if (mod && e.shiftKey && e.key === "f") {
         e.preventDefault();
         setShowGlobalSearch(true);
-      } else if ((e.metaKey || e.ctrlKey) && e.key === "f" && activeSession) {
+        return;
+      }
+      if (mod && e.key === "f" && activeSession) {
         e.preventDefault();
         setShowSessionSearch(true);
+        return;
+      }
+      // Ctrl+/ or Cmd+/ — focus chat input
+      if (mod && e.key === "/") {
+        e.preventDefault();
+        chatInputRef.current?.focus();
+        return;
+      }
+      // Ctrl+Shift+C — copy last Claude message
+      if (mod && e.shiftKey && e.key === "C") {
+        e.preventDefault();
+        const lastClaude = [...messages].reverse().find(
+          (m) => m.sender_type === "claude" && (m.content || m.parsed?.content),
+        );
+        if (lastClaude) {
+          const text = lastClaude.content ?? lastClaude.parsed?.content ?? "";
+          navigator.clipboard.writeText(text);
+        }
+        return;
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeSession]);
+  }, [activeSession, messages]);
 
   const emit = useCallback((event: string, data?: unknown) => {
     socketRef.current?.emit(event, data);
@@ -937,6 +961,7 @@ export function ChatTab() {
           onSearch={activeSession ? () => setShowSessionSearch(true) : undefined}
           onGlobalSearch={() => setShowGlobalSearch(true)}
           sessionId={activeSession?.id}
+          messages={messages}
         />
 
         {showSessionSearch && activeSession && (
@@ -988,6 +1013,7 @@ export function ChatTab() {
             pendingInteraction={pendingInteraction}
             loadingMessages={loadingMessages}
             avatarState={avatarState}
+            onSendStarter={(msg) => handleSend(msg)}
           />
         )}
 
@@ -999,6 +1025,7 @@ export function ChatTab() {
         )}
 
         <ChatInput
+          ref={chatInputRef}
           onSend={handleSend}
           disabled={!connected || !activeSession}
           isRunning={isRunning}

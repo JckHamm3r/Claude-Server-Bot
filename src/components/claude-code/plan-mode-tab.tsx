@@ -2,7 +2,15 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { getSocket } from "@/lib/socket";
-import { Loader2, Plus, ClipboardList } from "lucide-react";
+import {
+  Loader2,
+  Plus,
+  ClipboardList,
+  AlertCircle,
+  X,
+  Send,
+  ChevronDown,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ClaudePlan } from "@/lib/claude-db";
 import { PlanStepList } from "./plan-step-list";
@@ -20,7 +28,16 @@ export function PlanModeTab() {
   const [goal, setGoal] = useState("");
   const [sessionId] = useState(() => `plan-session-${crypto.randomUUID()}`);
 
+  const [planError, setPlanError] = useState<string | null>(null);
+  const [generatingProgress, setGeneratingProgress] = useState("");
+  const [stepProgress, setStepProgress] = useState<Map<string, string>>(
+    new Map(),
+  );
+  const [refineInput, setRefineInput] = useState("");
+  const [showThinking, setShowThinking] = useState(false);
+
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
+  const progressRef = useRef<HTMLPreElement>(null);
 
   const activePlan = activePlanId ? plans.get(activePlanId) ?? null : null;
 
@@ -62,15 +79,13 @@ export function PlanModeTab() {
 
     socket.on("claude:plan_generated", ({ plan }: { plan: ClaudePlan }) => {
       setGenerating(false);
+      setGeneratingProgress("");
       upsertPlan(plan);
       setActivePlanId(plan.id);
     });
 
     socket.on("claude:plan_updated", ({ plan }: { plan: ClaudePlan }) => {
       upsertPlan(plan);
-      if (plan.id === activePlanId) {
-        // keep active
-      }
     });
 
     socket.on("claude:plan_executing", ({ planId }: { planId: string }) => {
@@ -92,7 +107,15 @@ export function PlanModeTab() {
 
     socket.on(
       "claude:plan_paused",
-      ({ stepId, canRollback }: { planId: string; stepId: string; error: string; canRollback?: boolean }) => {
+      ({
+        stepId,
+        canRollback,
+      }: {
+        planId: string;
+        stepId: string;
+        error: string;
+        canRollback?: boolean;
+      }) => {
         setExecuting(false);
         setPausedStepId(stepId);
         setPausedCanRollback(canRollback ?? false);
@@ -119,7 +142,15 @@ export function PlanModeTab() {
 
     socket.on(
       "claude:step_completed",
-      ({ planId, stepId, result }: { planId: string; stepId: string; result: string }) => {
+      ({
+        planId,
+        stepId,
+        result,
+      }: {
+        planId: string;
+        stepId: string;
+        result: string;
+      }) => {
         setPlans((prev) => {
           const p = prev.get(planId);
           if (!p || !p.steps) return prev;
@@ -127,9 +158,17 @@ export function PlanModeTab() {
           next.set(planId, {
             ...p,
             steps: p.steps.map((s) =>
-              s.id === stepId ? { ...s, status: "completed" as const, result } : s,
+              s.id === stepId
+                ? { ...s, status: "completed" as const, result }
+                : s,
             ),
           });
+          return next;
+        });
+        setStepProgress((prev) => {
+          if (!prev.has(stepId)) return prev;
+          const next = new Map(prev);
+          next.delete(stepId);
           return next;
         });
       },
@@ -137,7 +176,15 @@ export function PlanModeTab() {
 
     socket.on(
       "claude:step_failed",
-      ({ planId, stepId, error }: { planId: string; stepId: string; error: string }) => {
+      ({
+        planId,
+        stepId,
+        error,
+      }: {
+        planId: string;
+        stepId: string;
+        error: string;
+      }) => {
         setPlans((prev) => {
           const p = prev.get(planId);
           if (!p || !p.steps) return prev;
@@ -145,17 +192,61 @@ export function PlanModeTab() {
           next.set(planId, {
             ...p,
             steps: p.steps.map((s) =>
-              s.id === stepId ? { ...s, status: "failed" as const, error } : s,
+              s.id === stepId
+                ? { ...s, status: "failed" as const, error }
+                : s,
             ),
           });
+          return next;
+        });
+        setStepProgress((prev) => {
+          if (!prev.has(stepId)) return prev;
+          const next = new Map(prev);
+          next.delete(stepId);
           return next;
         });
       },
     );
 
+    socket.on(
+      "claude:plan_progress",
+      ({ content }: { planId: string; content: string }) => {
+        setGeneratingProgress(content);
+      },
+    );
+
+    socket.on(
+      "claude:step_progress",
+      ({
+        stepId,
+        content,
+      }: {
+        planId: string;
+        stepId: string;
+        content: string;
+      }) => {
+        setStepProgress((prev) => {
+          const next = new Map(prev);
+          next.set(stepId, content);
+          return next;
+        });
+      },
+    );
+
+    socket.on("claude:plan_deleted", ({ planId }: { planId: string }) => {
+      setPlans((prev) => {
+        const next = new Map(prev);
+        next.delete(planId);
+        return next;
+      });
+      setActivePlanId((prev) => (prev === planId ? null : prev));
+    });
+
     socket.on("claude:error", ({ message }: { message: string }) => {
       setGenerating(false);
       setExecuting(false);
+      setGeneratingProgress("");
+      setPlanError(message);
       console.error("[plan-mode] socket error:", message);
     });
 
@@ -176,12 +267,14 @@ export function PlanModeTab() {
       socket.off("claude:step_executing");
       socket.off("claude:step_completed");
       socket.off("claude:step_failed");
+      socket.off("claude:plan_progress");
+      socket.off("claude:step_progress");
+      socket.off("claude:plan_deleted");
       socket.off("claude:error");
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Keep plan_updated handler's activePlanId reference current
   useEffect(() => {
     const socket = socketRef.current;
     if (!socket) return;
@@ -195,22 +288,37 @@ export function PlanModeTab() {
     };
   }, [activePlanId, upsertPlan]);
 
+  useEffect(() => {
+    if (progressRef.current) {
+      progressRef.current.scrollTop = progressRef.current.scrollHeight;
+    }
+  }, [generatingProgress]);
+
   const handleGeneratePlan = useCallback(() => {
     if (!goal.trim() || generating) return;
     setGenerating(true);
+    setGeneratingProgress("");
+    setPlanError(null);
+    setShowThinking(false);
     emit("claude:generate_plan", { sessionId, goal: goal.trim() });
     setGoal("");
   }, [goal, generating, emit, sessionId]);
 
-  const handleApprove = useCallback((stepId: string) => {
-    if (!activePlanId) return;
-    emit("claude:approve_step", { stepId, planId: activePlanId });
-  }, [activePlanId, emit]);
+  const handleApprove = useCallback(
+    (stepId: string) => {
+      if (!activePlanId) return;
+      emit("claude:approve_step", { stepId, planId: activePlanId });
+    },
+    [activePlanId, emit],
+  );
 
-  const handleReject = useCallback((stepId: string) => {
-    if (!activePlanId) return;
-    emit("claude:reject_step", { stepId, planId: activePlanId });
-  }, [activePlanId, emit]);
+  const handleReject = useCallback(
+    (stepId: string) => {
+      if (!activePlanId) return;
+      emit("claude:reject_step", { stepId, planId: activePlanId });
+    },
+    [activePlanId, emit],
+  );
 
   const handleApproveAll = useCallback(() => {
     if (!activePlanId) return;
@@ -222,15 +330,30 @@ export function PlanModeTab() {
     emit("claude:reject_all_steps", { planId: activePlanId });
   }, [activePlanId, emit]);
 
-  const handleReorder = useCallback((stepId: string, newOrder: number) => {
-    if (!activePlanId) return;
-    emit("claude:reorder_step", { stepId, planId: activePlanId, newOrder });
-  }, [activePlanId, emit]);
+  const handleReorder = useCallback(
+    (stepId: string, newOrder: number) => {
+      if (!activePlanId) return;
+      emit("claude:reorder_step", {
+        stepId,
+        planId: activePlanId,
+        newOrder,
+      });
+    },
+    [activePlanId, emit],
+  );
 
-  const handleEdit = useCallback((stepId: string, summary: string, details: string) => {
-    if (!activePlanId) return;
-    emit("claude:edit_step", { stepId, planId: activePlanId, summary, details });
-  }, [activePlanId, emit]);
+  const handleEdit = useCallback(
+    (stepId: string, summary: string, details: string) => {
+      if (!activePlanId) return;
+      emit("claude:edit_step", {
+        stepId,
+        planId: activePlanId,
+        summary,
+        details,
+      });
+    },
+    [activePlanId, emit],
+  );
 
   const handleExecute = useCallback(() => {
     if (!activePlanId) return;
@@ -278,8 +401,31 @@ export function PlanModeTab() {
     emit("claude:rollback_continue", { planId: activePlanId });
   }, [activePlanId, emit]);
 
+  const handleRefinePlan = useCallback(() => {
+    if (!activePlanId || !refineInput.trim() || generating) return;
+    setGenerating(true);
+    setGeneratingProgress("");
+    setPlanError(null);
+    setShowThinking(false);
+    emit("claude:refine_plan", {
+      planId: activePlanId,
+      instruction: refineInput.trim(),
+    });
+    setRefineInput("");
+  }, [activePlanId, refineInput, generating, emit]);
+
+  const handleDeletePlan = useCallback(() => {
+    if (!activePlanId) return;
+    emit("claude:delete_plan", { planId: activePlanId });
+  }, [activePlanId, emit]);
+
+  const handleDismissError = useCallback(() => {
+    setPlanError(null);
+  }, []);
+
   const planList = Array.from(plans.values()).sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    (a, b) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   );
 
   return (
@@ -334,16 +480,31 @@ export function PlanModeTab() {
           </div>
         )}
 
+        {planError && (
+          <div className="flex items-start gap-2 px-4 py-2.5 border-b border-bot-red/20 bg-bot-red/10">
+            <AlertCircle className="h-4 w-4 text-bot-red shrink-0 mt-0.5" />
+            <p className="flex-1 text-caption text-bot-red">{planError}</p>
+            <button
+              onClick={handleDismissError}
+              className="rounded p-0.5 text-bot-red hover:text-bot-red/70 transition-colors"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto p-4">
           {!activePlan ? (
-            /* Goal input area */
             <div className="flex flex-col items-center justify-center min-h-full gap-6 py-12">
               <div className="flex flex-col items-center gap-2 text-bot-muted">
                 <ClipboardList className="h-10 w-10 opacity-40" />
-                <p className="text-subtitle font-medium text-bot-text">Plan Mode</p>
+                <p className="text-subtitle font-medium text-bot-text">
+                  Plan Mode
+                </p>
                 <p className="text-body text-bot-muted text-center max-w-sm">
-                  Describe a development goal and Claude will generate a step-by-step plan for
-                  you to review and approve before execution.
+                  Describe a development goal and Claude will generate a
+                  step-by-step plan for you to review and approve before
+                  execution.
                 </p>
               </div>
 
@@ -379,32 +540,121 @@ export function PlanModeTab() {
                 </button>
 
                 {generating && (
-                  <p className="text-center text-caption text-bot-muted">
-                    Claude is drafting your plan…
-                  </p>
+                  <div className="flex flex-col gap-2">
+                    <p className="text-center text-caption text-bot-muted">
+                      Claude is drafting your plan…
+                    </p>
+
+                    {generatingProgress && (
+                      <div className="rounded-lg border border-bot-border bg-bot-surface overflow-hidden">
+                        <button
+                          onClick={() => setShowThinking((v) => !v)}
+                          className="flex w-full items-center gap-2 px-3 py-2 text-caption text-bot-muted hover:text-bot-text transition-colors"
+                        >
+                          <ChevronDown
+                            className={cn(
+                              "h-3.5 w-3.5 transition-transform",
+                              !showThinking && "-rotate-90",
+                            )}
+                          />
+                          Claude is thinking…
+                        </button>
+                        {showThinking && (
+                          <pre
+                            ref={progressRef}
+                            className="max-h-48 overflow-auto border-t border-bot-border px-3 py-2 font-mono text-caption text-bot-muted whitespace-pre-wrap break-words"
+                          >
+                            {generatingProgress}
+                          </pre>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
           ) : (
-            /* Plan display */
-            <PlanStepList
-              plan={activePlan}
-              onApprove={handleApprove}
-              onReject={handleReject}
-              onApproveAll={handleApproveAll}
-              onRejectAll={handleRejectAll}
-              onReorder={handleReorder}
-              onEdit={handleEdit}
-              onExecute={handleExecute}
-              onCancel={handleCancel}
-              onRetry={handleRetry}
-              onSkip={handleSkip}
-              onRollbackStop={handleRollbackStop}
-              onRollbackContinue={handleRollbackContinue}
-              executing={executing}
-              pausedStepId={pausedStepId}
-              pausedCanRollback={pausedCanRollback}
-            />
+            <div className="flex flex-col gap-4">
+              <PlanStepList
+                plan={activePlan}
+                onApprove={handleApprove}
+                onReject={handleReject}
+                onApproveAll={handleApproveAll}
+                onRejectAll={handleRejectAll}
+                onReorder={handleReorder}
+                onEdit={handleEdit}
+                onExecute={handleExecute}
+                onCancel={handleCancel}
+                onRetry={handleRetry}
+                onSkip={handleSkip}
+                onRollbackStop={handleRollbackStop}
+                onRollbackContinue={handleRollbackContinue}
+                executing={executing}
+                pausedStepId={pausedStepId}
+                pausedCanRollback={pausedCanRollback}
+                stepProgress={stepProgress}
+                onDelete={handleDeletePlan}
+              />
+
+              {generating && generatingProgress && (
+                <div className="rounded-lg border border-bot-border bg-bot-surface overflow-hidden">
+                  <button
+                    onClick={() => setShowThinking((v) => !v)}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-caption text-bot-muted hover:text-bot-text transition-colors"
+                  >
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <span className="flex-1 text-left">
+                      Claude is thinking…
+                    </span>
+                    <ChevronDown
+                      className={cn(
+                        "h-3.5 w-3.5 transition-transform",
+                        !showThinking && "-rotate-90",
+                      )}
+                    />
+                  </button>
+                  {showThinking && (
+                    <pre
+                      ref={progressRef}
+                      className="max-h-48 overflow-auto border-t border-bot-border px-3 py-2 font-mono text-caption text-bot-muted whitespace-pre-wrap break-words"
+                    >
+                      {generatingProgress}
+                    </pre>
+                  )}
+                </div>
+              )}
+
+              {activePlan.status === "reviewing" && !executing && (
+                <div className="flex items-center gap-2 rounded-lg border border-bot-border bg-bot-surface px-3 py-2">
+                  <input
+                    type="text"
+                    value={refineInput}
+                    onChange={(e) => setRefineInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        handleRefinePlan();
+                      }
+                    }}
+                    disabled={generating}
+                    placeholder="Refine this plan… e.g. 'Add a testing step' or 'Combine steps 2 and 3'"
+                    className="flex-1 bg-transparent text-body text-bot-text placeholder:text-bot-muted focus:outline-none disabled:opacity-60"
+                  />
+                  <button
+                    onClick={handleRefinePlan}
+                    disabled={!refineInput.trim() || generating}
+                    className="rounded-md p-1.5 text-bot-muted hover:text-bot-accent disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    title="Refine plan"
+                  >
+                    {generating ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Send className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>

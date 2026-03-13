@@ -31,11 +31,22 @@ function makeMockReq(socket: Socket) {
     headers: { cookie: cookieHeader },
     cookies: Object.fromEntries(
       cookieHeader.split(";").map((c) => {
-        const [k, ...v] = c.trim().split("=");
-        return [k, v.join("=")];
+        const [k, ...rest] = c.trim().split("=");
+        let value = rest.join("=");
+        try {
+          value = decodeURIComponent(value);
+        } catch {
+          /* leave raw on malformed values */
+        }
+        return [k, value];
       }),
     ),
   } as Parameters<typeof getToken>[0]["req"];
+}
+
+const NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET || "";
+if (!NEXTAUTH_SECRET) {
+  console.warn("WARNING: NEXTAUTH_SECRET is not set — socket authentication will fail");
 }
 
 const NEXTAUTH_COOKIE =
@@ -48,7 +59,7 @@ async function getTokenFromSocket(socket: Socket) {
   try {
     const token = await getToken({
       req,
-      secret: process.env.NEXTAUTH_SECRET ?? "",
+      secret: NEXTAUTH_SECRET,
       cookieName: NEXTAUTH_COOKIE,
       secureCookie: NEXTAUTH_COOKIE.startsWith("__Secure-"),
     });
@@ -65,9 +76,7 @@ async function verifySocket(socket: Socket): Promise<boolean> {
     if (!token) return false;
     const email = (token.email as string) ?? "";
     if (!email) return false;
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const dbInstance = (require("../lib/db") as { default: import("better-sqlite3").Database }).default;
-    const user = dbInstance.prepare("SELECT email FROM users WHERE email = ?").get(email);
+    const user = db.prepare("SELECT email FROM users WHERE email = ?").get(email);
     return !!user;
   } catch {
     return false;
@@ -100,6 +109,9 @@ const sessionListeners = new Set<string>();
 const sessionCommandSubmitter = new Map<string, string>();
 const sessionStartTimes = new Map<string, number>();
 const userSessionCommands = new Map<string, Map<string, number>>();
+const sessionCmdStartTimes = new Map<string, number>();
+
+const MAX_LATENCIES = 10000;
 
 // In-memory metrics counter (flushed to DB every minute)
 let metricsBuffer = { session_count: 0, command_count: 0, agent_count: 0, latencies: [] as number[] };
@@ -133,7 +145,10 @@ function flushMetrics() {
   metricsBuffer = { session_count: 0, command_count: 0, agent_count: 0, latencies: [] };
 }
 
-setInterval(() => {
+let metricsInterval: NodeJS.Timeout | undefined;
+let cleanupInterval: NodeJS.Timeout | undefined;
+
+metricsInterval = setInterval(() => {
   if (Date.now() - lastMetricsFlush > 60_000) {
     flushMetrics();
     lastMetricsFlush = Date.now();
@@ -141,7 +156,7 @@ setInterval(() => {
 }, 60_000);
 
 // Periodic security cleanup: expire temporary IP blocks every 5 minutes
-setInterval(() => {
+cleanupInterval = setInterval(() => {
   cleanupExpiredBlocks();
 }, 5 * 60_000);
 
@@ -219,6 +234,19 @@ function incrementSessionCommands(email: string, sessionId: string) {
 // ── Main export ──────────────────────────────────────────────────────────────
 
 export function registerHandlers(io: Server) {
+  // Clear any existing intervals to prevent duplicates on re-register
+  if (metricsInterval) clearInterval(metricsInterval);
+  if (cleanupInterval) clearInterval(cleanupInterval);
+  metricsInterval = setInterval(() => {
+    if (Date.now() - lastMetricsFlush > 60_000) {
+      flushMetrics();
+      lastMetricsFlush = Date.now();
+    }
+  }, 60_000);
+  cleanupInterval = setInterval(() => {
+    cleanupExpiredBlocks();
+  }, 5 * 60_000);
+
   const provider = getClaudeProvider();
 
   // Wire notification emitter so dispatchNotification can push real-time events
@@ -272,7 +300,7 @@ export function registerHandlers(io: Server) {
     const sessionProvider = getSessionProvider(sessionId) ?? provider;
 
     let pendingContent = sessionStreamingContent.get(sessionId) ?? "";
-    const cmdStartTime = Date.now();
+    sessionCmdStartTimes.set(sessionId, Date.now());
     const toolCalls: { toolCallId: string; toolName: string; toolInput: unknown; status: string; result?: string; exitCode?: number }[] = [];
 
     sessionProvider.onOutput(sessionId, async (parsed) => {
@@ -384,6 +412,13 @@ export function registerHandlers(io: Server) {
         if (!sp?.isRunning(sessionId)) {
           setSessionStatus(sessionId, "idle");
         }
+
+        // S9-03 + S9-04: Clean up listener set and providers for ephemeral sessions
+        const ephemeralPrefixes = ["agent-gen-", "plan-gen-", "plan-step-", "plan-refine-"];
+        if (ephemeralPrefixes.some((p) => sessionId.startsWith(p))) {
+          sessionListeners.delete(sessionId);
+          sessionProviders.delete(sessionId);
+        }
       }
 
       if (parsed.type === "done" && pendingContent) {
@@ -391,9 +426,13 @@ export function registerHandlers(io: Server) {
         pendingContent = "";
         sessionStreamingContent.delete(sessionId);
 
-        // Record latency
-        const latency = Date.now() - cmdStartTime;
-        metricsBuffer.latencies.push(latency);
+        // Record latency using per-command start time
+        const cmdStart = sessionCmdStartTimes.get(sessionId) ?? Date.now();
+        const latency = Date.now() - cmdStart;
+        sessionCmdStartTimes.delete(sessionId);
+        if (metricsBuffer.latencies.length < MAX_LATENCIES) {
+          metricsBuffer.latencies.push(latency);
+        }
         metricsBuffer.command_count++;
 
         const submitterEmail = sessionCommandSubmitter.get(sessionId);

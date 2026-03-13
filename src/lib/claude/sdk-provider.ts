@@ -9,6 +9,7 @@ interface SDKSessionState {
   skipPermissions: boolean;
   messageHistory: { role: "user" | "assistant"; content: string }[];
   abortController?: AbortController;
+  lastActivity: number;
 }
 
 const sessions = new Map<string, SDKSessionState>();
@@ -20,10 +21,27 @@ function getOrCreate(sessionId: string): SDKSessionState {
       running: false,
       skipPermissions: false,
       messageHistory: [],
+      lastActivity: Date.now(),
     });
   }
-  return sessions.get(sessionId)!;
+  const state = sessions.get(sessionId)!;
+  state.lastActivity = Date.now();
+  return state;
 }
+
+// ── Session GC ───────────────────────────────────────────────────────────────
+const SDK_GC_INTERVAL = 5 * 60 * 1000;
+const SDK_IDLE_THRESHOLD = 30 * 60 * 1000;
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, state] of sessions) {
+    if (!state.running && (now - state.lastActivity) > SDK_IDLE_THRESHOLD) {
+      state.emitter.removeAllListeners();
+      if (state.abortController) state.abortController.abort();
+      sessions.delete(id);
+    }
+  }
+}, SDK_GC_INTERVAL).unref();
 
 function getApiKey(): string {
   // Try app_settings first, then env
@@ -36,9 +54,12 @@ function getApiKey(): string {
   return process.env.ANTHROPIC_API_KEY ?? "";
 }
 
+const MAX_HISTORY = 100;
+
 async function runSDK(state: SDKSessionState, message: string): Promise<void> {
   if (state.running) return;
   state.running = true;
+  state.lastActivity = Date.now();
 
   const apiKey = getApiKey();
   if (!apiKey) {
@@ -50,13 +71,14 @@ async function runSDK(state: SDKSessionState, message: string): Promise<void> {
     return;
   }
 
-  // Set API key in env for the SDK
-  process.env.ANTHROPIC_API_KEY = apiKey;
+  if (!process.env.ANTHROPIC_API_KEY) {
+    process.env.ANTHROPIC_API_KEY = apiKey;
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let query: (opts: any) => Promise<any>;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
     const sdk = require("@anthropic-ai/claude-code") as any;
     query = sdk.query;
   } catch {
@@ -78,6 +100,14 @@ async function runSDK(state: SDKSessionState, message: string): Promise<void> {
   }
 
   state.messageHistory.push({ role: "user", content: fullMessage });
+  if (state.messageHistory.length > MAX_HISTORY) {
+    state.messageHistory = state.messageHistory.slice(-MAX_HISTORY);
+  }
+
+  const timeoutMs = 300_000; // 5 minutes
+  const timeoutId = setTimeout(() => {
+    state.abortController?.abort();
+  }, timeoutMs);
 
   try {
     const result = await query({
@@ -115,6 +145,9 @@ async function runSDK(state: SDKSessionState, message: string): Promise<void> {
 
     if (responseText) {
       state.messageHistory.push({ role: "assistant", content: responseText });
+      if (state.messageHistory.length > MAX_HISTORY) {
+        state.messageHistory = state.messageHistory.slice(-MAX_HISTORY);
+      }
       state.emitter.emit("output", {
         type: "text",
         content: responseText,
@@ -130,8 +163,10 @@ async function runSDK(state: SDKSessionState, message: string): Promise<void> {
       } as ParsedOutput);
     }
   } finally {
+    clearTimeout(timeoutId);
     state.running = false;
     state.abortController = undefined;
+    state.lastActivity = Date.now();
     state.emitter.emit("output", { type: "done" } as ParsedOutput);
   }
 }
@@ -149,7 +184,10 @@ export const sdkProvider: ClaudeCodeProvider = {
     if (!state) return;
     if (opts?.model) state.model = opts.model;
     // TODO: inputFiles support for SDK (base64 encoding)
-    runSDK(state, message);
+    runSDK(state, message).catch(err => {
+      console.error("SDK error:", err);
+      state.emitter.emit("output", { type: "error", message: String(err) } as ParsedOutput);
+    });
   },
 
   interrupt(sessionId) {

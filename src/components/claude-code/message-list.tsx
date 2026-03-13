@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import Image from "next/image";
+import { Terminal, Code2, FileSearch, MessageSquare, Slash } from "lucide-react";
 import { MessageItem } from "./message-item";
 import type { ParsedOutput } from "@/lib/claude/provider";
 import { getAvatarPath, type AvatarState } from "@/lib/avatar-state";
@@ -38,7 +39,15 @@ interface MessageListProps {
   pendingInteraction?: { type: string; messageId: string } | null;
   loadingMessages?: boolean;
   avatarState?: AvatarState;
+  onSendStarter?: (message: string) => void;
 }
+
+const STARTER_PROMPTS = [
+  { icon: Terminal, label: "Run a command", prompt: "Run `git status` and summarize the current state of the repo" },
+  { icon: Code2, label: "Write code", prompt: "Help me write a function that " },
+  { icon: FileSearch, label: "Explore codebase", prompt: "Give me an overview of this project's architecture" },
+  { icon: MessageSquare, label: "Explain something", prompt: "Explain how " },
+];
 
 function ActivityStrip({ activity, isRunning }: { activity: ActivityState | null; isRunning: boolean }) {
   if (!isRunning) return null;
@@ -93,6 +102,7 @@ export function MessageList({
   pendingInteraction,
   loadingMessages,
   avatarState,
+  onSendStarter,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -108,21 +118,58 @@ export function MessageList({
             <span className="h-1.5 w-1.5 rounded-full bg-bot-muted animate-bounce [animation-delay:0ms]" />
             <span className="h-1.5 w-1.5 rounded-full bg-bot-muted animate-bounce [animation-delay:150ms]" />
             <span className="h-1.5 w-1.5 rounded-full bg-bot-muted animate-bounce [animation-delay:300ms]" />
-            <span className="ml-2">Loading messages…</span>
+            <span className="ml-2">Loading messages...</span>
           </span>
         </div>
       );
     }
     return (
-      <div className="flex flex-1 items-center justify-center text-body text-bot-muted">
-        Start a conversation with Claude Code.
+      <div className="flex flex-1 flex-col items-center justify-center px-4 py-8">
+        <div className="max-w-lg w-full space-y-6 text-center">
+          <div className="space-y-2">
+            <h2 className="text-subtitle font-semibold text-bot-text">Start a conversation</h2>
+            <p className="text-body text-bot-muted">
+              Ask Claude Code to write code, run commands, search your codebase, or explain concepts.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            {STARTER_PROMPTS.map((s) => (
+              <button
+                key={s.label}
+                onClick={() => onSendStarter?.(s.prompt)}
+                className="flex items-center gap-2.5 rounded-xl border border-bot-border/60 bg-bot-elevated/50 px-4 py-3 text-left text-caption text-bot-text hover:bg-bot-elevated hover:border-bot-border transition-colors group"
+              >
+                <s.icon className="h-4 w-4 text-bot-muted group-hover:text-bot-accent transition-colors shrink-0" />
+                <span>{s.label}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center justify-center gap-4 text-[11px] text-bot-muted">
+            <span className="flex items-center gap-1">
+              <Slash className="h-3 w-3" />
+              Type <kbd className="rounded bg-bot-elevated px-1 py-0.5 font-mono text-[10px]">/</kbd> for commands
+            </span>
+            <span className="opacity-30">|</span>
+            <span className="flex items-center gap-1">
+              Type <kbd className="rounded bg-bot-elevated px-1 py-0.5 font-mono text-[10px]">@</kbd> to reference files
+            </span>
+          </div>
+
+          <div className="text-[10px] text-bot-muted/50 space-x-3">
+            <span>Ctrl+/ focus input</span>
+            <span>Ctrl+F search</span>
+            <span>Ctrl+Shift+C copy last reply</span>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="flex-1 overflow-y-auto py-4">
+      <div className="flex-1 overflow-y-auto py-4 select-text">
         <div className="mx-auto max-w-3xl px-4 space-y-1">
           {messages.map((msg, i) => {
             const isHighlighted = searchHighlights?.has(msg.id);

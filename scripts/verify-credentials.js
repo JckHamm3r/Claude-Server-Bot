@@ -1,15 +1,20 @@
 #!/usr/bin/env node
 // verify-credentials.js — Verify that admin credentials in .env are valid
-// Usage: node scripts/verify-credentials.js <password> <env-file>
+// Usage: echo "<password>" | node scripts/verify-credentials.js <env-file>
 
 const bcrypt = require("bcryptjs");
 const fs = require("fs");
 
-const password = process.argv[2];
-const envFile = process.argv[3];
+const envFile = process.argv[2];
 
-if (!password || !envFile) {
-  console.error("Usage: node verify-credentials.js <password> <env-file>");
+if (!envFile) {
+  console.error("Usage: echo '<password>' | node verify-credentials.js <env-file>");
+  process.exit(1);
+}
+
+const password = fs.readFileSync("/dev/stdin", "utf8").trim();
+if (!password) {
+  console.error("No password provided on stdin");
   process.exit(1);
 }
 

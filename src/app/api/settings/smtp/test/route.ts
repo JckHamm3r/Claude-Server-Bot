@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
     );
     return NextResponse.json({ ok: true });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("[smtp/test] SMTP test failed:", err);
+    return NextResponse.json({ error: "SMTP connection test failed" }, { status: 500 });
   }
 }

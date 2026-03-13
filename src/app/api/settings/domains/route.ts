@@ -98,15 +98,29 @@ export async function POST(request: NextRequest) {
     "INSERT INTO domains (hostname, notes) VALUES (?, ?)"
   ).run(hostname, body.notes ?? null);
 
-  // Attempt to auto-configure nginx + SSL via setup-domain.sh
+  // Validate arguments before shell invocation
+  const port = process.env.PORT || "3000";
+  const pathPrefix = process.env.CLAUDE_BOT_PATH_PREFIX || "";
+  const slug = process.env.CLAUDE_BOT_SLUG || "";
+
+  if (!/^\d+$/.test(port)) {
+    return NextResponse.json({ error: "Invalid PORT configuration" }, { status: 500 });
+  }
+  if (pathPrefix && !/^[a-zA-Z0-9_-]*$/.test(pathPrefix)) {
+    return NextResponse.json({ error: "Invalid PATH_PREFIX configuration" }, { status: 500 });
+  }
+  if (slug && !/^[a-zA-Z0-9]+$/.test(slug)) {
+    return NextResponse.json({ error: "Invalid SLUG configuration" }, { status: 500 });
+  }
+
   let setupResult: { ok: boolean; error?: string } = { ok: false, error: "Setup script not available" };
   try {
     const { stdout } = await execFileAsync("sudo", [
       "/usr/local/bin/setup-domain.sh",
       hostname,
-      process.env.PORT || "3000",
-      process.env.CLAUDE_BOT_PATH_PREFIX || "",
-      process.env.CLAUDE_BOT_SLUG || "",
+      port,
+      pathPrefix,
+      slug,
       process.cwd(),
       getAdminEmail(),
     ], { timeout: 120000 });
@@ -162,14 +176,28 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "Domain not found" }, { status: 404 });
   }
 
+  const retryPort = process.env.PORT || "3000";
+  const retryPathPrefix = process.env.CLAUDE_BOT_PATH_PREFIX || "";
+  const retrySlug = process.env.CLAUDE_BOT_SLUG || "";
+
+  if (!/^\d+$/.test(retryPort)) {
+    return NextResponse.json({ error: "Invalid PORT configuration" }, { status: 500 });
+  }
+  if (retryPathPrefix && !/^[a-zA-Z0-9_-]*$/.test(retryPathPrefix)) {
+    return NextResponse.json({ error: "Invalid PATH_PREFIX configuration" }, { status: 500 });
+  }
+  if (retrySlug && !/^[a-zA-Z0-9]+$/.test(retrySlug)) {
+    return NextResponse.json({ error: "Invalid SLUG configuration" }, { status: 500 });
+  }
+
   let setupResult: { ok: boolean; error?: string } = { ok: false, error: "Setup script not available" };
   try {
     const { stdout } = await execFileAsync("sudo", [
       "/usr/local/bin/setup-domain.sh",
       domain.hostname,
-      process.env.PORT || "3000",
-      process.env.CLAUDE_BOT_PATH_PREFIX || "",
-      process.env.CLAUDE_BOT_SLUG || "",
+      retryPort,
+      retryPathPrefix,
+      retrySlug,
       process.cwd(),
       getAdminEmail(),
     ], { timeout: 120000 });

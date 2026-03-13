@@ -42,13 +42,20 @@ export async function POST(req: NextRequest) {
     }
 
     const id = crypto.randomUUID();
-    const ext = path.extname(file.name) || "";
+    const rawExt = path.extname(file.name) || "";
+    const ext = rawExt.replace(/[^a-zA-Z0-9.]/g, '');
     const storedName = `${id}${ext}`;
     const uploadDir = path.join(DATA_DIR, "uploads", sessionId);
     fs.mkdirSync(uploadDir, { recursive: true });
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const filePath = path.join(uploadDir, storedName);
+
+    const resolvedPath = path.resolve(filePath);
+    if (!resolvedPath.startsWith(path.resolve(uploadDir))) {
+      return NextResponse.json({ error: "Invalid file path" }, { status: 400 });
+    }
+
     fs.writeFileSync(filePath, buffer);
 
     const upload = createUpload({

@@ -33,10 +33,11 @@ export async function GET(
   }
 
   const buffer = fs.readFileSync(filePath);
+  const safeName = upload.original_name.replace(/[^\w.\-]/g, '_');
   return new NextResponse(buffer, {
     headers: {
       "Content-Type": upload.mime_type,
-      "Content-Disposition": `inline; filename="${upload.original_name}"`,
+      "Content-Disposition": `inline; filename="${safeName}"`,
       "Cache-Control": "private, max-age=3600",
     },
   });

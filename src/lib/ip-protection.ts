@@ -35,8 +35,9 @@ export function getFailedAttemptCount(ip: string, windowMinutes: number): number
         AND created_at > datetime('now', '-' || ? || ' minutes')
     `).get(ip, windowMinutes) as { count: number };
     return row.count;
-  } catch {
-    return 0;
+  } catch (err) {
+    console.error("[ip-protection] getFailedAttemptCount error:", err);
+    return 999;
   }
 }
 
@@ -54,8 +55,9 @@ export function isIPBlocked(ip: string): { blocked: boolean; reason?: string; un
       reason: row.block_reason,
       unblockAt: row.unblock_at ?? undefined,
     };
-  } catch {
-    return { blocked: false };
+  } catch (err) {
+    console.error("[ip-protection] isIPBlocked error:", err);
+    return { blocked: true, reason: "Database error — failing closed" };
   }
 }
 
@@ -132,17 +134,24 @@ export function cleanupExpiredBlocks(): void {
   }
 }
 
-export function extractIP(headers: Record<string, string | string[] | undefined>): string {
-  const realIp = headers["x-real-ip"];
-  if (realIp && typeof realIp === "string") return realIp.trim();
+export function extractIP(
+  headers: Record<string, string | string[] | undefined>,
+  remoteAddress?: string
+): string {
+  const trustedProxy = getAppSetting("trusted_proxy", "false") === "true";
 
-  const forwardedFor = headers["x-forwarded-for"];
-  if (forwardedFor) {
-    const first = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
-    return first.split(",")[0].trim();
+  if (trustedProxy) {
+    const realIp = headers["x-real-ip"];
+    if (realIp && typeof realIp === "string") return realIp.trim();
+
+    const forwardedFor = headers["x-forwarded-for"];
+    if (forwardedFor) {
+      const first = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
+      return first.split(",")[0].trim();
+    }
   }
 
-  return "unknown";
+  return remoteAddress ?? "127.0.0.1";
 }
 
 export function getIPProtectionSettings() {

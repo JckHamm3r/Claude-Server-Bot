@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import db from "@/lib/db";
 import fs from "fs";
 import path from "path";
 
@@ -16,7 +17,8 @@ function updateEnvFile(key: string, value: string): void {
 
   const lines = content.split("\n");
   const existingIdx = lines.findIndex((l) => l.startsWith(`${key}=`));
-  const newLine = `${key}=${value}`;
+  const sanitizedValue = value.replace(/[\r\n\x00-\x1F\x7F]/g, '');
+  const newLine = `${key}=${sanitizedValue}`;
 
   if (existingIdx >= 0) {
     lines[existingIdx] = newLine;
@@ -31,6 +33,11 @@ export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const requester = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(session.user.email) as { is_admin: number } | undefined;
+  if (!requester?.is_admin) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   let body: { projectRoot: string };

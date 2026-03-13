@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import os from "os";
 import db from "@/lib/db";
 
@@ -36,7 +36,7 @@ export async function GET() {
   let disk_used_gb = 0;
   let disk_total_gb = 0;
   try {
-    const dfOutput = execSync("df -k /").toString();
+    const dfOutput = execFileSync("df", ["-k", "/"], { encoding: "utf8" });
     const lines = dfOutput.trim().split("\n");
     // Second line has the data
     const parts = lines[1].trim().split(/\s+/);

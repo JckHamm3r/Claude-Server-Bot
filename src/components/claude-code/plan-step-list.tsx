@@ -1,6 +1,6 @@
 "use client";
 
-import { Play, X, CheckCheck, XCircle, Loader2 } from "lucide-react";
+import { Play, X, CheckCheck, XCircle, Loader2, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ClaudePlan, ClaudePlanStep } from "@/lib/claude-db";
 import { PlanStepCard } from "./plan-step-card";
@@ -19,9 +19,11 @@ interface PlanStepListProps {
   onSkip: () => void;
   onRollbackStop?: () => void;
   onRollbackContinue?: () => void;
+  onDelete?: () => void;
   executing: boolean;
   pausedStepId?: string | null;
   pausedCanRollback?: boolean;
+  stepProgress?: Map<string, string>;
 }
 
 const PLAN_STATUS_CONFIG: Record<
@@ -50,9 +52,11 @@ export function PlanStepList({
   onSkip,
   onRollbackStop,
   onRollbackContinue,
+  onDelete,
   executing,
   pausedStepId,
   pausedCanRollback,
+  stepProgress,
 }: PlanStepListProps) {
   const steps = (plan.steps ?? []).slice().sort((a, b) => a.step_order - b.step_order);
   const hasApproved = steps.some((s) => s.status === "approved");
@@ -125,6 +129,16 @@ export function PlanStepList({
               Cancel Plan
             </button>
           )}
+
+          {onDelete && !executing && (
+            <button
+              onClick={onDelete}
+              className="flex items-center gap-1.5 rounded border border-bot-border px-3 py-1.5 text-caption text-bot-muted hover:text-bot-red hover:border-bot-red/40 transition-colors ml-auto"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete
+            </button>
+          )}
         </div>
       </div>
 
@@ -133,37 +147,46 @@ export function PlanStepList({
         {steps.length === 0 ? (
           <p className="text-center text-body text-bot-muted py-8">No steps generated yet.</p>
         ) : (
-          steps.map((step: ClaudePlanStep, idx: number) => (
-            <PlanStepCard
-              key={step.id}
-              step={step}
-              stepNumber={idx + 1}
-              isFirst={idx === 0}
-              isLast={idx === steps.length - 1}
-              totalSteps={steps.length}
-              onApprove={() => onApprove(step.id)}
-              onReject={() => onReject(step.id)}
-              onMoveUp={() => {
-                if (idx === 0) return;
-                const prev = steps[idx - 1];
-                onReorder(step.id, prev.step_order);
-                onReorder(prev.id, step.step_order);
-              }}
-              onMoveDown={() => {
-                if (idx === steps.length - 1) return;
-                const next = steps[idx + 1];
-                onReorder(step.id, next.step_order);
-                onReorder(next.id, step.step_order);
-              }}
-              onEdit={(summary, details) => onEdit(step.id, summary, details)}
-              onRetry={pausedStepId === step.id ? onRetry : undefined}
-              onSkip={pausedStepId === step.id ? onSkip : undefined}
-              onRollbackStop={pausedStepId === step.id ? onRollbackStop : undefined}
-              onRollbackContinue={pausedStepId === step.id ? onRollbackContinue : undefined}
-              paused={pausedStepId === step.id}
-              canRollback={pausedStepId === step.id ? pausedCanRollback : false}
-            />
-          ))
+          steps.map((step: ClaudePlanStep, idx: number) => {
+            const progress = stepProgress?.get(step.id);
+            return (
+              <div key={step.id} className="flex flex-col gap-1">
+                <PlanStepCard
+                  step={step}
+                  stepNumber={idx + 1}
+                  isFirst={idx === 0}
+                  isLast={idx === steps.length - 1}
+                  totalSteps={steps.length}
+                  onApprove={() => onApprove(step.id)}
+                  onReject={() => onReject(step.id)}
+                  onMoveUp={() => {
+                    if (idx === 0) return;
+                    const prev = steps[idx - 1];
+                    onReorder(step.id, prev.step_order);
+                    onReorder(prev.id, step.step_order);
+                  }}
+                  onMoveDown={() => {
+                    if (idx === steps.length - 1) return;
+                    const next = steps[idx + 1];
+                    onReorder(step.id, next.step_order);
+                    onReorder(next.id, step.step_order);
+                  }}
+                  onEdit={(summary, details) => onEdit(step.id, summary, details)}
+                  onRetry={pausedStepId === step.id ? onRetry : undefined}
+                  onSkip={pausedStepId === step.id ? onSkip : undefined}
+                  onRollbackStop={pausedStepId === step.id ? onRollbackStop : undefined}
+                  onRollbackContinue={pausedStepId === step.id ? onRollbackContinue : undefined}
+                  paused={pausedStepId === step.id}
+                  canRollback={pausedStepId === step.id ? pausedCanRollback : false}
+                />
+                {progress && (
+                  <pre className="ml-8 max-h-32 overflow-auto rounded border border-bot-border bg-bot-elevated px-3 py-2 font-mono text-caption text-bot-muted whitespace-pre-wrap break-words">
+                    {progress}
+                  </pre>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
     </div>

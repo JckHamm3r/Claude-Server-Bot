@@ -72,7 +72,7 @@ const env = [
 ].join("\n") + "\n";
 
 const envPath = path.join(config.installDir, ".env");
-fs.writeFileSync(envPath, env);
+fs.writeFileSync(envPath, env, { mode: 0o600 });
 
 // Output verification info to stdout (consumed by install.sh)
 console.log(JSON.stringify({ ok: true, hash: hash, envPath: envPath }));

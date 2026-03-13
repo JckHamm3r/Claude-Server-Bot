@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, KeyboardEvent, useState, useEffect, useCallback } from "react";
+import { useRef, useImperativeHandle, forwardRef, KeyboardEvent, useState, useEffect, useCallback } from "react";
 import { Send, Clock, Paperclip } from "lucide-react";
 import { AttachmentPreview, type PendingAttachment } from "./attachment-preview";
 import { apiUrl } from "@/lib/utils";
@@ -29,9 +29,13 @@ const SLASH_COMMANDS = [
   { cmd: "/bug",     args: "",        desc: "Report a Claude Code bug" },
 ];
 
+export interface ChatInputHandle {
+  focus: () => void;
+}
+
 // ── Main component ───────────────────────────────────────────────────────────
 
-export function ChatInput({
+export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
   onSend,
   disabled,
   isRunning,
@@ -39,12 +43,16 @@ export function ChatInput({
   onTypingStart,
   onTypingStop,
   sessionId,
-}: ChatInputProps) {
+}, ref) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
+
+  useImperativeHandle(ref, () => ({
+    focus: () => textareaRef.current?.focus(),
+  }), []);
 
   // ── Attachment state ───────────────────────────────────────────────────
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -501,4 +509,4 @@ export function ChatInput({
       </div>
     </div>
   );
-}
+});

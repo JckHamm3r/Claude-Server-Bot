@@ -1,0 +1,12 @@
+---
+description: Persistent installer and deployment context
+alwaysApply: true
+---
+
+# Installer-Centric Project Context
+
+- This repository is a curl-installable tool with a script-first workflow.
+- Treat `install.sh`, `update.sh`, `uninstall.sh`, and `scripts/setup-domain.sh` as critical paths.
+- Prioritize shell portability (especially macOS/BSD compatibility) and safe quoting in installer/update scripts.
+- Preserve and validate credential generation/login behavior when changing setup or env generation logic.
+- Ensure API/UI changes remain compatible with base-path slug deployments.

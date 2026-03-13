@@ -19,6 +19,34 @@ if ! echo "$DOMAIN" | grep -qE '^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)
   json_fail "Invalid domain format: $DOMAIN"
 fi
 
+# Validate PORT
+if ! echo "$PORT" | grep -qE '^[0-9]+$'; then
+  json_fail "Invalid port (must be numeric): $PORT"
+fi
+if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+  json_fail "Port out of range (1-65535): $PORT"
+fi
+
+# Validate PATH_PREFIX (allow empty)
+if [ -n "$PATH_PREFIX" ] && ! echo "$PATH_PREFIX" | grep -qE '^[a-zA-Z0-9_-]*$'; then
+  json_fail "Invalid path prefix (alphanumeric, hyphens, underscores only): $PATH_PREFIX"
+fi
+
+# Validate SLUG
+if [ -n "$SLUG" ] && ! echo "$SLUG" | grep -qE '^[a-zA-Z0-9]+$'; then
+  json_fail "Invalid slug (alphanumeric only): $SLUG"
+fi
+
+# Validate INSTALL_DIR does not contain path traversal
+if echo "$INSTALL_DIR" | grep -q '\.\.'; then
+  json_fail "Invalid install directory (must not contain '..'): $INSTALL_DIR"
+fi
+
+# Validate ADMIN_EMAIL (basic format check)
+if [ -n "$ADMIN_EMAIL" ] && ! echo "$ADMIN_EMAIL" | grep -qE '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'; then
+  json_fail "Invalid email format: $ADMIN_EMAIL"
+fi
+
 # Install nginx if missing
 if ! command -v nginx &>/dev/null; then
   export DEBIAN_FRONTEND=noninteractive
@@ -83,10 +111,13 @@ fi
 
 # Run certbot
 CERTBOT_EMAIL="${ADMIN_EMAIL:-admin@$DOMAIN}"
-if ! certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$CERTBOT_EMAIL" --redirect -q 2>/tmp/certbot-err.log; then
-  err_msg=$(cat /tmp/certbot-err.log 2>/dev/null | tail -5 | tr '\n' ' ')
+certbot_log=$(mktemp /tmp/certbot-XXXXXX.log)
+if ! certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$CERTBOT_EMAIL" --redirect -q 2>"$certbot_log"; then
+  err_msg=$(tail -5 "$certbot_log" 2>/dev/null | tr '\n' ' ')
+  rm -f "$certbot_log"
   json_fail "Certbot failed: ${err_msg:-unknown error}"
 fi
+rm -f "$certbot_log"
 
 # Update .env NEXTAUTH_URL if install dir provided
 if [ -n "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/.env" ]; then

@@ -9,6 +9,8 @@ import {
   getMessage,
   getSessionTokenUsage,
   getGlobalTokenUsage,
+  canAccessSession,
+  canModifySession,
 } from "../lib/claude-db";
 import { logActivity } from "../lib/activity-log";
 import { getAppSetting } from "../lib/app-settings";
@@ -22,6 +24,11 @@ export function registerMessageHandlers(ctx: HandlerContext) {
     "claude:message",
     async ({ sessionId, content, attachments }: { sessionId: string; content: string; attachments?: string[] }) => {
       try {
+        if (!canAccessSession(sessionId, email)) {
+          socket.emit("claude:error", { sessionId, message: "Access denied" });
+          return;
+        }
+
         // Rate limiting
         const rl = ctx.checkRateLimit(email, sessionId);
         if (!rl.ok) {
@@ -172,6 +179,10 @@ export function registerMessageHandlers(ctx: HandlerContext) {
   );
 
   socket.on("claude:interrupt", ({ sessionId }: { sessionId: string }) => {
+    if (!canAccessSession(sessionId, email)) {
+      socket.emit("claude:error", { sessionId, message: "Access denied" });
+      return;
+    }
     const sp = ctx.getSessionProvider(sessionId);
     sp.interrupt(sessionId);
     ctx.setSessionStatus(sessionId, "idle");
@@ -180,6 +191,10 @@ export function registerMessageHandlers(ctx: HandlerContext) {
   socket.on(
     "claude:select_option",
     ({ sessionId, choice }: { sessionId: string; choice: string }) => {
+      if (!canAccessSession(sessionId, email)) {
+        socket.emit("claude:error", { sessionId, message: "Access denied" });
+        return;
+      }
       const sp = ctx.getSessionProvider(sessionId);
       sp.sendMessage(sessionId, choice);
     },
@@ -188,6 +203,10 @@ export function registerMessageHandlers(ctx: HandlerContext) {
   socket.on(
     "claude:confirm",
     ({ sessionId, value }: { sessionId: string; value: boolean }) => {
+      if (!canAccessSession(sessionId, email)) {
+        socket.emit("claude:error", { sessionId, message: "Access denied" });
+        return;
+      }
       const sp = ctx.getSessionProvider(sessionId);
       sp.sendMessage(sessionId, value ? "y" : "n");
     },
@@ -196,6 +215,10 @@ export function registerMessageHandlers(ctx: HandlerContext) {
   socket.on(
     "claude:allow_tool",
     ({ sessionId, toolName, scope }: { sessionId: string; toolName: string; scope?: "session" | "once" }) => {
+      if (!canAccessSession(sessionId, email)) {
+        socket.emit("claude:error", { sessionId, message: "Access denied" });
+        return;
+      }
       const sp = ctx.getSessionProvider(sessionId);
       ctx.setSessionStatus(sessionId, "running");
       sp.allowTool(sessionId, toolName, scope ?? "once");
@@ -208,8 +231,12 @@ export function registerMessageHandlers(ctx: HandlerContext) {
     "claude:edit_message",
     async ({ sessionId, messageId, newContent }: { sessionId: string; messageId: string; newContent: string }) => {
       try {
+        if (!canModifySession(sessionId, email)) {
+          socket.emit("claude:error", { sessionId, message: "Access denied" });
+          return;
+        }
         const session = getSession(sessionId);
-        if (!session || session.created_by !== email) return;
+        if (!session) return;
 
         const msg = getMessage(messageId);
         if (!msg || msg.session_id !== sessionId) return;
@@ -252,8 +279,10 @@ export function registerMessageHandlers(ctx: HandlerContext) {
     "claude:delete_message",
     ({ sessionId, messageId }: { sessionId: string; messageId: string }) => {
       try {
-        const session = getSession(sessionId);
-        if (!session || session.created_by !== email) return;
+        if (!canModifySession(sessionId, email)) {
+          socket.emit("claude:error", { sessionId, message: "Access denied" });
+          return;
+        }
         deleteMessage(messageId);
         io.to(`session:${sessionId}`).emit("claude:message_deleted", { sessionId, messageId });
       } catch (err) {

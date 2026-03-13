@@ -107,6 +107,7 @@ export const authOptions: NextAuthOptions = {
 
   session: {
     strategy: "jwt",
+    maxAge: 24 * 60 * 60, // 24 hours
   },
 
   pages: {
@@ -118,12 +119,37 @@ export const authOptions: NextAuthOptions = {
       if (user) {
         token.email = user.email;
         token.isAdmin = (user as { isAdmin?: boolean }).isAdmin ?? false;
+        token.lastRefresh = Date.now();
       }
+
+      const REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
+      const lastRefresh = (token.lastRefresh as number) ?? 0;
+      if (Date.now() - lastRefresh > REFRESH_INTERVAL) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const db = (require("./db") as { default: import("better-sqlite3").Database }).default;
+          const row = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(token.email as string) as
+            | { is_admin: number }
+            | undefined;
+          if (row) {
+            token.isAdmin = Boolean(row.is_admin);
+          }
+          const settings = db.prepare("SELECT setup_complete FROM user_settings WHERE email = ?").get(token.email as string) as
+            | { setup_complete: number }
+            | undefined;
+          token.setupComplete = settings ? Boolean(settings.setup_complete) : false;
+          token.lastRefresh = Date.now();
+        } catch {
+          // DB unavailable in edge runtime — keep existing value
+        }
+      }
+
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
         session.user.email = token.email as string;
+        (session.user as any).isAdmin = token.isAdmin ?? false;
       }
       return session;
     },

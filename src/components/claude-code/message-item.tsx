@@ -1,10 +1,11 @@
 "use client";
 
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { useState } from "react";
-import { Copy, Check, CheckCircle2, Pencil, Trash2, X, FileText } from "lucide-react";
+import { Copy, Check, CheckCircle2, Pencil, Trash2, X, FileText, ExternalLink } from "lucide-react";
 import Image from "next/image";
 import type { ParsedOutput } from "@/lib/claude/provider";
 import { getAvatarPath, type AvatarState } from "@/lib/avatar-state";
@@ -39,22 +40,166 @@ interface MessageItemProps {
   avatarState?: AvatarState;
 }
 
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ text, size = "sm" }: { text: string; size?: "sm" | "xs" }) {
   const [copied, setCopied] = useState(false);
+  const iconClass = size === "xs" ? "h-3 w-3" : "h-3.5 w-3.5";
   return (
     <button
-      onClick={() => {
+      onClick={(e) => {
+        e.stopPropagation();
         navigator.clipboard.writeText(text);
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       }}
-      className="p-1 rounded text-bot-muted hover:text-bot-text transition-colors"
-      title="Copy"
+      className="p-1 rounded text-bot-muted hover:text-bot-text hover:bg-bot-elevated transition-colors"
+      title={copied ? "Copied!" : "Copy"}
     >
-      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+      {copied ? <Check className={iconClass} /> : <Copy className={iconClass} />}
     </button>
   );
 }
+
+function formatTimestamp(ts: string): string {
+  const d = new Date(ts);
+  return d.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function truncateUrl(url: string, maxLen = 60): string {
+  if (url.length <= maxLen) return url;
+  try {
+    const u = new URL(url);
+    const path = u.pathname + u.search;
+    const available = maxLen - u.origin.length - 3;
+    if (available > 10) {
+      return u.origin + path.slice(0, available) + "...";
+    }
+  } catch { /* not a valid URL, just truncate */ }
+  return url.slice(0, maxLen - 3) + "...";
+}
+
+const REMARK_PLUGINS = [remarkGfm];
+
+const sharedMarkdownComponents: Components = {
+  a({ href, children }) {
+    const url = href ?? "";
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-bot-blue hover:text-bot-blue/80 underline underline-offset-2 decoration-bot-blue/40 hover:decoration-bot-blue/70 transition-colors inline-flex items-baseline gap-0.5 break-all"
+        title={url}
+      >
+        {children ?? truncateUrl(url)}
+        <ExternalLink className="inline h-3 w-3 shrink-0 translate-y-[1px]" />
+      </a>
+    );
+  },
+  code({ className, children, ...props }) {
+    const match = /language-(\w+)/.exec(className ?? "");
+    const codeText = String(children).replace(/\n$/, "");
+    if (match) {
+      return (
+        <div className="relative group/code my-2 rounded-lg overflow-hidden border border-bot-border/40">
+          <div className="flex items-center justify-between px-3 py-1.5 bg-[#2d2d2d] border-b border-[#404040]">
+            <span className="text-[10px] font-mono text-gray-400 uppercase tracking-wide">{match[1]}</span>
+            <CopyButton text={codeText} />
+          </div>
+          <SyntaxHighlighter
+            style={vscDarkPlus}
+            language={match[1]}
+            PreTag="div"
+            className="!rounded-none !rounded-b-lg text-caption !mt-0"
+            showLineNumbers={codeText.split("\n").length > 5}
+            lineNumberStyle={{ color: "#555", fontSize: "11px", paddingRight: "1em", userSelect: "none" }}
+          >
+            {codeText}
+          </SyntaxHighlighter>
+        </div>
+      );
+    }
+    return (
+      <code
+        className="rounded bg-bot-surface px-1.5 py-0.5 font-mono text-caption text-bot-accent"
+        {...props}
+      >
+        {children}
+      </code>
+    );
+  },
+  p({ children }) {
+    return <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>;
+  },
+  ul({ children }) {
+    return <ul className="mb-2 list-disc pl-4 space-y-1">{children}</ul>;
+  },
+  ol({ children }) {
+    return <ol className="mb-2 list-decimal pl-4 space-y-1">{children}</ol>;
+  },
+  li({ children }) {
+    return <li className="leading-relaxed">{children}</li>;
+  },
+  h1({ children }) {
+    return <h1 className="text-subtitle font-semibold mb-2 mt-3 first:mt-0">{children}</h1>;
+  },
+  h2({ children }) {
+    return <h2 className="text-body font-semibold mb-1.5 mt-3 first:mt-0">{children}</h2>;
+  },
+  h3({ children }) {
+    return <h3 className="text-body font-medium mb-1 mt-2 first:mt-0">{children}</h3>;
+  },
+  blockquote({ children }) {
+    return (
+      <blockquote className="border-l-2 border-bot-border pl-3 my-2 text-bot-muted">
+        {children}
+      </blockquote>
+    );
+  },
+  table({ children }) {
+    return (
+      <div className="my-2 overflow-x-auto rounded-lg border border-bot-border">
+        <table className="min-w-full text-caption">{children}</table>
+      </div>
+    );
+  },
+  thead({ children }) {
+    return <thead className="bg-bot-surface">{children}</thead>;
+  },
+  tbody({ children }) {
+    return <tbody className="divide-y divide-bot-border/40">{children}</tbody>;
+  },
+  tr({ children }) {
+    return <tr className="hover:bg-bot-surface/50 transition-colors">{children}</tr>;
+  },
+  th({ children }) {
+    return <th className="px-3 py-2 text-left font-semibold text-bot-text border-b border-bot-border">{children}</th>;
+  },
+  td({ children }) {
+    return <td className="px-3 py-2 text-bot-text">{children}</td>;
+  },
+  del({ children }) {
+    return <del className="text-bot-muted line-through">{children}</del>;
+  },
+  input({ checked, ...props }) {
+    return (
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled
+        className="mr-1.5 accent-bot-accent"
+        {...props}
+      />
+    );
+  },
+  hr() {
+    return <hr className="my-3 border-bot-border/40" />;
+  },
+};
 
 function TokenBadge({ metadata }: { metadata?: Record<string, unknown> }) {
   if (!metadata?.usage) return null;
@@ -268,6 +413,7 @@ export function MessageItem({
       >
         {isHovered && !isRunning && (
           <div className="flex items-center gap-0.5 self-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <CopyButton text={content} size="xs" />
             {canEdit && (
               <button
                 onClick={() => {
@@ -291,44 +437,55 @@ export function MessageItem({
             )}
           </div>
         )}
-        <div className="max-w-[75%] rounded-2xl rounded-tr-sm bg-bot-accent/20 px-4 py-2.5 text-body text-bot-text">
-          {imageAttachments.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-2">
-              {imageAttachments.map((img) => (
-                <a
-                  key={img.id}
-                  href={apiUrl(`/api/claude-code/upload/${img.id}`)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block rounded-lg overflow-hidden border border-bot-border hover:border-bot-accent transition-colors"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={apiUrl(`/api/claude-code/upload/${img.id}`)}
-                    alt={img.name}
-                    className="max-w-[200px] max-h-[150px] object-cover"
-                  />
-                </a>
-              ))}
+        <div className="max-w-[75%]">
+          <div className="rounded-2xl rounded-tr-sm bg-bot-accent/20 px-4 py-2.5 text-body text-bot-text">
+            {imageAttachments.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {imageAttachments.map((img) => (
+                  <a
+                    key={img.id}
+                    href={apiUrl(`/api/claude-code/upload/${img.id}`)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block rounded-lg overflow-hidden border border-bot-border hover:border-bot-accent transition-colors"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={apiUrl(`/api/claude-code/upload/${img.id}`)}
+                      alt={img.name}
+                      className="max-w-[200px] max-h-[150px] object-cover"
+                    />
+                  </a>
+                ))}
+              </div>
+            )}
+            {attachmentIds.length > 0 && (
+              <div className="flex flex-wrap gap-1 mb-1.5">
+                {attachmentIds.filter((id) => !imageAttachments.some((img) => img.id === id)).map((id) => (
+                  <a
+                    key={id}
+                    href={apiUrl(`/api/claude-code/upload/${id}`)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 rounded bg-bot-accent/10 px-1.5 py-0.5 text-[10px] font-mono text-bot-accent hover:bg-bot-accent/20 transition-colors"
+                  >
+                    <FileText className="h-2.5 w-2.5" />
+                    attachment
+                  </a>
+                ))}
+              </div>
+            )}
+            <div className="whitespace-pre-wrap break-words [&_p]:mb-1 [&_p:last-child]:mb-0">
+              <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={sharedMarkdownComponents}>
+                {displayContent}
+              </ReactMarkdown>
             </div>
-          )}
-          {attachmentIds.length > 0 && (
-            <div className="flex flex-wrap gap-1 mb-1.5">
-              {attachmentIds.filter((id) => !imageAttachments.some((img) => img.id === id)).map((id) => (
-                <a
-                  key={id}
-                  href={apiUrl(`/api/claude-code/upload/${id}`)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 rounded bg-bot-accent/10 px-1.5 py-0.5 text-[10px] font-mono text-bot-accent hover:bg-bot-accent/20 transition-colors"
-                >
-                  <FileText className="h-2.5 w-2.5" />
-                  attachment
-                </a>
-              ))}
-            </div>
-          )}
-          <p className="whitespace-pre-wrap break-words">{displayContent}</p>
+          </div>
+          <div className="mt-0.5 text-right opacity-0 group-hover:opacity-100 transition-opacity">
+            <span className="text-[10px] text-bot-muted">
+              {formatTimestamp(message.timestamp)}
+            </span>
+          </div>
         </div>
         <div className="mt-1 h-7 w-7 shrink-0 rounded-full bg-bot-elevated flex items-center justify-center">
           <span className="text-caption font-semibold text-bot-muted">U</span>
@@ -347,85 +504,41 @@ export function MessageItem({
       <div className="mt-1 h-7 w-7 shrink-0 rounded-full overflow-hidden">
         <Image unoptimized src={getAvatarPath((isLatest && isRunning) ? (avatarState ?? "waiting") : "waiting")} alt="Claude" width={28} height={28} className="object-cover" />
       </div>
-      <div className="min-w-0 flex-1 rounded-2xl rounded-bl-sm bg-bot-elevated px-4 py-2.5 text-body text-bot-text max-w-[90%]">
-        <ReactMarkdown
-          components={{
-            code({ className, children, ...props }) {
-              const match = /language-(\w+)/.exec(className ?? "");
-              const codeText = String(children).replace(/\n$/, "");
-              if (match) {
-                return (
-                  <div className="relative group my-2">
-                    <div className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                      <CopyButton text={codeText} />
-                    </div>
-                    <SyntaxHighlighter
-                      style={vscDarkPlus}
-                      language={match[1]}
-                      PreTag="div"
-                      className="!rounded-lg text-caption"
-                    >
-                      {codeText}
-                    </SyntaxHighlighter>
-                  </div>
-                );
-              }
-              return (
-                <code
-                  className="rounded bg-bot-surface px-1.5 py-0.5 font-mono text-caption text-bot-accent"
-                  {...props}
-                >
-                  {children}
-                </code>
-              );
-            },
-            p({ children }) {
-              return <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>;
-            },
-            ul({ children }) {
-              return <ul className="mb-2 list-disc pl-4 space-y-1">{children}</ul>;
-            },
-            ol({ children }) {
-              return <ol className="mb-2 list-decimal pl-4 space-y-1">{children}</ol>;
-            },
-            h1({ children }) {
-              return <h1 className="text-subtitle font-semibold mb-2 mt-3 first:mt-0">{children}</h1>;
-            },
-            h2({ children }) {
-              return <h2 className="text-body font-semibold mb-1.5 mt-3 first:mt-0">{children}</h2>;
-            },
-            h3({ children }) {
-              return <h3 className="text-body font-medium mb-1 mt-2 first:mt-0">{children}</h3>;
-            },
-            blockquote({ children }) {
-              return (
-                <blockquote className="border-l-2 border-bot-border pl-3 my-2 text-bot-muted">
-                  {children}
-                </blockquote>
-              );
-            },
-          }}
-        >
-          {displayContent}
-        </ReactMarkdown>
-        {message.parsed?.type === "text" && (
-          <div className="mt-1 flex items-center justify-between">
-            <TokenBadge metadata={message.metadata} />
-            <span className="text-[10px] text-bot-muted opacity-40">
-              {new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+      <div className="min-w-0 flex-1 max-w-[90%]">
+        <div className="rounded-2xl rounded-bl-sm bg-bot-elevated px-4 py-2.5 text-body text-bot-text">
+          <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={sharedMarkdownComponents}>
+            {displayContent}
+          </ReactMarkdown>
+          {message.parsed?.type === "text" && (
+            <div className="mt-1 flex items-center justify-between">
+              <TokenBadge metadata={message.metadata} />
+              <span className="text-[10px] text-bot-muted opacity-40">
+                {new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            </div>
+          )}
+        </div>
+        {/* Hover timestamp for streaming/non-final messages */}
+        {message.parsed?.type !== "text" && (
+          <div className="mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+            <span className="text-[10px] text-bot-muted">
+              {formatTimestamp(message.timestamp)}
             </span>
           </div>
         )}
       </div>
-      {isHovered && canDelete && !isRunning && (
-        <div className="flex items-center self-center opacity-0 group-hover:opacity-100 transition-opacity">
-          <button
-            onClick={() => onDelete?.(message.id)}
-            className="rounded p-1 text-bot-muted hover:text-bot-red hover:bg-bot-red/10 transition-colors"
-            title="Delete message"
-          >
-            <Trash2 className="h-3 w-3" />
-          </button>
+      {isHovered && !isRunning && (
+        <div className="flex flex-col items-center gap-0.5 self-center opacity-0 group-hover:opacity-100 transition-opacity">
+          <CopyButton text={content} size="xs" />
+          {canDelete && (
+            <button
+              onClick={() => onDelete?.(message.id)}
+              className="rounded p-1 text-bot-muted hover:text-bot-red hover:bg-bot-red/10 transition-colors"
+              title="Delete message"
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
+          )}
         </div>
       )}
     </div>

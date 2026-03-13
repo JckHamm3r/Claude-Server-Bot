@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import db from "@/lib/db";
 import fs from "fs/promises";
 import path from "path";
 
@@ -74,6 +75,11 @@ export async function PUT(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const requester = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(session.user.email) as { is_admin: number } | undefined;
+  if (!requester?.is_admin) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   let body: { file: string; content: string };

@@ -1,3 +1,4 @@
+import path from "path";
 import { getAppSetting } from "./app-settings";
 
 // Protected paths — Claude should never access these
@@ -20,6 +21,10 @@ export const PROTECTED_PATHS = [
   // Bot source files that should not be self-modified
   "src/lib/auth.ts",
   "src/lib/db.ts",
+  "src/middleware.ts",
+  "src/lib/security-guard.ts",
+  "src/lib/command-sandbox.ts",
+  "src/lib/ip-protection.ts",
   "server.ts",
 ];
 
@@ -41,6 +46,51 @@ export const BOT_CONFIG_PATTERNS: RegExp[] = [
   /edit\s+(the\s+)?server\s+(config|settings?)/i,
 ];
 
+function escapeRegex(str: string): string {
+  return str.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+}
+
+// Extract individual path arguments from a shell command string,
+// handling basic single/double quoting.
+function extractPathsFromCommand(command: string): string[] {
+  const paths: string[] = [];
+  const args: string[] = [];
+  let current = "";
+  let inSingle = false;
+  let inDouble = false;
+
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (ch === "'" && !inDouble) {
+      inSingle = !inSingle;
+    } else if (ch === '"' && !inSingle) {
+      inDouble = !inDouble;
+    } else if ((ch === " " || ch === "\t") && !inSingle && !inDouble) {
+      if (current.length > 0) {
+        args.push(current);
+        current = "";
+      }
+    } else {
+      current += ch;
+    }
+  }
+  if (current.length > 0) {
+    args.push(current);
+  }
+
+  for (const arg of args) {
+    if (arg.startsWith("-")) continue;
+    if (arg.includes("/") || arg.includes(".")) {
+      paths.push(arg);
+    }
+  }
+  return paths;
+}
+
+function normalizePath(p: string): string {
+  return path.normalize(p).replace(/\\/g, "/");
+}
+
 // Check if a tool use targets a protected path
 export function checkProtectedPath(
   toolName: string,
@@ -50,15 +100,23 @@ export function checkProtectedPath(
 
   const input = toolInput as Record<string, unknown>;
 
-  // Get path-like fields from tool input
-  const pathFields: string[] = [];
-  for (const key of ["file_path", "path", "command", "pattern", "old_string", "new_string", "content"]) {
+  const pathValues: string[] = [];
+
+  for (const key of ["file_path", "path", "pattern", "old_string", "new_string", "content"]) {
     if (typeof input[key] === "string") {
-      pathFields.push(input[key] as string);
+      pathValues.push(normalizePath(input[key] as string));
     }
   }
 
-  for (const pathValue of pathFields) {
+  if (typeof input["command"] === "string") {
+    const commandStr = input["command"] as string;
+    pathValues.push(normalizePath(commandStr));
+    for (const extracted of extractPathsFromCommand(commandStr)) {
+      pathValues.push(normalizePath(extracted));
+    }
+  }
+
+  for (const pathValue of pathValues) {
     for (const pattern of PROTECTED_PATHS) {
       if (matchesProtectedPattern(pathValue, pattern)) {
         return {
@@ -106,8 +164,9 @@ function matchesProtectedPattern(path: string, pattern: string): boolean {
     const regexStr =
       "^" +
       normalizedPattern
-        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-        .replace(/\*/g, ".*") +
+        .split("*")
+        .map(escapeRegex)
+        .join(".*") +
       "$";
     try {
       if (new RegExp(regexStr).test(normalizedPath)) return true;

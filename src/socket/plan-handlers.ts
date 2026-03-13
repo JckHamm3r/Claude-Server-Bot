@@ -1,33 +1,34 @@
-import { execSync } from "child_process";
 import type { HandlerContext, PlanAction } from "./types";
 import {
   listAgents,
   createAgent,
   updateAgent,
   deleteAgent,
+  getAgent,
   getAgentVersions,
   createPlan,
   getPlan,
+  getSession,
   updatePlanStatus,
   listPlans,
   addPlanStep,
   getPlanSteps,
   updatePlanStep,
+  deletePlanSteps,
+  deletePlan,
+  canAccessSession,
+  isUserAdmin,
 } from "../lib/claude-db";
 import { logActivity } from "../lib/activity-log";
 import { dispatchNotification } from "../lib/notifications";
 
-const PROJECT_ROOT = process.env.CLAUDE_PROJECT_ROOT ?? process.cwd();
-
-function tryGitRollback(): { ok: boolean; error?: string } {
-  try {
-    execSync("git checkout -- .", { cwd: PROJECT_ROOT, stdio: "pipe" });
-    execSync("git clean -fd", { cwd: PROJECT_ROOT, stdio: "pipe" });
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: String(e) };
-  }
+function sanitizePromptInput(input: string, maxLen = 2000): string {
+  return input.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').slice(0, maxLen);
 }
+
+const planExecutionCounts = new Map<string, number>();
+
+const planOwners = new Map<string, string>();
 
 export function registerPlanHandlers(ctx: HandlerContext) {
   const { socket, email, provider } = ctx;
@@ -68,6 +69,11 @@ export function registerPlanHandlers(ctx: HandlerContext) {
       changeDescription?: string;
     }) => {
       try {
+        const agent = getAgent(agentId);
+        if (!agent || (agent.created_by !== email && !isUserAdmin(email))) {
+          socket.emit("claude:error", { message: "Access denied" });
+          return;
+        }
         updateAgent(agentId, data, email, changeDescription);
         const agents = listAgents(email);
         socket.emit("claude:agents", { agents });
@@ -79,6 +85,11 @@ export function registerPlanHandlers(ctx: HandlerContext) {
 
   socket.on("claude:delete_agent", ({ agentId }: { agentId: string }) => {
     try {
+      const agent = getAgent(agentId);
+      if (!agent || (agent.created_by !== email && !isUserAdmin(email))) {
+        socket.emit("claude:error", { message: "Access denied" });
+        return;
+      }
       deleteAgent(agentId);
       const agents = listAgents(email);
       socket.emit("claude:agents", { agents });
@@ -99,9 +110,9 @@ export function registerPlanHandlers(ctx: HandlerContext) {
   socket.on("claude:generate_agent", async ({ description }: { description: string }) => {
     const sessionId = `agent-gen-${Date.now()}`;
     try {
-      provider.createSession(sessionId, { skipPermissions: true });
+      provider.createSession(sessionId, { skipPermissions: false });
 
-      const prompt = `Generate a Claude Code agent configuration for: ${description}
+      const prompt = `Generate a Claude Code agent configuration for: ${sanitizePromptInput(description)}
 
 Return ONLY valid JSON with these fields:
 {
@@ -118,8 +129,10 @@ Return only the JSON object, no markdown, no explanation.`;
       let lastTextOutput = "";
 
       provider.onOutput(sessionId, (parsed) => {
-        if ((parsed.type === "text" || parsed.type === "streaming") && parsed.content) {
+        if (parsed.type === "text" && parsed.content) {
           lastTextOutput = parsed.content;
+        } else if (parsed.type === "streaming" && parsed.content) {
+          lastTextOutput += parsed.content;
         }
         if (parsed.type === "done") {
           provider.offOutput(sessionId);
@@ -156,14 +169,20 @@ Return only the JSON object, no markdown, no explanation.`;
     "claude:generate_plan",
     async ({ sessionId, goal }: { sessionId: string; goal: string }) => {
       try {
+        if (!canAccessSession(sessionId, email)) {
+          socket.emit("claude:error", { sessionId, message: "Access denied" });
+          return;
+        }
         const plan = createPlan(sessionId, goal, email);
         logActivity("plan_created", email, { planId: plan.id, goal });
         const planSessionId = "plan-gen-" + plan.id;
-        provider.createSession(planSessionId, { skipPermissions: true });
+        const parentSession = getSession(sessionId);
+        const skipPerms = parentSession?.skip_permissions ?? false;
+        provider.createSession(planSessionId, { skipPermissions: skipPerms });
 
         const prompt = `You are helping plan a multi-step development task for a software project.
 
-Goal: ${goal}
+Goal: ${sanitizePromptInput(goal)}
 
 Generate a detailed step-by-step plan. Return ONLY a JSON array of steps:
 [
@@ -176,8 +195,12 @@ Be specific. Each step should be atomic and independently executable. Return onl
         let lastOutput = "";
 
         provider.onOutput(planSessionId, (parsed) => {
-          if ((parsed.type === "text" || parsed.type === "streaming") && parsed.content) {
+          if (parsed.type === "text" && parsed.content) {
             lastOutput = parsed.content;
+            socket.emit("claude:plan_progress", { planId: plan.id, content: lastOutput });
+          } else if (parsed.type === "streaming" && parsed.content) {
+            lastOutput += parsed.content;
+            socket.emit("claude:plan_progress", { planId: plan.id, content: lastOutput });
           }
           if (parsed.type === "done") {
             provider.offOutput(planSessionId);
@@ -188,23 +211,26 @@ Be specific. Each step should be atomic and independently executable. Return onl
                 .replace(/\s*```\s*$/, "")
                 .trim();
               const steps: { summary: string; details?: string }[] = JSON.parse(cleaned);
+              const cappedSteps = steps.slice(0, 50);
               updatePlanStatus(plan.id, "reviewing");
-              for (let i = 0; i < steps.length; i++) {
+              for (let i = 0; i < cappedSteps.length; i++) {
                 addPlanStep(plan.id, {
                   step_order: i + 1,
-                  summary: steps[i].summary,
-                  details: steps[i].details,
+                  summary: cappedSteps[i].summary,
+                  details: cappedSteps[i].details,
                 });
               }
               const fullPlan = getPlan(plan.id);
               socket.emit("claude:plan_generated", { plan: fullPlan });
             } catch {
+              updatePlanStatus(plan.id, "failed");
               socket.emit("claude:error", { message: "Failed to parse plan steps from Claude response" });
             }
           }
           if (parsed.type === "error") {
             provider.offOutput(planSessionId);
             provider.closeSession(planSessionId);
+            updatePlanStatus(plan.id, "failed");
             socket.emit("claude:error", { message: parsed.message ?? "Claude error during plan generation" });
           }
         });
@@ -233,6 +259,11 @@ Be specific. Each step should be atomic and independently executable. Return onl
     "claude:approve_step",
     ({ stepId, planId }: { stepId: string; planId: string }) => {
       try {
+        const existingPlan = getPlan(planId);
+        if (!existingPlan || (existingPlan.created_by !== email && !isUserAdmin(email))) {
+          socket.emit("claude:error", { message: "Access denied" });
+          return;
+        }
         updatePlanStep(stepId, { status: "approved", approved_by: email });
         const plan = getPlan(planId);
         socket.emit("claude:plan_updated", { plan });
@@ -246,6 +277,11 @@ Be specific. Each step should be atomic and independently executable. Return onl
     "claude:reject_step",
     ({ stepId, planId }: { stepId: string; planId: string }) => {
       try {
+        const existingPlan = getPlan(planId);
+        if (!existingPlan || (existingPlan.created_by !== email && !isUserAdmin(email))) {
+          socket.emit("claude:error", { message: "Access denied" });
+          return;
+        }
         updatePlanStep(stepId, { status: "rejected" });
         const plan = getPlan(planId);
         socket.emit("claude:plan_updated", { plan });
@@ -318,27 +354,49 @@ Be specific. Each step should be atomic and independently executable. Return onl
         socket.emit("claude:error", { message: "Plan not found" });
         return;
       }
+      if (plan.created_by !== email && !isUserAdmin(email)) {
+        socket.emit("claude:error", { message: "Access denied" });
+        return;
+      }
+
+      const currentCount = planExecutionCounts.get(email) ?? 0;
+      if (currentCount >= 2) {
+        socket.emit("claude:error", { message: "Too many concurrent plan executions. Please wait for an existing plan to complete." });
+        return;
+      }
+      planExecutionCounts.set(email, currentCount + 1);
+      planOwners.set(planId, email);
+
       logActivity("plan_executed", email, { planId });
       const approvedSteps = (plan.steps ?? []).filter((s) => s.status === "approved");
       updatePlanStatus(planId, "executing");
       socket.emit("claude:plan_executing", { planId });
 
-      for (const step of approvedSteps) {
+      const planSession = getSession(plan.session_id);
+      const skipPerms = planSession?.skip_permissions ?? false;
+
+      let stepIdx = 0;
+      while (stepIdx < approvedSteps.length) {
+        const step = approvedSteps[stepIdx];
         updatePlanStep(step.id, { status: "executing", executed_at: new Date().toISOString() });
         socket.emit("claude:step_executing", { planId, stepId: step.id });
 
-        const stepSessionId = "plan-step-" + step.id;
-        provider.createSession(stepSessionId, { skipPermissions: true });
+        const stepSessionId = `plan-step-${step.id}-${Date.now()}`;
+        provider.createSession(stepSessionId, { skipPermissions: skipPerms });
 
-        const stepPrompt = `Execute this step: ${step.summary}\n\nDetails: ${step.details ?? ""}`;
+        const stepPrompt = `Execute this step: ${sanitizePromptInput(step.summary)}\n\nDetails: ${sanitizePromptInput(step.details ?? "")}`;
 
         let stepOutput = "";
         let stepError = "";
 
         await new Promise<void>((resolve) => {
           provider.onOutput(stepSessionId, (parsed) => {
-            if ((parsed.type === "text" || parsed.type === "streaming") && parsed.content) {
+            if (parsed.type === "text" && parsed.content) {
               stepOutput = parsed.content;
+              socket.emit("claude:step_progress", { planId, stepId: step.id, content: stepOutput });
+            } else if (parsed.type === "streaming" && parsed.content) {
+              stepOutput += parsed.content;
+              socket.emit("claude:step_progress", { planId, stepId: step.id, content: stepOutput });
             }
             if (parsed.type === "error") {
               stepError = parsed.message ?? "Unknown error";
@@ -359,7 +417,6 @@ Be specific. Each step should be atomic and independently executable. Return onl
             planId,
             stepId: step.id,
             error: stepError,
-            canRollback: true,
           });
 
           const action = await new Promise<PlanAction>((resolve) => {
@@ -367,37 +424,39 @@ Be specific. Each step should be atomic and independently executable. Return onl
           });
           ctx.planResumeCallbacks.delete(planId);
 
-          if (action === "rollback_stop" || action === "rollback_continue") {
-            const rollback = tryGitRollback();
-            const rollbackStatus = rollback.ok ? "rolled_back" : "failed";
-            updatePlanStep(step.id, { status: rollbackStatus });
-            socket.emit("claude:step_rolled_back", {
-              planId,
-              stepId: step.id,
-              ok: rollback.ok,
-              error: rollback.error,
-            });
-          }
-
-          if (action === "cancel" || action === "rollback_stop") {
-            updatePlanStatus(planId, "cancelled");
+          if (action === "cancel") {
+            planExecutionCounts.set(email, (planExecutionCounts.get(email) ?? 1) - 1);
+            planOwners.delete(planId);
+            updatePlanStatus(planId, "failed");
             const updatedPlan = getPlan(planId);
             socket.emit("claude:plan_updated", { plan: updatedPlan });
-            dispatchNotification("plan_failed", email, "Plan cancelled", `Plan execution was cancelled after a step failed.`).catch(() => {});
+            dispatchNotification("plan_failed", email, "Plan failed", `Plan execution failed and was stopped.`).catch(() => {});
             return;
           }
+
+          if (action === "retry") {
+            continue;
+          }
+
+          // "skip" — advance to next step
+          stepIdx++;
           continue;
         }
 
         updatePlanStep(step.id, { status: "completed", result: stepOutput });
         socket.emit("claude:step_completed", { planId, stepId: step.id, result: stepOutput });
+        stepIdx++;
       }
 
+      planExecutionCounts.set(email, (planExecutionCounts.get(email) ?? 1) - 1);
+      planOwners.delete(planId);
       updatePlanStatus(planId, "completed");
       const completedPlan = getPlan(planId);
       socket.emit("claude:plan_completed", { plan: completedPlan });
       dispatchNotification("plan_completed", email, "Plan completed", `Your plan has been executed successfully.`).catch(() => {});
     } catch (err) {
+      planExecutionCounts.set(email, (planExecutionCounts.get(email) ?? 1) - 1);
+      planOwners.delete(planId);
       socket.emit("claude:error", { message: String(err) });
     }
   });
@@ -412,15 +471,6 @@ Be specific. Each step should be atomic and independently executable. Return onl
     if (cb) cb("skip");
   });
 
-  socket.on("claude:rollback_stop", ({ planId }: { planId: string }) => {
-    const cb = ctx.planResumeCallbacks.get(planId);
-    if (cb) cb("rollback_stop");
-  });
-
-  socket.on("claude:rollback_continue", ({ planId }: { planId: string }) => {
-    const cb = ctx.planResumeCallbacks.get(planId);
-    if (cb) cb("rollback_continue");
-  });
 
   socket.on("claude:cancel_plan", ({ planId }: { planId: string }) => {
     try {
@@ -434,6 +484,118 @@ Be specific. Each step should be atomic and independently executable. Return onl
       socket.emit("claude:plan_updated", { plan });
     } catch (err) {
       socket.emit("claude:error", { message: String(err) });
+    }
+  });
+
+  socket.on(
+    "claude:refine_plan",
+    async ({ planId, instruction }: { planId: string; instruction: string }) => {
+      try {
+        const existingPlan = getPlan(planId);
+        if (!existingPlan) {
+          socket.emit("claude:error", { message: "Plan not found" });
+          return;
+        }
+
+        const existingSteps = existingPlan.steps ?? [];
+        const numberedSteps = existingSteps
+          .map((s, i) => `${i + 1}. ${s.summary}${s.details ? ` — ${s.details}` : ""}`)
+          .join("\n");
+
+        updatePlanStatus(planId, "drafting");
+
+        const refineSessionId = `plan-refine-${planId}-${Date.now()}`;
+        const refineParentSession = getSession(existingPlan.session_id);
+        const refineSkipPerms = refineParentSession?.skip_permissions ?? false;
+        provider.createSession(refineSessionId, { skipPermissions: refineSkipPerms });
+
+        const prompt = `You are helping refine a multi-step development plan.
+
+Here is an existing plan for: ${sanitizePromptInput(existingPlan.goal)}
+
+Current steps:
+${numberedSteps}
+
+User instruction: ${sanitizePromptInput(instruction)}
+
+Generate an updated plan incorporating the user's instruction. Return ONLY a JSON array of steps:
+[
+  { "summary": "brief one-line summary", "details": "detailed explanation of what will be done" },
+  ...
+]
+
+Be specific. Each step should be atomic and independently executable. Return only the JSON array.`;
+
+        let lastOutput = "";
+
+        provider.onOutput(refineSessionId, (parsed) => {
+          if (parsed.type === "text" && parsed.content) {
+            lastOutput = parsed.content;
+            socket.emit("claude:plan_progress", { planId, content: lastOutput });
+          } else if (parsed.type === "streaming" && parsed.content) {
+            lastOutput += parsed.content;
+            socket.emit("claude:plan_progress", { planId, content: lastOutput });
+          }
+          if (parsed.type === "done") {
+            provider.offOutput(refineSessionId);
+            provider.closeSession(refineSessionId);
+            try {
+              const cleaned = lastOutput
+                .replace(/^```(?:json)?\s*/i, "")
+                .replace(/\s*```\s*$/, "")
+                .trim();
+              const steps: { summary: string; details?: string }[] = JSON.parse(cleaned);
+              const cappedSteps = steps.slice(0, 50);
+              deletePlanSteps(planId);
+              for (let i = 0; i < cappedSteps.length; i++) {
+                addPlanStep(planId, {
+                  step_order: i + 1,
+                  summary: cappedSteps[i].summary,
+                  details: cappedSteps[i].details,
+                });
+              }
+              updatePlanStatus(planId, "reviewing");
+              const fullPlan = getPlan(planId);
+              socket.emit("claude:plan_generated", { plan: fullPlan });
+            } catch {
+              updatePlanStatus(planId, "failed");
+              socket.emit("claude:error", { message: "Failed to parse refined plan from Claude response" });
+            }
+          }
+          if (parsed.type === "error") {
+            provider.offOutput(refineSessionId);
+            provider.closeSession(refineSessionId);
+            updatePlanStatus(planId, "failed");
+            socket.emit("claude:error", { message: parsed.message ?? "Claude error during plan refinement" });
+          }
+        });
+
+        provider.sendMessage(refineSessionId, prompt);
+      } catch (err) {
+        socket.emit("claude:error", { message: String(err) });
+      }
+    },
+  );
+
+  socket.on("claude:delete_plan", ({ planId }: { planId: string }) => {
+    try {
+      const existingPlan = getPlan(planId);
+      if (!existingPlan || (existingPlan.created_by !== email && !isUserAdmin(email))) {
+        socket.emit("claude:error", { message: "Access denied" });
+        return;
+      }
+      deletePlan(planId);
+      socket.emit("claude:plan_deleted", { planId });
+    } catch (err) {
+      socket.emit("claude:error", { message: String(err) });
+    }
+  });
+
+  socket.on("disconnect", () => {
+    for (const [planId, cb] of ctx.planResumeCallbacks) {
+      if (planOwners.get(planId) === email) {
+        cb("cancel");
+      }
     }
   });
 }

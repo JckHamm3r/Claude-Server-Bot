@@ -1,9 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import db from "@/lib/db";
+import type Database from "better-sqlite3";
 
-function requireAdmin(email: string): boolean {
+export const dynamic = "force-dynamic";
+
+let dbInstance: Database.Database | null = null;
+
+async function getDb(): Promise<Database.Database> {
+  if (!dbInstance) {
+    // Lazy-load DB so build-time route analysis does not initialize SQLite.
+    const mod = (await import("@/lib/db")) as { default: Database.Database };
+    dbInstance = mod.default;
+  }
+  return dbInstance;
+}
+
+async function requireAdmin(email: string): Promise<boolean> {
+  const db = await getDb();
   const user = db
     .prepare("SELECT is_admin FROM users WHERE email = ?")
     .get(email) as { is_admin: number } | undefined;
@@ -15,10 +29,11 @@ export async function GET() {
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!requireAdmin(session.user.email)) {
+  if (!(await requireAdmin(session.user.email))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  const db = await getDb();
   const rows = db
     .prepare("SELECT key, value FROM app_settings ORDER BY key ASC")
     .all() as { key: string; value: string }[];
@@ -36,10 +51,11 @@ export async function POST(request: NextRequest) {
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!requireAdmin(session.user.email)) {
+  if (!(await requireAdmin(session.user.email))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  const db = await getDb();
   let body: Record<string, unknown>;
   try {
     body = await request.json();
@@ -61,6 +77,18 @@ export async function POST(request: NextRequest) {
     }
   });
 
+  const KNOWN_KEYS = new Set([
+    "personality", "personality_custom",
+    "guard_rails_enabled", "sandbox_enabled", "ip_protection_enabled",
+    "sandbox_always_allowed", "sandbox_always_blocked",
+    "ip_max_attempts", "ip_window_minutes", "ip_block_duration_minutes",
+    "rate_limit_commands", "rate_limit_runtime_min", "rate_limit_concurrent",
+    "upload_max_size_bytes",
+    "anthropic_api_key",
+    "trusted_proxy",
+    "budget_limit_session_usd", "budget_limit_daily_usd", "budget_limit_monthly_usd",
+  ]);
+
   const entries = Object.entries(body)
     .filter(([, v]) => v !== undefined && v !== null)
     .map(([k, v]) => [k, String(v)] as [string, string]);
@@ -69,7 +97,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "No settings provided" }, { status: 400 });
   }
 
+  const unknownKeys = entries.filter(([k]) => !KNOWN_KEYS.has(k)).map(([k]) => k);
+
   upsertMany(entries);
+
+  if (unknownKeys.length > 0) {
+    return NextResponse.json({ ok: true, warning: `Unrecognized keys: ${unknownKeys.join(", ")}` });
+  }
 
   return NextResponse.json({ ok: true });
 }

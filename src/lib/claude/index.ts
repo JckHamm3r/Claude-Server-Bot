@@ -41,6 +41,9 @@ export function getClaudeProvider(type?: string): ClaudeCodeProvider {
   if (mode === "sdk") {
     return getSDKProvider();
   }
+  if (mode !== "subprocess") {
+    console.warn(`Unknown provider type "${mode}", falling back to subprocess`);
+  }
   return getSubprocessProvider();
 }
 

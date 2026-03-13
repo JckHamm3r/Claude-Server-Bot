@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Square, RotateCcw, Trash2, Zap, Search, Download, ChevronDown } from "lucide-react";
+import { Square, RotateCcw, Trash2, Zap, Search, Download, ChevronDown, ClipboardCopy, Check } from "lucide-react";
 import { cn, apiUrl } from "@/lib/utils";
 import { ModelSelector } from "./model-selector";
 
@@ -15,6 +15,13 @@ interface BudgetLimits {
   session_usd: number;
   daily_usd: number;
   monthly_usd: number;
+}
+
+interface ChatMessage {
+  sender_type: "admin" | "claude";
+  content?: string;
+  parsed?: { content?: string; type?: string };
+  timestamp: string;
 }
 
 interface ChatToolbarProps {
@@ -31,6 +38,7 @@ interface ChatToolbarProps {
   onGlobalSearch?: () => void;
   sessionId?: string;
   budgetLimits?: BudgetLimits | null;
+  messages?: ChatMessage[];
 }
 
 function formatTokenCount(n: number): string {
@@ -81,6 +89,39 @@ function ExportDropdown({ sessionId }: { sessionId: string }) {
   );
 }
 
+function CopyAllButton({ messages }: { messages: ChatMessage[] }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    const lines = messages
+      .filter((m) => {
+        const text = m.content ?? m.parsed?.content;
+        return text && text.trim().length > 0;
+      })
+      .map((m) => {
+        const sender = m.sender_type === "admin" ? "You" : "Claude";
+        const text = m.content ?? m.parsed?.content ?? "";
+        return `**${sender}:**\n${text}`;
+      });
+    if (lines.length === 0) return;
+    navigator.clipboard.writeText(lines.join("\n\n---\n\n"));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      disabled={messages.length === 0}
+      className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+      title="Copy entire conversation to clipboard"
+    >
+      {copied ? <Check className="h-3.5 w-3.5 text-bot-green" /> : <ClipboardCopy className="h-3.5 w-3.5" />}
+      {copied ? "Copied" : "Copy All"}
+    </button>
+  );
+}
+
 export function ChatToolbar({
   onInterrupt,
   onClearContext,
@@ -95,6 +136,7 @@ export function ChatToolbar({
   onGlobalSearch,
   sessionId,
   budgetLimits,
+  messages = [],
 }: ChatToolbarProps) {
   return (
     <div className="flex items-center gap-2 border-b border-bot-border bg-bot-surface px-4 py-2">
@@ -157,6 +199,8 @@ export function ChatToolbar({
             All
           </button>
         )}
+
+        <CopyAllButton messages={messages} />
 
         {sessionId && <ExportDropdown sessionId={sessionId} />}
 

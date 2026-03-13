@@ -1,8 +1,8 @@
 import { createServer as createHttpServer } from "http";
 import { createServer as createHttpsServer } from "https";
 import { readFileSync, existsSync } from "fs";
-import { parse } from "url";
 import next from "next";
+import type { UrlWithParsedQuery } from "url";
 import { Server } from "socket.io";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -17,7 +17,31 @@ app.prepare().then(() => {
   };
 
   const handler = (req: import("http").IncomingMessage, res: import("http").ServerResponse) => {
-    handle(req, res, parse(req.url ?? "/", true));
+    const url = new URL(req.url ?? "/", `http://${req.headers.host || "localhost"}`);
+    const query: Record<string, string | string[]> = {};
+    for (const [key, value] of url.searchParams.entries()) {
+      const existing = query[key];
+      if (existing !== undefined) {
+        query[key] = Array.isArray(existing) ? [...existing, value] : [existing, value];
+      } else {
+        query[key] = value;
+      }
+    }
+    const parsedUrl: UrlWithParsedQuery = {
+      protocol: url.protocol,
+      slashes: true,
+      auth: null,
+      host: url.host,
+      port: url.port,
+      hostname: url.hostname,
+      hash: url.hash || null,
+      search: url.search || null,
+      query,
+      pathname: url.pathname,
+      path: url.pathname + (url.search || ""),
+      href: url.href,
+    };
+    handle(req, res, parsedUrl);
   };
 
   // Use HTTPS if cert files are configured and exist
@@ -39,6 +63,7 @@ app.prepare().then(() => {
   const io = new Server(httpServer, {
     path: socketPath,
     cors: { origin: false },
+    maxHttpBufferSize: 1e6,
   });
 
   registerHandlers(io);

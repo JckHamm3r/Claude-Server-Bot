@@ -17,9 +17,7 @@ export async function middleware(request: NextRequest) {
     pathname === "/claude-code.png" ||
     pathname.startsWith("/avatars/") ||
     pathname === "/api/bot-identity" ||
-    pathname === "/api/health/ping" ||
-    pathname.endsWith(".png") ||
-    pathname.endsWith(".ico")
+    pathname === "/api/health/ping"
   ) {
     return NextResponse.next();
   }
@@ -27,8 +25,9 @@ export async function middleware(request: NextRequest) {
   // Use NEXTAUTH_URL for redirects to avoid localhost in callback URLs
   // (request.nextUrl.origin resolves to localhost on custom servers)
   const configuredUrl = process.env.NEXTAUTH_URL ?? "";
+  const suffix = `/${prefix}/${slug}`;
   const origin = configuredUrl
-    ? configuredUrl.replace(new RegExp(`(/${prefix}/${slug})?$`), "")
+    ? (configuredUrl.endsWith(suffix) ? configuredUrl.slice(0, -suffix.length) : configuredUrl)
     : request.nextUrl.origin;
 
   try {
@@ -40,7 +39,8 @@ export async function middleware(request: NextRequest) {
     if (!token) {
       // Not authenticated → redirect to login (include basePath)
       const loginUrl = new URL(`${basePath}/login`, origin);
-      loginUrl.searchParams.set("callbackUrl", `${origin}${basePath}${pathname}`);
+      const safePath = pathname.startsWith("/") && !pathname.startsWith("//") ? pathname : "/";
+      loginUrl.searchParams.set("callbackUrl", `${origin}${basePath}${safePath}`);
       return NextResponse.redirect(loginUrl);
     }
 
@@ -49,9 +49,8 @@ export async function middleware(request: NextRequest) {
       return NextResponse.next();
     }
 
-    // Check setup_complete for dashboard routes
-    // We store setup_complete in a cookie to avoid DB lookups in middleware (edge runtime)
-    const setupComplete = request.cookies.get("bot_setup_complete")?.value === "1";
+    const setupComplete = token.setupComplete === true ||
+      request.cookies.get("bot_setup_complete")?.value === "1";
     if (!setupComplete && pathname !== "/setup" && !pathname.startsWith("/api/settings/project") && !pathname.startsWith("/api/claude-code/test") && !pathname.startsWith("/api/setup/")) {
       const setupUrl = new URL(`${basePath}/setup`, origin);
       return NextResponse.redirect(setupUrl);

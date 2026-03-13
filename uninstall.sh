@@ -237,6 +237,10 @@ fi
 # ─── Remove install directory ─────────────────────────────────────────────
 echo ""
 if confirm "Remove the entire install directory ($INSTALL_DIR)?" "n"; then
+  if [ -z "$INSTALL_DIR" ] || [ "$INSTALL_DIR" = "/" ] || [ "$INSTALL_DIR" = "$HOME" ]; then
+    error "Refusing to delete '$INSTALL_DIR' — safety check failed"
+    exit 1
+  fi
   echo "  Removing install directory..."
   # If we're inside the directory, move out first
   if [[ "$(pwd)" == "$INSTALL_DIR"* ]]; then

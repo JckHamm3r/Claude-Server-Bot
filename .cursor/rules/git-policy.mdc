@@ -1,0 +1,10 @@
+---
+description: Repo-specific git push policy
+alwaysApply: true
+---
+
+# Git Policy For This Repository
+
+- User has explicitly authorized direct pushes to `origin/main` for this repository.
+- When asked to push, `main` is an allowed target branch.
+- Still follow safe git behavior: do not force-push unless explicitly requested.

@@ -1,5 +1,6 @@
-import { spawn } from "child_process";
+import { spawn, type ChildProcess } from "child_process";
 import { EventEmitter } from "events";
+import path from "path";
 import type { ClaudeCodeProvider, ParsedOutput, TokenUsage } from "./provider";
 
 const CLAUDE_BIN = process.env.CLAUDE_CLI_PATH ?? "claude";
@@ -25,6 +26,7 @@ interface SessionState {
   permissionRetry: boolean;
   preRetryContentLength: number;
   lastEmittedContentLength: number;
+  toolCallCounter: number;
 }
 
 const sessions = new Map<string, SessionState>();
@@ -44,6 +46,16 @@ const gcInterval = setInterval(() => {
 
 // Prevent the interval from keeping Node alive during shutdown
 if (gcInterval.unref) gcInterval.unref();
+
+// ── Process kill helper ──────────────────────────────────────────────────────
+
+function killProcess(proc: ChildProcess): void {
+  try { proc.kill("SIGTERM"); } catch { /* ignore */ }
+  const killTimer = setTimeout(() => {
+    try { proc.kill("SIGKILL"); } catch { /* ignore */ }
+  }, 5000);
+  killTimer.unref();
+}
 
 // ── Error classification ─────────────────────────────────────────────────────
 
@@ -83,6 +95,7 @@ function getOrCreate(sessionId: string): SessionState {
       permissionRetry: false,
       preRetryContentLength: 0,
       lastEmittedContentLength: 0,
+      toolCallCounter: 0,
     });
   }
   const state = sessions.get(sessionId)!;
@@ -122,8 +135,13 @@ function runClaude(
     args.push("--allowed-tools", allAllowedTools.join(","));
   }
 
-  // Add input files for multimodal support (images)
+  // Add input files for multimodal support (images) — validate paths
+  const projectRoot = path.resolve(process.env.CLAUDE_PROJECT_ROOT ?? process.cwd());
   for (const filePath of inputFiles) {
+    if (filePath.startsWith('-')) continue;
+    if (filePath.includes('..')) continue;
+    const resolved = path.resolve(projectRoot, filePath);
+    if (!resolved.startsWith(projectRoot + path.sep) && resolved !== projectRoot) continue;
     args.push("--input-file", filePath);
   }
 
@@ -132,6 +150,13 @@ function runClaude(
     args.push("--system-prompt", state.systemPrompt);
   }
   const fullMessage = message;
+
+  const MAX_MESSAGE_LENGTH = 2 * 1024 * 1024; // 2MB
+  if (fullMessage.length > MAX_MESSAGE_LENGTH) {
+    state.running = false;
+    state.emitter.emit("output", { type: "error", message: "Message too long (max 2MB)" } as ParsedOutput);
+    return;
+  }
 
   const env = { ...process.env };
   delete (env as Record<string, string | undefined>).CLAUDECODE;
@@ -147,6 +172,7 @@ function runClaude(
   proc.stdin.write(fullMessage + "\n");
   proc.stdin.end();
 
+  const MAX_BUFFER_SIZE = 10 * 1024 * 1024; // 10MB
   let buffer = "";
   let producedContent = false;
   let lastStdoutTime = Date.now();
@@ -156,12 +182,7 @@ function runClaude(
   state.timeoutTimer = setTimeout(() => {
     if (state.generation !== gen) return;
     if (state.activeProc === proc) {
-      try { proc.kill("SIGTERM"); } catch { /* ignore */ }
-      // Force kill after 5s if still alive
-      const forceKillTimer = setTimeout(() => {
-        try { proc.kill("SIGKILL"); } catch { /* ignore */ }
-      }, 5000);
-      if (forceKillTimer.unref) forceKillTimer.unref();
+      killProcess(proc);
       state.emitter.emit("output", {
         type: "error",
         message: "Claude process timed out. You can retry your message.",
@@ -187,6 +208,9 @@ function runClaude(
     lastStdoutTime = Date.now();
     state.lastActivity = Date.now();
     buffer += chunk.toString();
+    if (buffer.length > MAX_BUFFER_SIZE) {
+      buffer = buffer.slice(-MAX_BUFFER_SIZE);
+    }
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
 
@@ -273,9 +297,6 @@ function runClaude(
   });
 }
 
-// Tool call ID counter
-let toolCallCounter = 0;
-
 function handleEvent(state: SessionState, event: Record<string, unknown>): void {
   const type = event.type as string;
   state.lastActivity = Date.now();
@@ -314,7 +335,7 @@ function handleEvent(state: SessionState, event: Record<string, unknown>): void 
       }
       if (block.type === "tool_use" && block.name) {
         state.permissionRetry = false;
-        const callId = block.id ?? `tool_${++toolCallCounter}`;
+        const callId = block.id ?? `tool_${++state.toolCallCounter}`;
 
         // Emit tool_call event for rich rendering
         state.emitter.emit("output", {
@@ -429,12 +450,15 @@ export const subprocessProvider: ClaudeCodeProvider = {
 
     // Kill current proc if running, then re-run with expanded tool list
     if (state.activeProc) {
-      try { state.activeProc.kill("SIGTERM"); } catch { /* ignore */ }
+      killProcess(state.activeProc);
       state.activeProc = undefined;
     }
     state.running = false;
 
-    runClaude(state, state.lastMessage, state.skipPermissions, extraTools);
+    // Small delay to allow close event to fire before spawning new process
+    setTimeout(() => {
+      runClaude(state, state.lastMessage, state.skipPermissions, extraTools);
+    }, 100);
   },
 
   denyPermission(sessionId) {
@@ -444,7 +468,7 @@ export const subprocessProvider: ClaudeCodeProvider = {
 
     // Kill the active subprocess — proc.on("close") will emit "done" and set running = false
     if (state.activeProc) {
-      try { state.activeProc.kill("SIGTERM"); } catch { /* ignore */ }
+      killProcess(state.activeProc);
       // Don't clear activeProc here — let close handler do it
     } else {
       // No active proc: emit synthetic done to unblock UI
@@ -464,7 +488,7 @@ export const subprocessProvider: ClaudeCodeProvider = {
       state.timeoutTimer = undefined;
     }
     if (state.activeProc) {
-      try { state.activeProc.kill("SIGTERM"); } catch { /* ignore */ }
+      killProcess(state.activeProc);
       state.activeProc = undefined;
     }
   },
@@ -472,7 +496,7 @@ export const subprocessProvider: ClaudeCodeProvider = {
   closeSession(sessionId) {
     const state = sessions.get(sessionId);
     if (state?.activeProc) {
-      try { state.activeProc.kill("SIGTERM"); } catch { /* ignore */ }
+      killProcess(state.activeProc);
     }
     if (state?.timeoutTimer) clearTimeout(state.timeoutTimer);
     sessions.delete(sessionId);
@@ -480,6 +504,7 @@ export const subprocessProvider: ClaudeCodeProvider = {
 
   onOutput(sessionId, cb) {
     const state = getOrCreate(sessionId);
+    state.emitter.removeAllListeners("output");
     state.emitter.on("output", cb);
   },
 

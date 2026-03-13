@@ -1,4 +1,5 @@
 import db from "./db";
+import { randomUUID } from "crypto";
 
 // ==================== SESSIONS ====================
 
@@ -107,14 +108,16 @@ export function saveMessage(
   messageType: "chat" | "system" | "error" = "chat",
   metadata?: Record<string, unknown>,
 ): ClaudeMessage {
-  const id = require("crypto").randomUUID();
-  db.prepare(`
-    INSERT INTO messages (id, session_id, sender_type, sender_id, content, message_type, metadata)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, sessionId, senderType, senderId ?? null, content, messageType, JSON.stringify(metadata ?? {}));
-  db.prepare("UPDATE sessions SET updated_at = datetime('now') WHERE id = ?").run(sessionId);
-  const row = db.prepare("SELECT * FROM messages WHERE id = ?").get(id) as Record<string, unknown>;
-  return rowToMessage(row);
+  return db.transaction(() => {
+    const id = randomUUID();
+    db.prepare(`
+      INSERT INTO messages (id, session_id, sender_type, sender_id, content, message_type, metadata)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(id, sessionId, senderType, senderId ?? null, content, messageType, JSON.stringify(metadata ?? {}));
+    db.prepare("UPDATE sessions SET updated_at = datetime('now') WHERE id = ?").run(sessionId);
+    const row = db.prepare("SELECT * FROM messages WHERE id = ?").get(id) as Record<string, unknown>;
+    return rowToMessage(row);
+  })();
 }
 
 export function getMessages(sessionId: string): ClaudeMessage[] {
@@ -268,7 +271,7 @@ export function createTemplate(
   data: { name: string; description?: string; system_prompt?: string; model?: string; skip_permissions?: boolean; provider_type?: string; icon?: string; is_default?: boolean },
   createdBy: string,
 ): SessionTemplate {
-  const id = require("crypto").randomUUID();
+  const id = randomUUID();
   db.prepare(`
     INSERT INTO session_templates (id, name, description, system_prompt, model, skip_permissions, provider_type, icon, is_default, created_by)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -379,19 +382,20 @@ export function createAgent(
   data: { name: string; description: string; icon?: string; model: string; allowed_tools: string[] },
   createdBy: string,
 ): ClaudeAgent {
-  const id = require("crypto").randomUUID();
-  db.prepare(`
-    INSERT INTO agents (id, name, description, icon, model, allowed_tools, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, data.name, data.description, data.icon ?? null, data.model, JSON.stringify(data.allowed_tools), createdBy);
-  const agent = rowToAgent(db.prepare("SELECT * FROM agents WHERE id = ?").get(id) as Record<string, unknown>);
-  // Create initial version
-  const versionId = require("crypto").randomUUID();
-  db.prepare(`
-    INSERT INTO agent_versions (id, agent_id, version_number, config_snapshot, change_description, created_by)
-    VALUES (?, ?, 1, ?, 'Initial version', ?)
-  `).run(versionId, id, JSON.stringify({ name: agent.name, description: agent.description, icon: agent.icon, model: agent.model, allowed_tools: agent.allowed_tools, status: agent.status, current_version: 1 }), createdBy);
-  return agent;
+  return db.transaction(() => {
+    const id = randomUUID();
+    db.prepare(`
+      INSERT INTO agents (id, name, description, icon, model, allowed_tools, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(id, data.name, data.description, data.icon ?? null, data.model, JSON.stringify(data.allowed_tools), createdBy);
+    const agent = rowToAgent(db.prepare("SELECT * FROM agents WHERE id = ?").get(id) as Record<string, unknown>);
+    const versionId = randomUUID();
+    db.prepare(`
+      INSERT INTO agent_versions (id, agent_id, version_number, config_snapshot, change_description, created_by)
+      VALUES (?, ?, 1, ?, 'Initial version', ?)
+    `).run(versionId, id, JSON.stringify({ name: agent.name, description: agent.description, icon: agent.icon, model: agent.model, allowed_tools: agent.allowed_tools, status: agent.status, current_version: 1 }), createdBy);
+    return agent;
+  })();
 }
 
 export function updateAgent(
@@ -400,25 +404,27 @@ export function updateAgent(
   updatedBy: string,
   changeDescription?: string,
 ): ClaudeAgent {
-  const fields: string[] = [];
-  const values: unknown[] = [];
-  if (data.name !== undefined) { fields.push("name = ?"); values.push(data.name); }
-  if (data.description !== undefined) { fields.push("description = ?"); values.push(data.description); }
-  if (data.icon !== undefined) { fields.push("icon = ?"); values.push(data.icon); }
-  if (data.model !== undefined) { fields.push("model = ?"); values.push(data.model); }
-  if (data.allowed_tools !== undefined) { fields.push("allowed_tools = ?"); values.push(JSON.stringify(data.allowed_tools)); }
-  if (data.status !== undefined) { fields.push("status = ?"); values.push(data.status); }
-  fields.push("updated_at = datetime('now')");
-  fields.push("current_version = current_version + 1");
-  values.push(id);
-  db.prepare(`UPDATE agents SET ${fields.join(", ")} WHERE id = ?`).run(...values as Parameters<typeof db.prepare>[0][]);
-  const agent = rowToAgent(db.prepare("SELECT * FROM agents WHERE id = ?").get(id) as Record<string, unknown>);
-  const versionId = require("crypto").randomUUID();
-  db.prepare(`
-    INSERT INTO agent_versions (id, agent_id, version_number, config_snapshot, change_description, created_by)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(versionId, id, agent.current_version, JSON.stringify({ name: agent.name, description: agent.description, icon: agent.icon, model: agent.model, allowed_tools: agent.allowed_tools, status: agent.status, current_version: agent.current_version }), changeDescription ?? null, updatedBy);
-  return agent;
+  return db.transaction(() => {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+    if (data.name !== undefined) { fields.push("name = ?"); values.push(data.name); }
+    if (data.description !== undefined) { fields.push("description = ?"); values.push(data.description); }
+    if (data.icon !== undefined) { fields.push("icon = ?"); values.push(data.icon); }
+    if (data.model !== undefined) { fields.push("model = ?"); values.push(data.model); }
+    if (data.allowed_tools !== undefined) { fields.push("allowed_tools = ?"); values.push(JSON.stringify(data.allowed_tools)); }
+    if (data.status !== undefined) { fields.push("status = ?"); values.push(data.status); }
+    fields.push("updated_at = datetime('now')");
+    fields.push("current_version = current_version + 1");
+    values.push(id);
+    db.prepare(`UPDATE agents SET ${fields.join(", ")} WHERE id = ?`).run(...values as Parameters<typeof db.prepare>[0][]);
+    const agent = rowToAgent(db.prepare("SELECT * FROM agents WHERE id = ?").get(id) as Record<string, unknown>);
+    const versionId = randomUUID();
+    db.prepare(`
+      INSERT INTO agent_versions (id, agent_id, version_number, config_snapshot, change_description, created_by)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(versionId, id, agent.current_version, JSON.stringify({ name: agent.name, description: agent.description, icon: agent.icon, model: agent.model, allowed_tools: agent.allowed_tools, status: agent.status, current_version: agent.current_version }), changeDescription ?? null, updatedBy);
+    return agent;
+  })();
 }
 
 export function deleteAgent(id: string): void {
@@ -486,7 +492,7 @@ function rowToPlanStep(row: Record<string, unknown>): ClaudePlanStep {
 }
 
 export function createPlan(sessionId: string, goal: string, createdBy: string): ClaudePlan {
-  const id = require("crypto").randomUUID();
+  const id = randomUUID();
   db.prepare("INSERT INTO plans (id, session_id, goal, created_by) VALUES (?, ?, ?, ?)").run(id, sessionId, goal, createdBy);
   return rowToPlan(db.prepare("SELECT * FROM plans WHERE id = ?").get(id) as Record<string, unknown>);
 }
@@ -509,7 +515,7 @@ export function listPlans(sessionId: string): ClaudePlan[] {
 }
 
 export function addPlanStep(planId: string, step: { step_order: number; summary: string; details?: string }): ClaudePlanStep {
-  const id = require("crypto").randomUUID();
+  const id = randomUUID();
   db.prepare("INSERT INTO plan_steps (id, plan_id, step_order, summary, details) VALUES (?, ?, ?, ?, ?)").run(id, planId, step.step_order, step.summary, step.details ?? null);
   return rowToPlanStep(db.prepare("SELECT * FROM plan_steps WHERE id = ?").get(id) as Record<string, unknown>);
 }
@@ -533,9 +539,20 @@ export function updatePlanStep(
   if (data.error !== undefined) { fields.push("error = ?"); values.push(data.error); }
   if (data.approved_by !== undefined) { fields.push("approved_by = ?"); values.push(data.approved_by); }
   if (data.executed_at !== undefined) { fields.push("executed_at = ?"); values.push(data.executed_at); }
+  if (fields.length === 0) {
+    return rowToPlanStep(db.prepare("SELECT * FROM plan_steps WHERE id = ?").get(id) as Record<string, unknown>);
+  }
   values.push(id);
   db.prepare(`UPDATE plan_steps SET ${fields.join(", ")} WHERE id = ?`).run(...values as Parameters<typeof db.prepare>[0][]);
   return rowToPlanStep(db.prepare("SELECT * FROM plan_steps WHERE id = ?").get(id) as Record<string, unknown>);
+}
+
+export function deletePlanSteps(planId: string): void {
+  db.prepare("DELETE FROM plan_steps WHERE plan_id = ?").run(planId);
+}
+
+export function deletePlan(planId: string): void {
+  db.prepare("DELETE FROM plans WHERE id = ?").run(planId);
 }
 
 // ==================== USER SETTINGS ====================
@@ -658,17 +675,18 @@ export interface SearchResult {
 
 export function searchMessages(query: string, limit = 50): SearchResult[] {
   try {
+    const safeQuery = '"' + query.replace(/"/g, '""') + '"';
     const rows = db.prepare(`
       SELECT m.id as messageId, m.session_id as sessionId, s.name as sessionName,
              m.sender_type as senderType, m.content, m.timestamp,
-             snippet(messages_fts, 0, '<mark>', '</mark>', '...', 40) as snippet
+             snippet(messages_fts, 0, '[[highlight]]', '[[/highlight]]', '...', 40) as snippet
       FROM messages_fts
       JOIN messages m ON messages_fts.rowid = m.rowid
       LEFT JOIN sessions s ON m.session_id = s.id
       WHERE messages_fts MATCH ?
       ORDER BY rank
       LIMIT ?
-    `).all(query, limit) as SearchResult[];
+    `).all(safeQuery, limit) as SearchResult[];
     return rows;
   } catch {
     return [];
@@ -677,19 +695,68 @@ export function searchMessages(query: string, limit = 50): SearchResult[] {
 
 export function searchSessionMessages(sessionId: string, query: string, limit = 50): SearchResult[] {
   try {
+    const safeQuery = '"' + query.replace(/"/g, '""') + '"';
     const rows = db.prepare(`
       SELECT m.id as messageId, m.session_id as sessionId, s.name as sessionName,
              m.sender_type as senderType, m.content, m.timestamp,
-             snippet(messages_fts, 0, '<mark>', '</mark>', '...', 40) as snippet
+             snippet(messages_fts, 0, '[[highlight]]', '[[/highlight]]', '...', 40) as snippet
       FROM messages_fts
       JOIN messages m ON messages_fts.rowid = m.rowid
       LEFT JOIN sessions s ON m.session_id = s.id
       WHERE messages_fts MATCH ? AND m.session_id = ?
       ORDER BY rank
       LIMIT ?
-    `).all(query, sessionId, limit) as SearchResult[];
+    `).all(safeQuery, sessionId, limit) as SearchResult[];
     return rows;
   } catch {
     return [];
   }
+}
+
+// ==================== SESSION ACCESS CONTROL ====================
+
+export function isUserAdmin(email: string): boolean {
+  try {
+    const row = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(email) as { is_admin: number } | undefined;
+    return Boolean(row?.is_admin);
+  } catch {
+    return false;
+  }
+}
+
+export function canAccessSession(sessionId: string, email: string): boolean {
+  const session = getSession(sessionId);
+  if (!session) return false;
+  if (session.created_by === email) return true;
+  if (isUserAdmin(email)) return true;
+  const participant = db.prepare(
+    "SELECT 1 FROM session_participants WHERE session_id = ? AND user_email = ?"
+  ).get(sessionId, email);
+  return Boolean(participant);
+}
+
+export function canModifySession(sessionId: string, email: string): boolean {
+  const session = getSession(sessionId);
+  if (!session) return false;
+  if (session.created_by === email) return true;
+  if (isUserAdmin(email)) return true;
+  return false;
+}
+
+export function addSessionParticipant(sessionId: string, userEmail: string, role = "collaborator"): void {
+  db.prepare(
+    "INSERT OR IGNORE INTO session_participants (session_id, user_email, role) VALUES (?, ?, ?)"
+  ).run(sessionId, userEmail, role);
+}
+
+export function removeSessionParticipant(sessionId: string, userEmail: string): void {
+  db.prepare(
+    "DELETE FROM session_participants WHERE session_id = ? AND user_email = ?"
+  ).run(sessionId, userEmail);
+}
+
+export function listSessionParticipants(sessionId: string): Array<{ user_email: string; role: string; invited_at: string }> {
+  return db.prepare(
+    "SELECT user_email, role, invited_at FROM session_participants WHERE session_id = ?"
+  ).all(sessionId) as Array<{ user_email: string; role: string; invited_at: string }>;
 }

@@ -3,11 +3,21 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getClaudeProvider } from "@/lib/claude";
 
+const lastTestTime = new Map<string, number>();
+
 export async function GET() {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  const email = session.user.email;
+  const now = Date.now();
+  const last = lastTestTime.get(email);
+  if (last && now - last < 60000) {
+    return NextResponse.json({ error: "Rate limited — wait 60 seconds between tests" }, { status: 429 });
+  }
+  lastTestTime.set(email, now);
 
   const sessionId = `test-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const provider = getClaudeProvider();

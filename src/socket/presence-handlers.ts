@@ -6,6 +6,7 @@ import {
   markNotificationsRead,
   markAllNotificationsRead,
 } from "../lib/notifications";
+import { canAccessSession } from "../lib/claude-db";
 
 const PROJECT_ROOT = process.env.CLAUDE_PROJECT_ROOT ?? process.cwd();
 
@@ -15,10 +16,12 @@ export function registerPresenceHandlers(ctx: HandlerContext) {
   // ── Typing indicators ─────────────────────────────────────────────────
 
   socket.on("claude:typing_start", ({ sessionId }: { sessionId: string }) => {
+    if (!canAccessSession(sessionId, email)) return;
     socket.to(`session:${sessionId}`).emit("claude:typing", { email, typing: true });
   });
 
   socket.on("claude:typing_stop", ({ sessionId }: { sessionId: string }) => {
+    if (!canAccessSession(sessionId, email)) return;
     socket.to(`session:${sessionId}`).emit("claude:typing", { email, typing: false });
   });
 
@@ -85,7 +88,11 @@ export function registerPresenceHandlers(ctx: HandlerContext) {
 
   socket.on("terminal:resize", ({ cols, rows }: { cols: number; rows: number }) => {
     const pty = ctx.ptyProcesses.get(socket.id);
-    if (pty) pty.resize(cols, rows);
+    if (pty) {
+      const safeCols = Math.max(1, Math.min(500, Number(cols) || 80));
+      const safeRows = Math.max(1, Math.min(200, Number(rows) || 24));
+      pty.resize(safeCols, safeRows);
+    }
   });
 
   socket.on("terminal:close", () => {
@@ -112,6 +119,13 @@ export function registerPresenceHandlers(ctx: HandlerContext) {
     const userInfo = ctx.connectedUsers.get(socket.id);
     if (userInfo?.activeSession) {
       // Don't delete command submitter — the command may still be running
+    }
+
+    // Clean up rate-limit command counts for this user
+    for (const [key] of ctx.userSessionCommands) {
+      if (key === email) {
+        ctx.userSessionCommands.delete(key);
+      }
     }
 
     ctx.connectedUsers.delete(socket.id);

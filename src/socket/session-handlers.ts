@@ -17,6 +17,11 @@ import {
   createTemplate,
   updateTemplate,
   deleteTemplate,
+  canAccessSession,
+  canModifySession,
+  addSessionParticipant,
+  removeSessionParticipant,
+  listSessionParticipants,
 } from "../lib/claude-db";
 import { AVAILABLE_MODELS, DEFAULT_MODEL } from "../lib/models";
 import { isSDKAvailable } from "../lib/claude";
@@ -48,6 +53,11 @@ export function registerSessionHandlers(ctx: HandlerContext) {
       templateId?: string;
     }) => {
       try {
+        if (!/^[a-zA-Z0-9_-]{1,64}$/.test(sessionId)) {
+          socket.emit("claude:error", { sessionId, message: "Invalid session ID format" });
+          return;
+        }
+
         // Apply template if provided
         let templateSystemPrompt: string | undefined;
         if (templateId) {
@@ -128,6 +138,10 @@ export function registerSessionHandlers(ctx: HandlerContext) {
   socket.on(
     "claude:set_active_session",
     ({ sessionId }: { sessionId: string | null }) => {
+      if (sessionId && !canAccessSession(sessionId, email)) {
+        socket.emit("claude:error", { sessionId, message: "Access denied" });
+        return;
+      }
       ctx.connectedUsers.set(socket.id, { email, activeSession: sessionId });
       if (sessionId) socket.join(`session:${sessionId}`);
       ctx.broadcastPresence();
@@ -145,9 +159,8 @@ export function registerSessionHandlers(ctx: HandlerContext) {
 
   socket.on("claude:get_messages", ({ sessionId }: { sessionId: string }) => {
     try {
-      const session = getSession(sessionId);
-      if (!session || session.created_by !== email) {
-        socket.emit("claude:error", { sessionId, message: "Session not found" });
+      if (!canAccessSession(sessionId, email)) {
+        socket.emit("claude:error", { sessionId, message: "Access denied" });
         return;
       }
       const messages = getMessages(sessionId);
@@ -161,6 +174,10 @@ export function registerSessionHandlers(ctx: HandlerContext) {
     "claude:rename_session",
     ({ sessionId, name }: { sessionId: string; name: string }) => {
       try {
+        if (!canModifySession(sessionId, email)) {
+          socket.emit("claude:error", { sessionId, message: "Access denied" });
+          return;
+        }
         renameSession(sessionId, name);
       } catch (err: unknown) {
         console.error("[db] rename_session failed:", err);
@@ -177,8 +194,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
 
   socket.on("claude:delete_session", ({ sessionId }: { sessionId: string }) => {
     try {
-      const session = getSession(sessionId);
-      if (!session || session.created_by !== email) return;
+      if (!canModifySession(sessionId, email)) return;
       const sp = ctx.getSessionProvider(sessionId);
       sp.offOutput(sessionId);
       sp.closeSession(sessionId);
@@ -232,6 +248,10 @@ export function registerSessionHandlers(ctx: HandlerContext) {
   );
 
   socket.on("claude:close_session", ({ sessionId }: { sessionId: string }) => {
+    if (!canModifySession(sessionId, email)) {
+      socket.emit("claude:error", { sessionId, message: "Access denied" });
+      return;
+    }
     const sp = ctx.getSessionProvider(sessionId);
     sp.offOutput(sessionId);
     sp.closeSession(sessionId);
@@ -250,8 +270,14 @@ export function registerSessionHandlers(ctx: HandlerContext) {
     "claude:set_model",
     ({ sessionId, model }: { sessionId: string; model: string }) => {
       try {
-        const session = getSession(sessionId);
-        if (!session || session.created_by !== email) return;
+        if (!canModifySession(sessionId, email)) {
+          socket.emit("claude:error", { sessionId, message: "Access denied" });
+          return;
+        }
+        if (!AVAILABLE_MODELS.some((m) => m.value === model)) {
+          socket.emit("claude:error", { sessionId, message: "Invalid model" });
+          return;
+        }
         updateSessionModel(sessionId, model);
         io.to(`session:${sessionId}`).emit("claude:model_changed", { sessionId, model });
       } catch (err) {
@@ -264,6 +290,10 @@ export function registerSessionHandlers(ctx: HandlerContext) {
   socket.on(
     "claude:get_session_state",
     ({ sessionId }: { sessionId: string }) => {
+      if (!canAccessSession(sessionId, email)) {
+        socket.emit("claude:error", { sessionId, message: "Access denied" });
+        return;
+      }
       const sp = ctx.getSessionProvider(sessionId);
       socket.emit("claude:session_state", {
         sessionId,
@@ -278,6 +308,10 @@ export function registerSessionHandlers(ctx: HandlerContext) {
     "claude:get_usage",
     ({ sessionId }: { sessionId: string }) => {
       try {
+        if (!canAccessSession(sessionId, email)) {
+          socket.emit("claude:error", { sessionId, message: "Access denied" });
+          return;
+        }
         const usage = getSessionTokenUsage(sessionId);
         socket.emit("claude:session_usage", { sessionId, usage });
       } catch (err) {
@@ -288,7 +322,8 @@ export function registerSessionHandlers(ctx: HandlerContext) {
 
   socket.on("claude:get_global_usage", ({ since, userId }: { since?: string; userId?: string }) => {
     try {
-      const usage = getGlobalTokenUsage({ since, userId });
+      const effectiveUserId = isAdmin ? userId : email;
+      const usage = getGlobalTokenUsage({ since, userId: effectiveUserId });
       socket.emit("claude:global_usage", { usage });
     } catch (err) {
       socket.emit("claude:error", { message: String(err) });
@@ -409,6 +444,46 @@ export function registerSessionHandlers(ctx: HandlerContext) {
       socket.emit("claude:templates", { templates });
     } catch (err) {
       socket.emit("claude:error", { message: String(err) });
+    }
+  });
+
+  // ── Session sharing ────────────────────────────────────────────────────
+
+  socket.on("claude:invite_to_session", ({ sessionId, inviteEmail }: { sessionId: string; inviteEmail: string }) => {
+    try {
+      if (!canModifySession(sessionId, email)) {
+        socket.emit("claude:error", { sessionId, message: "Only session owner or admin can invite" });
+        return;
+      }
+      addSessionParticipant(sessionId, inviteEmail);
+      socket.emit("claude:session_participants", { sessionId, participants: listSessionParticipants(sessionId) });
+    } catch (err) {
+      socket.emit("claude:error", { sessionId, message: "Failed to invite user" });
+    }
+  });
+
+  socket.on("claude:remove_from_session", ({ sessionId, removeEmail }: { sessionId: string; removeEmail: string }) => {
+    try {
+      if (!canModifySession(sessionId, email)) {
+        socket.emit("claude:error", { sessionId, message: "Only session owner or admin can remove" });
+        return;
+      }
+      removeSessionParticipant(sessionId, removeEmail);
+      socket.emit("claude:session_participants", { sessionId, participants: listSessionParticipants(sessionId) });
+    } catch (err) {
+      socket.emit("claude:error", { sessionId, message: "Failed to remove user" });
+    }
+  });
+
+  socket.on("claude:list_session_participants", ({ sessionId }: { sessionId: string }) => {
+    try {
+      if (!canAccessSession(sessionId, email)) {
+        socket.emit("claude:error", { sessionId, message: "Access denied" });
+        return;
+      }
+      socket.emit("claude:session_participants", { sessionId, participants: listSessionParticipants(sessionId) });
+    } catch (err) {
+      socket.emit("claude:error", { sessionId, message: "Failed to list participants" });
     }
   });
 }

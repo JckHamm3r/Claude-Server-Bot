@@ -29,6 +29,12 @@ export async function POST(request: NextRequest) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
+
+    const SQLITE_MAGIC = Buffer.from("SQLite format 3\0");
+    if (buffer.length < 16 || !buffer.subarray(0, 16).equals(SQLITE_MAGIC)) {
+      return NextResponse.json({ error: "File is not a valid SQLite database" }, { status: 400 });
+    }
+
     const destPath = path.join(DATA_DIR, "restore-pending.db");
     writeFileSync(destPath, buffer);
 

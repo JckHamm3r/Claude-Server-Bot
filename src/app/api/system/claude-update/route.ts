@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import db from "@/lib/db";
 
 export async function POST() {
@@ -18,11 +18,11 @@ export async function POST() {
   }
 
   try {
-    const output = execSync("npm install -g @anthropic-ai/claude-code", {
+    const output = execFileSync("npm", ["install", "-g", "@anthropic-ai/claude-code"], {
       encoding: "utf8",
       timeout: 120000,
     });
-    return NextResponse.json({ ok: true, output });
+    return NextResponse.json({ ok: true, output: output.slice(0, 2000) });
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ ok: false, output: errorMessage });

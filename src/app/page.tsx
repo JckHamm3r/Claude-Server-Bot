@@ -25,8 +25,8 @@ export default function DashboardPage() {
   }, []);
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center bg-bot-bg select-none">
-      <div className="text-center space-y-2">
+    <main className="min-h-screen flex flex-col items-center justify-center bg-bot-bg">
+      <div className="text-center space-y-2 select-none">
         <h1 className="text-h1 font-semibold text-bot-text">{hostname}</h1>
         {projectRoot && (
           <p className="text-body text-bot-muted font-mono">{projectRoot}</p>
