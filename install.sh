@@ -258,7 +258,7 @@ stop_spinner() {
     kill "$SPINNER_PID" 2>/dev/null || true
     wait "$SPINNER_PID" 2>/dev/null || true
     SPINNER_PID=""
-    printf "\r%80s\r" ""  # Clear the line
+    printf "\r%120s\r" ""  # Clear the line
   fi
 }
 
@@ -1384,8 +1384,9 @@ step_confirm() {
   printf "  ${BOLD}║${NC}  Project Dir:   %-41s${BOLD}║${NC}\n" "$PROJECT_ROOT"
   printf "  ${BOLD}║${NC}  Install Dir:   %-41s${BOLD}║${NC}\n" "$INSTALL_DIR"
   printf "  ${BOLD}║${NC}  Service:       %-41s${BOLD}║${NC}\n" "$service_display"
-  printf "  ${BOLD}║${NC}  URL:           %-41s${BOLD}║${NC}\n" "$full_url"
   echo -e "  ${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
+  echo ""
+  echo -e "  ${BOLD}URL:${NC} ${CYAN}${full_url}${NC}"
   echo ""
 
   if [ -z "$DOMAIN" ]; then
@@ -2309,13 +2310,11 @@ step_done() {
 
   echo -e "${BOLD}  ${BOT_NAME} is live!${NC}"
   echo ""
-  echo -e "  ${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}"
-  echo -e "  ${BOLD}║  ${GREEN}Your Credentials${NC}${BOLD}                                          ║${NC}"
-  echo -e "  ${BOLD}╠══════════════════════════════════════════════════════════════╣${NC}"
-  printf "  ${BOLD}║${NC}  URL:       ${CYAN}%-45s${NC}${BOLD}║${NC}\n" "$full_url"
-  printf "  ${BOLD}║${NC}  Email:     %-45s${BOLD}║${NC}\n" "$ADMIN_EMAIL"
-  printf "  ${BOLD}║${NC}  Password:  %-45s${BOLD}║${NC}\n" "$ADMIN_PASSWORD"
-  echo -e "  ${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
+  echo -e "  ${BOLD}${GREEN}Your Credentials${NC}"
+  echo ""
+  echo -e "  ${BOLD}URL:${NC}       ${CYAN}${full_url}${NC}"
+  echo -e "  ${BOLD}Email:${NC}     ${ADMIN_EMAIL}"
+  echo -e "  ${BOLD}Password:${NC}  ${ADMIN_PASSWORD}"
   echo ""
 
   # Try to copy password to clipboard
