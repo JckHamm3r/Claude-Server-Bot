@@ -3,7 +3,6 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import fs from "fs";
 import path from "path";
-import { execSync } from "child_process";
 
 const ENV_FILE = path.join(process.cwd(), ".env");
 
@@ -54,16 +53,9 @@ export async function POST(request: NextRequest) {
   const hasClaudeMd = fs.existsSync(path.join(projectRoot, "CLAUDE.md"));
   const hasClaudeDir = fs.existsSync(path.join(projectRoot, ".claude"));
 
-  // Update .env
+  // Update .env and set in-memory so current process picks it up immediately
   updateEnvFile("CLAUDE_PROJECT_ROOT", projectRoot);
-  updateEnvFile("NEXT_PUBLIC_CLAUDE_PROJECT_ROOT", projectRoot);
-
-  // Restart service
-  try {
-    execSync("sudo systemctl restart claude-bot.service", { stdio: "pipe" });
-  } catch {
-    // Service might not exist in dev
-  }
+  process.env.CLAUDE_PROJECT_ROOT = projectRoot;
 
   return NextResponse.json({ ok: true, hasClaudeMd, hasClaudeDir });
 }

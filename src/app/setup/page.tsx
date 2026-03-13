@@ -68,8 +68,8 @@ export default function SetupPage() {
       if (res.ok) {
         setProjectStatus({ hasClaudeMd: data.hasClaudeMd, hasClaudeDir: data.hasClaudeDir, path });
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error("[setup] checkProject error:", err);
     }
   }
 
@@ -92,6 +92,8 @@ export default function SetupPage() {
       } else {
         setProjectError(data.error ?? "Failed to update");
       }
+    } catch (err) {
+      setProjectError("Failed to save project: " + String(err));
     } finally {
       setSavingProject(false);
     }
@@ -132,6 +134,13 @@ export default function SetupPage() {
 
   // Compute effective steps (skip step 2 if CLAUDE.md exists)
   const skipInit = projectStatus?.hasClaudeMd ?? false;
+
+  // Auto-advance past step 2 if it shouldn't be shown
+  useEffect(() => {
+    if (step === 2 && (skipInit || !projectStatus)) {
+      setStep(3);
+    }
+  }, [step, skipInit, projectStatus]);
 
   function advanceStep(from: Step) {
     if (from === 1) {

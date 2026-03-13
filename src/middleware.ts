@@ -52,7 +52,7 @@ export async function middleware(request: NextRequest) {
     // Check setup_complete for dashboard routes
     // We store setup_complete in a cookie to avoid DB lookups in middleware (edge runtime)
     const setupComplete = request.cookies.get("bot_setup_complete")?.value === "1";
-    if (!setupComplete && pathname !== "/setup") {
+    if (!setupComplete && pathname !== "/setup" && !pathname.startsWith("/api/settings/project") && !pathname.startsWith("/api/claude-code/test") && !pathname.startsWith("/api/setup/")) {
       const setupUrl = new URL(`${basePath}/setup`, origin);
       return NextResponse.redirect(setupUrl);
     }
