@@ -373,11 +373,17 @@ install_pkg() {
 
 # ─── Utility functions ─────────────────────────────────────────────────────
 check_sudo() {
-  if ! sudo -v 2>/dev/null; then
-    error "sudo access is required but is not available."
-    echo "  Run this installer with a user that has sudo privileges."
-    return 1
+  # Try non-interactive first (passwordless sudo / SSH key setups)
+  if sudo -n true 2>/dev/null; then
+    return 0
   fi
+  # Fall back to interactive (may prompt for password)
+  if sudo -v 2>/dev/null; then
+    return 0
+  fi
+  error "sudo access is required but is not available."
+  echo "  Run this installer with a user that has sudo privileges."
+  return 1
 }
 
 get_local_ip() {
