@@ -8,6 +8,7 @@ import { Copy, Check, CheckCircle2, Pencil, Trash2, X, FileText } from "lucide-r
 import Image from "next/image";
 import type { ParsedOutput } from "@/lib/claude/provider";
 import { getAvatarPath, type AvatarState } from "@/lib/avatar-state";
+import { apiUrl } from "@/lib/utils";
 import { OptionsButtons } from "./options-buttons";
 import { ConfirmButtons } from "./confirm-buttons";
 import { DiffView } from "./diff-view";
@@ -296,14 +297,14 @@ export function MessageItem({
               {imageAttachments.map((img) => (
                 <a
                   key={img.id}
-                  href={`/api/claude-code/upload/${img.id}`}
+                  href={apiUrl(`/api/claude-code/upload/${img.id}`)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="block rounded-lg overflow-hidden border border-bot-border hover:border-bot-accent transition-colors"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={`/api/claude-code/upload/${img.id}`}
+                    src={apiUrl(`/api/claude-code/upload/${img.id}`)}
                     alt={img.name}
                     className="max-w-[200px] max-h-[150px] object-cover"
                   />
@@ -316,7 +317,7 @@ export function MessageItem({
               {attachmentIds.filter((id) => !imageAttachments.some((img) => img.id === id)).map((id) => (
                 <a
                   key={id}
-                  href={`/api/claude-code/upload/${id}`}
+                  href={apiUrl(`/api/claude-code/upload/${id}`)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 rounded bg-bot-accent/10 px-1.5 py-0.5 text-[10px] font-mono text-bot-accent hover:bg-bot-accent/20 transition-colors"

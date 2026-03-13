@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { apiUrl } from "@/lib/utils";
 
 const FRIENDLY_NAMES: Record<string, string> = {
   "CLAUDE.md": "Project Instructions (CLAUDE.md)",
@@ -29,7 +30,7 @@ export function MemoryTab() {
 
   // Load file list on mount
   useEffect(() => {
-    fetch("/api/claude-code/memory")
+    fetch(apiUrl("/api/claude-code/memory"))
       .then((r) => r.json())
       .then((data: { files?: string[]; error?: string }) => {
         if (data.files && data.files.length > 0) {
@@ -46,7 +47,7 @@ export function MemoryTab() {
     setLoadError(null);
     setSaveState("idle");
 
-    fetch(`/api/claude-code/memory?file=${encodeURIComponent(file)}`)
+    fetch(apiUrl(`/api/claude-code/memory?file=${encodeURIComponent(file)}`))
       .then((r) => r.json())
       .then((data: { content?: string; error?: string }) => {
         if (data.error) {
@@ -71,7 +72,7 @@ export function MemoryTab() {
     if (!activeFile) return;
     setSaveState("saving");
 
-    fetch("/api/claude-code/memory", {
+    fetch(apiUrl("/api/claude-code/memory"), {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ file: activeFile, content }),

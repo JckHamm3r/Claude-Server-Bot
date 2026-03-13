@@ -1,15 +1,25 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { updateUserSettings } from "@/lib/claude-db";
 
-export async function POST() {
+function isHttps(): boolean {
+  const url = process.env.NEXTAUTH_URL ?? "";
+  return url.startsWith("https");
+}
+
+export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  await updateUserSettings(session.user.email, { setup_complete: true });
+  try {
+    await updateUserSettings(session.user.email, { setup_complete: true });
+  } catch (err) {
+    console.error("[setup/complete] updateUserSettings failed:", err);
+    return NextResponse.json({ error: "Setup completion failed" }, { status: 500 });
+  }
 
   // Return response with cookie to signal setup is done
   const response = NextResponse.json({ ok: true });
@@ -18,6 +28,7 @@ export async function POST() {
     path: "/",
     maxAge: 60 * 60 * 24 * 365, // 1 year
     sameSite: "lax",
+    secure: isHttps(),
   });
   return response;
 }

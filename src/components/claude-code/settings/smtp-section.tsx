@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { apiUrl } from "@/lib/utils";
 
 interface SmtpFormData {
   host: string;
@@ -35,7 +36,7 @@ export function SmtpSection() {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
-    fetch("/api/settings/smtp")
+    fetch(apiUrl("/api/settings/smtp"))
       .then((r) => r.json())
       .then((d: Partial<SmtpFormData>) => setForm({ ...DEFAULT_FORM, ...d }))
       .catch(() => {})
@@ -49,7 +50,7 @@ export function SmtpSection() {
     setSaving(true);
     setMsg(null);
     try {
-      const res = await fetch("/api/settings/smtp", {
+      const res = await fetch(apiUrl("/api/settings/smtp"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
@@ -69,7 +70,7 @@ export function SmtpSection() {
     setTesting(true);
     setMsg(null);
     try {
-      const res = await fetch("/api/settings/smtp/test", {
+      const res = await fetch(apiUrl("/api/settings/smtp/test"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ to: testEmail.trim() }),

@@ -35,8 +35,14 @@ export async function PUT(req: NextRequest) {
   const token = await requireAdmin(req);
   if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
 
-  const { apiKey } = (await req.json()) as { apiKey: string };
+  let body: { apiKey?: string };
+  try {
+    body = (await req.json()) as { apiKey: string };
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
 
+  const { apiKey } = body;
   if (typeof apiKey !== "string") {
     return NextResponse.json({ error: "Invalid API key" }, { status: 400 });
   }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { getSocket } from "@/lib/socket";
-import { cn } from "@/lib/utils";
+import { cn, apiUrl } from "@/lib/utils";
 import type { ClaudeUserSettings } from "@/lib/claude-db";
 import {
   CheckCircle2,
@@ -122,16 +122,16 @@ export function SettingsPanel() {
       setSettings(s);
     });
     // Determine admin via users endpoint (gracefully)
-    fetch("/api/users")
+    fetch(apiUrl("/api/users"))
       .then((r) => { if (r.ok) setIsAdmin(true); })
       .catch(() => {});
     // Load bot identity
-    fetch("/api/bot-identity")
+    fetch(apiUrl("/api/bot-identity"))
       .then((r) => r.json())
       .then((d) => { setBotName(d.name); setBotTagline(d.tagline); setBotAvatar(d.avatar); })
       .catch(() => {});
     // Load app settings
-    fetch("/api/app-settings")
+    fetch(apiUrl("/api/app-settings"))
       .then((r) => r.json())
       .then((d) => {
         setPersonality(d.personality ?? "professional");
@@ -147,7 +147,7 @@ export function SettingsPanel() {
 
   useEffect(() => {
     if (activeSection === "users") {
-      fetch("/api/users")
+      fetch(apiUrl("/api/users"))
         .then((r) => r.json())
         .then((data) => setUsers(data.users ?? []))
         .catch(() => {});
@@ -193,7 +193,7 @@ export function SettingsPanel() {
     if (!newEmail.trim() || addingUser) return;
     setAddingUser(true);
     try {
-      const res = await fetch("/api/users", {
+      const res = await fetch(apiUrl("/api/users"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: newEmail.trim() }),
@@ -211,7 +211,7 @@ export function SettingsPanel() {
 
   async function handleDeleteUser(email: string) {
     if (deletingEmail === email) {
-      await fetch("/api/users", {
+      await fetch(apiUrl("/api/users"), {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
@@ -229,7 +229,7 @@ export function SettingsPanel() {
     setSavingProject(true);
     setProjectMsg(null);
     try {
-      const res = await fetch("/api/settings/project", {
+      const res = await fetch(apiUrl("/api/settings/project"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectRoot: projectInput.trim() }),
@@ -253,7 +253,7 @@ export function SettingsPanel() {
     setSavingIdentity(true);
     setIdentityMsg(null);
     try {
-      const res = await fetch("/api/bot-identity", {
+      const res = await fetch(apiUrl("/api/bot-identity"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: botName, tagline: botTagline, avatar: botAvatar }),
@@ -280,7 +280,7 @@ export function SettingsPanel() {
   }
 
   async function handleSavePersonality() {
-    await fetch("/api/app-settings", {
+    await fetch(apiUrl("/api/app-settings"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ personality, personality_custom: personalityCustom }),
@@ -290,7 +290,7 @@ export function SettingsPanel() {
   async function handleSaveRates(e: React.FormEvent) {
     e.preventDefault();
     setSavingRates(true);
-    await fetch("/api/app-settings", {
+    await fetch(apiUrl("/api/app-settings"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -305,7 +305,7 @@ export function SettingsPanel() {
   async function loadActivity(offset: number) {
     setLoadingActivity(true);
     try {
-      const res = await fetch(`/api/activity-log?limit=50&offset=${offset}`);
+      const res = await fetch(apiUrl(`/api/activity-log?limit=50&offset=${offset}`));
       const data = await res.json();
       if (offset === 0) {
         setActivityEntries(data.entries ?? []);
@@ -322,7 +322,7 @@ export function SettingsPanel() {
   async function runHealthCheck() {
     setLoadingHealth(true);
     try {
-      const res = await fetch("/api/health");
+      const res = await fetch(apiUrl("/api/health"));
       setHealth(await res.json());
     } finally {
       setLoadingHealth(false);
@@ -331,7 +331,7 @@ export function SettingsPanel() {
 
   async function loadResources() {
     try {
-      const res = await fetch("/api/system/resources");
+      const res = await fetch(apiUrl("/api/system/resources"));
       setResources(await res.json());
     } catch { /* ignore */ }
   }
@@ -340,7 +340,7 @@ export function SettingsPanel() {
     setUpdatingClaude(true);
     setUpdateOutput(null);
     try {
-      const res = await fetch("/api/system/claude-update", { method: "POST" });
+      const res = await fetch(apiUrl("/api/system/claude-update"), { method: "POST" });
       const data = await res.json();
       setUpdateOutput(data.output ?? (data.ok ? "Updated successfully" : "Update failed"));
     } finally {
@@ -376,7 +376,7 @@ export function SettingsPanel() {
     try {
       const formData = new FormData();
       formData.append("backup", file);
-      const res = await fetch("/api/settings/restore", { method: "POST", body: formData });
+      const res = await fetch(apiUrl("/api/settings/restore"), { method: "POST", body: formData });
       const data = await res.json();
       setRestoreMsg(res.ok ? { ok: true, text: "Restore complete. Service restarting…" } : { ok: false, text: data.error ?? "Restore failed" });
     } finally {
@@ -387,7 +387,7 @@ export function SettingsPanel() {
   async function handleAutoUpdateToggle() {
     const newVal = autoUpdate === "true" ? "false" : "true";
     setSavingAutoUpdate(true);
-    await fetch("/api/app-settings", {
+    await fetch(apiUrl("/api/app-settings"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ auto_update_enabled: newVal }),
@@ -429,7 +429,7 @@ export function SettingsPanel() {
   return (
     <div className="flex h-full overflow-hidden">
       {/* Sidebar */}
-      <div className="w-44 shrink-0 border-r border-bot-border bg-bot-surface flex flex-col py-2 overflow-y-auto">
+      <div className="w-44 shrink-0 border-r border-bot-border bg-bot-surface flex flex-col py-2 overflow-y-auto space-y-1">
         {sections.map((s) => (
           <button
             key={s.key}
@@ -447,7 +447,7 @@ export function SettingsPanel() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-8">
+      <div className="flex-1 overflow-y-auto p-8 pb-12 space-y-6">
 
         {/* ── General ── */}
         {activeSection === "general" && (
@@ -1047,7 +1047,7 @@ function ApiKeySection() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/app-settings/api-key")
+    fetch(apiUrl("/api/app-settings/api-key"))
       .then((r) => r.json())
       .then((data: { hasKey: boolean; maskedKey: string }) => {
         setHasKey(data.hasKey);
@@ -1061,7 +1061,7 @@ function ApiKeySection() {
     setSaving(true);
     setMessage(null);
     try {
-      const res = await fetch("/api/app-settings/api-key", {
+      const res = await fetch(apiUrl("/api/app-settings/api-key"), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apiKey: inputKey }),
@@ -1086,7 +1086,7 @@ function ApiKeySection() {
   async function handleClear() {
     setSaving(true);
     try {
-      await fetch("/api/app-settings/api-key", { method: "DELETE" });
+      await fetch(apiUrl("/api/app-settings/api-key"), { method: "DELETE" });
       setHasKey(false);
       setMaskedKey("");
       setMessage({ ok: true, text: "API key cleared. SDK provider is no longer available." });

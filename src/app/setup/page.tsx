@@ -42,6 +42,8 @@ export default function SetupPage() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
 
+  const [error, setError] = useState<string | null>(null);
+
   // Load initial project status
   useEffect(() => {
     fetch(`${bp}/api/bot-identity`)
@@ -117,12 +119,16 @@ export default function SetupPage() {
     try {
       const res = await fetch(`${bp}/api/setup/complete`, { method: "POST" });
       if (!res.ok) {
-        console.error("[setup] complete failed:", res.status, await res.text());
+        const text = await res.text().catch(() => "Unknown error");
+        console.error("[setup] complete failed:", res.status, text);
+        setError(`Setup completion failed: ${text}`);
+        return;
       }
     } catch (err) {
       console.error("[setup] complete error:", err);
+      setError("Setup completion failed. Please try again.");
+      return;
     }
-    // Full page reload ensures middleware sees the new cookie
     window.location.href = bp || "/";
   }
 
@@ -139,9 +145,9 @@ export default function SetupPage() {
   // Compute effective steps (skip step 2 if CLAUDE.md exists)
   const skipInit = projectStatus?.hasClaudeMd ?? false;
 
-  // Auto-advance past step 2 if it shouldn't be shown
+  // Auto-advance past step 2 if it shouldn't be shown (only after projectStatus has loaded)
   useEffect(() => {
-    if (step === 2 && (skipInit || !projectStatus)) {
+    if (step === 2 && projectStatus !== null && (skipInit || !projectStatus.hasClaudeMd)) {
       setStep(3);
     }
   }, [step, skipInit, projectStatus]);
@@ -388,6 +394,9 @@ export default function SetupPage() {
                 )}
               </div>
 
+              {error && (
+                <p className="text-caption text-bot-red">{error}</p>
+              )}
               <button
                 onClick={handleComplete}
                 className="w-full rounded-lg bg-bot-accent px-4 py-3 text-body font-semibold text-white hover:bg-bot-accent/80 transition-colors"

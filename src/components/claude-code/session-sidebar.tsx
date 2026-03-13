@@ -13,6 +13,7 @@ interface SessionSidebarProps {
   onDelete: (session: ClaudeSession) => void;
   onRename: (session: ClaudeSession, newName: string) => void;
   onUpdateTags: (session: ClaudeSession, tags: string[]) => void;
+  loading?: boolean;
 }
 
 export function SessionSidebar({
@@ -23,6 +24,7 @@ export function SessionSidebar({
   onDelete,
   onRename,
   onUpdateTags,
+  loading = false,
 }: SessionSidebarProps) {
   const [search, setSearch] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -152,11 +154,18 @@ export function SessionSidebar({
       </div>
 
       <div className="flex-1 overflow-y-auto py-1">
-        {filtered.length === 0 ? (
+        {loading && (
+          <div className="space-y-1 px-2 py-1">
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="h-10 rounded-lg bg-bot-elevated animate-pulse" />
+            ))}
+          </div>
+        )}
+        {!loading && filtered.length === 0 ? (
           <p className="px-4 py-3 text-caption text-bot-muted">
             {search || activeTagFilters.length > 0 ? "No matches" : "No sessions yet"}
           </p>
-        ) : (
+        ) : !loading ? (
           filtered.map((session) => (
             <div
               key={session.id}
@@ -275,7 +284,7 @@ export function SessionSidebar({
               </div>
             </div>
           ))
-        )}
+        ) : null}
       </div>
     </div>
   );

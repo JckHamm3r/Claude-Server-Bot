@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Search, X, MessageSquare } from "lucide-react";
+import { apiUrl } from "@/lib/utils";
 
 interface SearchResult {
   messageId: string;
@@ -44,7 +45,7 @@ export function GlobalSearchDialog({ onClose, onNavigate }: GlobalSearchDialogPr
     }
     setLoading(true);
     try {
-      const res = await fetch(`/api/claude-code/search?q=${encodeURIComponent(q)}&limit=30`);
+      const res = await fetch(apiUrl(`/api/claude-code/search?q=${encodeURIComponent(q)}&limit=30`));
       if (!res.ok) return;
       const data = await res.json();
       setResults(data.results ?? []);

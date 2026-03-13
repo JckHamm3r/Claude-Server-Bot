@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { apiUrl } from "@/lib/utils";
 
 interface NotificationPref {
   event_type: string;
@@ -16,7 +17,7 @@ export function NotificationsSection() {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
-    fetch("/api/settings/notifications")
+    fetch(apiUrl("/api/settings/notifications"))
       .then((r) => r.json())
       .then((d: { preferences?: NotificationPref[] }) => setPrefs(d.preferences ?? []))
       .catch(() => {})
@@ -35,7 +36,7 @@ export function NotificationsSection() {
     setSaving(true);
     setMsg(null);
     try {
-      const res = await fetch("/api/settings/notifications", {
+      const res = await fetch(apiUrl("/api/settings/notifications"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ preferences: prefs }),

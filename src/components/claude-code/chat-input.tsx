@@ -3,6 +3,7 @@
 import { useRef, KeyboardEvent, useState, useEffect, useCallback } from "react";
 import { Send, Clock, Paperclip } from "lucide-react";
 import { AttachmentPreview, type PendingAttachment } from "./attachment-preview";
+import { apiUrl } from "@/lib/utils";
 
 interface ChatInputProps {
   onSend: (message: string, attachments?: string[]) => void;
@@ -74,7 +75,7 @@ export function ChatInput({
     if (atDebounceRef.current) clearTimeout(atDebounceRef.current);
     atDebounceRef.current = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/claude-code/files?q=${encodeURIComponent(atQuery)}`);
+        const res = await fetch(apiUrl(`/api/claude-code/files?q=${encodeURIComponent(atQuery)}`));
         if (!res.ok) return;
         const data = await res.json();
         setAtFiles(data.files ?? []);
@@ -182,7 +183,7 @@ export function ChatInput({
         formData.append("file", att.file);
         formData.append("sessionId", sessionId);
 
-        const res = await fetch("/api/claude-code/upload", {
+        const res = await fetch(apiUrl("/api/claude-code/upload"), {
           method: "POST",
           body: formData,
         });

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Square, RotateCcw, Trash2, Zap, Search, Download, ChevronDown } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, apiUrl } from "@/lib/utils";
 import { ModelSelector } from "./model-selector";
 
 interface SessionUsage {
@@ -44,7 +44,7 @@ function ExportDropdown({ sessionId }: { sessionId: string }) {
 
   const handleExport = (format: "markdown" | "json") => {
     setOpen(false);
-    window.open(`/api/claude-code/export?sessionId=${sessionId}&format=${format}`, "_blank");
+    window.open(apiUrl(`/api/claude-code/export?sessionId=${sessionId}&format=${format}`), "_blank");
   };
 
   return (

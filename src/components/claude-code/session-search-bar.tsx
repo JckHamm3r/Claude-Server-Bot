@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { X, ChevronUp, ChevronDown } from "lucide-react";
+import { apiUrl } from "@/lib/utils";
 
 interface SearchResult {
   messageId: string;
@@ -37,7 +38,7 @@ export function SessionSearchBar({ sessionId, onClose, onHighlightsChange }: Ses
       return;
     }
     try {
-      const res = await fetch(`/api/claude-code/search?q=${encodeURIComponent(q)}&sessionId=${sessionId}`);
+      const res = await fetch(apiUrl(`/api/claude-code/search?q=${encodeURIComponent(q)}&sessionId=${sessionId}`));
       if (!res.ok) return;
       const data = await res.json();
       setResults(data.results ?? []);

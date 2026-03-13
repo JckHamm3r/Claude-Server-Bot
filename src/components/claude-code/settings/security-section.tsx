@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Shield, Wifi, Terminal, ScrollText, Plus, X, RefreshCw, Lock, Unlock } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, apiUrl } from "@/lib/utils";
 
 type SecuritySubTab = "guard_rails" | "ip_protection" | "sandbox" | "security_log";
 
@@ -82,7 +82,7 @@ export function SecuritySection() {
   // ── Load data ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    fetch("/api/security/settings")
+    fetch(apiUrl("/api/security/settings"))
       .then((r) => r.json())
       .then((d: SecuritySettings) => setSecSettings(d))
       .catch(() => {});
@@ -97,7 +97,7 @@ export function SecuritySection() {
 
   function loadIPData() {
     setIpLoading(true);
-    fetch("/api/security/ip-protection")
+    fetch(apiUrl("/api/security/ip-protection"))
       .then((r) => r.json())
       .then((d: { settings: IPProtectionSettings; blockedIPs: BlockedIP[] }) => {
         setIpSettings(d.settings);
@@ -109,7 +109,7 @@ export function SecuritySection() {
 
   function loadSandboxData() {
     setSandboxLoading(true);
-    fetch("/api/security/sandbox")
+    fetch(apiUrl("/api/security/sandbox"))
       .then((r) => r.json())
       .then((d: SandboxData) => setSandboxData(d))
       .catch(() => {})
@@ -119,7 +119,7 @@ export function SecuritySection() {
   function loadSecurityLog(reset = false) {
     setLogLoading(true);
     const cursor = reset ? "" : logCursor ?? "";
-    const url = cursor ? `/api/security/log?cursor=${cursor}` : "/api/security/log";
+    const url = apiUrl(cursor ? `/api/security/log?cursor=${cursor}` : "/api/security/log");
     fetch(url)
       .then((r) => r.json())
       .then((d: { events: SecurityEvent[]; nextCursor: string | null }) => {
@@ -142,7 +142,7 @@ export function SecuritySection() {
     const updated = { ...secSettings, ...updates };
     setSecSettings(updated as SecuritySettings);
     try {
-      await fetch("/api/security/settings", {
+      await fetch(apiUrl("/api/security/settings"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
@@ -167,7 +167,7 @@ export function SecuritySection() {
     if ("blockDurationMinutes" in updates) body.ip_block_duration_minutes = updates.blockDurationMinutes;
     setIpSettings((prev) => prev ? { ...prev, ...updates } : prev);
     try {
-      await fetch("/api/security/ip-protection", {
+      await fetch(apiUrl("/api/security/ip-protection"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -180,7 +180,7 @@ export function SecuritySection() {
   }
 
   async function unblockIP(ip: string) {
-    await fetch(`/api/security/ip-protection/${encodeURIComponent(ip)}/unblock`, { method: "POST" });
+    await fetch(apiUrl(`/api/security/ip-protection/${encodeURIComponent(ip)}/unblock`), { method: "POST" });
     setBlockedIPs((prev) => prev.filter((b) => b.ip_address !== ip));
   }
 
@@ -188,7 +188,7 @@ export function SecuritySection() {
     if (!manualIP.trim()) return;
     setBlockingIP(true);
     try {
-      await fetch("/api/security/ip-protection/block", {
+      await fetch(apiUrl("/api/security/ip-protection/block"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -212,7 +212,7 @@ export function SecuritySection() {
 
   async function saveSandboxEnabled(enabled: boolean) {
     setSandboxData((prev) => prev ? { ...prev, enabled } : prev);
-    await fetch("/api/security/sandbox", {
+    await fetch(apiUrl("/api/security/sandbox"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled }),
@@ -222,7 +222,7 @@ export function SecuritySection() {
   async function addAlwaysAllowed() {
     const pattern = newAllowedPattern.trim();
     if (!pattern) return;
-    await fetch("/api/security/sandbox", {
+    await fetch(apiUrl("/api/security/sandbox"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ addAlwaysAllowed: pattern }),
@@ -234,7 +234,7 @@ export function SecuritySection() {
   }
 
   async function removeAlwaysAllowed(pattern: string) {
-    await fetch("/api/security/sandbox", {
+    await fetch(apiUrl("/api/security/sandbox"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ removeAlwaysAllowed: pattern }),
@@ -245,7 +245,7 @@ export function SecuritySection() {
   async function addAlwaysBlocked() {
     const pattern = newBlockedPattern.trim();
     if (!pattern) return;
-    await fetch("/api/security/sandbox", {
+    await fetch(apiUrl("/api/security/sandbox"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ addAlwaysBlocked: pattern }),
@@ -257,7 +257,7 @@ export function SecuritySection() {
   }
 
   async function removeAlwaysBlocked(pattern: string) {
-    await fetch("/api/security/sandbox", {
+    await fetch(apiUrl("/api/security/sandbox"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ removeAlwaysBlocked: pattern }),

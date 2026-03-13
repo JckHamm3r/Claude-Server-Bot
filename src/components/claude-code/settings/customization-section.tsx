@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { apiUrl } from "@/lib/utils";
 
 interface PersonalityOption {
   value: string;
@@ -24,7 +25,7 @@ export function CustomizationSection() {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
-    fetch("/api/settings/customization")
+    fetch(apiUrl("/api/settings/customization"))
       .then((r) => r.json())
       .then((d: { personality?: string; personality_custom?: string }) => {
         if (d.personality) setPersonality(d.personality);
@@ -37,7 +38,7 @@ export function CustomizationSection() {
     setSaving(true);
     setMsg(null);
     try {
-      const res = await fetch("/api/settings/customization", {
+      const res = await fetch(apiUrl("/api/settings/customization"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ personality, personality_custom: customPrompt }),

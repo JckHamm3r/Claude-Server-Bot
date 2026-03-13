@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Globe, Plus, X, CheckCircle2, RefreshCw, Loader2, AlertTriangle } from "lucide-react";
+import { apiUrl } from "@/lib/utils";
 
 interface Domain {
   id: string;
@@ -28,7 +29,7 @@ export function DomainsSection() {
 
   const load = () => {
     setLoading(true);
-    fetch("/api/settings/domains")
+    fetch(apiUrl("/api/settings/domains"))
       .then((r) => r.json())
       .then((d: { domains?: Domain[] }) => setDomains(d.domains ?? []))
       .catch(() => {})
@@ -42,7 +43,7 @@ export function DomainsSection() {
     setAdding(true);
     setMsg(null);
     try {
-      const res = await fetch("/api/settings/domains", {
+      const res = await fetch(apiUrl("/api/settings/domains"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ hostname: newHostname.trim() }),
@@ -72,7 +73,7 @@ export function DomainsSection() {
     setSettingUp(id);
     setMsg(null);
     try {
-      const res = await fetch("/api/settings/domains", {
+      const res = await fetch(apiUrl("/api/settings/domains"), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id }),
@@ -93,7 +94,7 @@ export function DomainsSection() {
 
   const handleRemove = async (id: string) => {
     try {
-      await fetch(`/api/settings/domains?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      await fetch(apiUrl(`/api/settings/domains?id=${encodeURIComponent(id)}`), { method: "DELETE" });
       load();
     } catch {
       setMsg({ ok: false, text: "Failed to remove domain" });

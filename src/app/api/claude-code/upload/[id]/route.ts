@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
+import db from "@/lib/db";
 import { getUpload } from "@/lib/claude-db";
 import path from "path";
 import fs from "fs";
@@ -19,6 +20,11 @@ export async function GET(
   const upload = getUpload(id);
   if (!upload) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  const sessionCheck = db.prepare("SELECT created_by FROM sessions WHERE id = ?").get(upload.session_id) as { created_by: string } | undefined;
+  if (!sessionCheck || sessionCheck.created_by !== token.email) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
 
   const filePath = path.join(DATA_DIR, "uploads", upload.session_id, upload.stored_name);

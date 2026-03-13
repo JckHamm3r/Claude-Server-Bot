@@ -54,7 +54,12 @@ export async function POST(request: NextRequest) {
   const hasClaudeDir = fs.existsSync(path.join(projectRoot, ".claude"));
 
   // Update .env and set in-memory so current process picks it up immediately
-  updateEnvFile("CLAUDE_PROJECT_ROOT", projectRoot);
+  try {
+    updateEnvFile("CLAUDE_PROJECT_ROOT", projectRoot);
+  } catch (err) {
+    console.error("[settings/project] updateEnvFile failed:", err);
+    return NextResponse.json({ error: "Failed to update configuration" }, { status: 500 });
+  }
   process.env.CLAUDE_PROJECT_ROOT = projectRoot;
 
   return NextResponse.json({ ok: true, hasClaudeMd, hasClaudeDir });

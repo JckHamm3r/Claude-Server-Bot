@@ -10,7 +10,8 @@ set -euo pipefail
 #    bash install.sh --dry-run [options]      # Preview without changes
 #    bash install.sh --config install.conf    # Load from config file
 #
-#  Do NOT pipe directly to bash (curl | bash) — interactive prompts need stdin.
+#  Curl install (downloads first, then runs interactively):
+#    curl -fsSL https://raw.githubusercontent.com/JckHamm3r/Claude-Server-Bot/main/install.sh | bash
 # ─────────────────────────────────────────────────────────────────────────────
 
 REPO_URL="https://github.com/JckHamm3r/Claude-Server-Bot.git"
@@ -1507,11 +1508,9 @@ step_build() {
   info "Cloned into $INSTALL_DIR"
   cd "$INSTALL_DIR"
 
-  # Move install log into the install directory
-  if [ -f "$INSTALL_LOG" ]; then
+  # Copy install log into the install directory for easy access
+  if [ -n "${INSTALL_LOG:-}" ] && [ -f "$INSTALL_LOG" ]; then
     cp "$INSTALL_LOG" "$INSTALL_DIR/install.log"
-    INSTALL_LOG="$INSTALL_DIR/install.log"
-    exec > >(tee -a "$INSTALL_LOG") 2>&1
   fi
 
   # Restore backed up data
@@ -1583,7 +1582,7 @@ step_build() {
       # Try a lightweight auth check — "claude api-key" or similar
       # The most reliable check: attempt to use the CLI and check exit code
       local auth_ok=false
-      if "$CLAUDE_BIN" /dev/null 2>&1 --output-format json -p "reply with ok" </dev/null &>/dev/null; then
+      if "$CLAUDE_BIN" -p "reply with ok" --output-format json </dev/null &>/dev/null 2>&1; then
         auth_ok=true
       fi
       if ! $auth_ok; then
@@ -1603,7 +1602,7 @@ step_build() {
               break
             fi
             # Re-check
-            if "$CLAUDE_BIN" /dev/null 2>&1 --output-format json -p "reply with ok" </dev/null &>/dev/null; then
+            if "$CLAUDE_BIN" -p "reply with ok" --output-format json </dev/null &>/dev/null 2>&1; then
               info "Claude CLI authenticated!"
               break
             else
@@ -1638,7 +1637,7 @@ step_build() {
   echo "  Compiling native modules..."
   start_spinner
   local sqlite3_dir
-  sqlite3_dir="$(find node_modules/.pnpm -path '*/better-sqlite3/binding.gyp' -printf '%h' -quit 2>/dev/null)"
+  sqlite3_dir="$(find node_modules/.pnpm -path '*/better-sqlite3/binding.gyp' -print 2>/dev/null | head -1 | xargs dirname 2>/dev/null)"
   if [ -n "$sqlite3_dir" ]; then
     local rebuild_log
     rebuild_log="$(mktemp)"
@@ -1727,7 +1726,7 @@ upgrade_in_place() {
   echo "  Compiling native modules..."
   start_spinner
   local sqlite3_dir
-  sqlite3_dir="$(find node_modules/.pnpm -path '*/better-sqlite3/binding.gyp' -printf '%h' -quit 2>/dev/null)"
+  sqlite3_dir="$(find node_modules/.pnpm -path '*/better-sqlite3/binding.gyp' -print 2>/dev/null | head -1 | xargs dirname 2>/dev/null)"
   if [ -n "$sqlite3_dir" ]; then
     npx --yes node-gyp rebuild --directory="$sqlite3_dir" > /dev/null 2>&1 || warn "Native module rebuild had issues."
   fi
@@ -1823,48 +1822,67 @@ restart_existing_service() {
 }
 
 generate_env() {
-  # Generate .env using Node.js with argv to avoid injection
+  # Write config as JSON to a temp file to avoid all shell quoting issues
+  local config_file
+  config_file="$(mktemp)"
   node -e "
-const bcrypt = require('bcryptjs');
 const fs = require('fs');
-const path = require('path');
-
-const password = process.argv[1];
-const port = process.argv[2];
-const baseUrl = process.argv[3];
-const slug = process.argv[4];
-const secret = process.argv[5];
-const email = process.argv[6];
-const cliBin = process.argv[7];
-const projectRoot = process.argv[8];
-const installDir = process.argv[9];
-const botName = process.argv[10];
-const pathPrefix = process.argv[11];
-
-const hash = bcrypt.hashSync(password, 12);
-
-const env = [
-  'NODE_ENV=production',
-  'PORT=' + port,
-  'NEXTAUTH_URL=' + baseUrl + '/' + pathPrefix + '/' + slug,
-  'NEXTAUTH_SECRET=' + secret,
-  'CLAUDE_BOT_PATH_PREFIX=' + pathPrefix,
-  'NEXT_PUBLIC_CLAUDE_BOT_PATH_PREFIX=' + pathPrefix,
-  'CLAUDE_BOT_SLUG=' + slug,
-  'NEXT_PUBLIC_CLAUDE_BOT_SLUG=' + slug,
-  'CLAUDE_BOT_NAME=' + botName,
-  'CLAUDE_BOT_ADMIN_EMAIL=' + email,
-  'CLAUDE_BOT_ADMIN_HASH=' + hash,
-  'CLAUDE_CLI_PATH=' + cliBin,
-  'CLAUDE_PROJECT_ROOT=' + projectRoot,
-  'DATA_DIR=' + path.join(installDir, 'data'),
-  'CLAUDE_PROVIDER=subprocess',
-].join('\n') + '\n';
-
-fs.writeFileSync(path.join(installDir, '.env'), env);
+const config = {
+  password: process.argv[1],
+  port: process.argv[2],
+  baseUrl: process.argv[3],
+  slug: process.argv[4],
+  secret: process.argv[5],
+  email: process.argv[6],
+  cliBin: process.argv[7],
+  projectRoot: process.argv[8],
+  installDir: process.argv[9],
+  botName: process.argv[10],
+  pathPrefix: process.argv[11]
+};
+fs.writeFileSync(process.argv[12], JSON.stringify(config));
 " "$ADMIN_PASSWORD" "$PORT" "$BASE_URL" "$SLUG" "$NEXTAUTH_SECRET" \
-  "$ADMIN_EMAIL" "$CLAUDE_BIN" "$PROJECT_ROOT" "$INSTALL_DIR" "$BOT_NAME" "$BOT_PATH_PREFIX"
+  "$ADMIN_EMAIL" "$CLAUDE_BIN" "$PROJECT_ROOT" "$INSTALL_DIR" "$BOT_NAME" "$BOT_PATH_PREFIX" "$config_file"
+
+  if [ $? -ne 0 ] || [ ! -s "$config_file" ]; then
+    rm -f "$config_file"
+    error "Failed to serialize configuration"
+    exit 1
+  fi
+
+  # Generate .env using the dedicated script (reads JSON, avoids shell quoting)
+  local gen_output
+  gen_output="$(node "$INSTALL_DIR/scripts/generate-env.js" "$config_file" 2>&1)"
+  local gen_exit=$?
+  rm -f "$config_file"
+
+  if [ "$gen_exit" -ne 0 ]; then
+    error "Failed to generate .env file!"
+    echo "  $gen_output"
+    exit 1
+  fi
+
+  if [ ! -f "$INSTALL_DIR/.env" ]; then
+    error ".env file was not created"
+    exit 1
+  fi
+
   info ".env generated"
+
+  # Verify the password matches the hash that was just written
+  echo "  Verifying credentials..."
+  local verify_output
+  verify_output="$(node "$INSTALL_DIR/scripts/verify-credentials.js" "$ADMIN_PASSWORD" "$INSTALL_DIR/.env" 2>&1)"
+  local verify_exit=$?
+
+  if [ "$verify_exit" -ne 0 ]; then
+    error "Credential verification FAILED — the password would not work at login!"
+    echo "  $verify_output"
+    error "This is a critical error. Please report it."
+    exit 1
+  fi
+
+  info "Credentials verified — password matches hash"
 }
 
 # ─── Step 9: Service Setup ────────────────────────────────────────────────
@@ -2365,27 +2383,32 @@ step_done() {
 main() {
   parse_args "$@"
 
-  # Set up install log — capture all output
-  INSTALL_LOG="/tmp/claude-bot-install.log"
+  # Set up install log early — capture all output from the start
+  INSTALL_LOG="/tmp/claude-bot-install-$(date +%s).log"
   exec > >(tee -a "$INSTALL_LOG") 2>&1
-  hint "Install log: $INSTALL_LOG"
 
-  # Detect curl|bash pipe — refuse to run without a terminal unless --unattended
+  # Detect curl|bash pipe — download to temp file and re-exec with terminal
   if ! $UNATTENDED && [ ! -t 0 ]; then
+    local tmp_script
+    tmp_script="$(mktemp /tmp/claude-bot-install-XXXXXX.sh)"
+    # Read the rest of stdin (the piped script) into the temp file
+    cat > "$tmp_script"
+    # If the temp file is empty, we were invoked without content — try downloading
+    if [ ! -s "$tmp_script" ]; then
+      echo "  Downloading installer..."
+      curl -fsSL "https://raw.githubusercontent.com/JckHamm3r/Claude-Server-Bot/main/install.sh" -o "$tmp_script" || {
+        echo "ERROR: Failed to download installer."
+        rm -f "$tmp_script"
+        exit 1
+      }
+    fi
+    chmod +x "$tmp_script"
     echo ""
-    echo "ERROR: stdin is not a terminal."
+    echo "  Piped input detected — re-launching installer interactively..."
+    echo "  (saved to $tmp_script)"
     echo ""
-    echo "  It looks like you're piping this script (e.g. curl | bash)."
-    echo "  This installer requires interactive input."
-    echo ""
-    echo "  Instead, download and run it directly:"
-    echo "    curl -fsSL <url> -o install.sh"
-    echo "    bash install.sh"
-    echo ""
-    echo "  Or use non-interactive mode:"
-    echo "    bash install.sh --unattended --bot-name=MyBot --email=admin@example.com --mode=vps --domain=bot.example.com"
-    echo ""
-    exit 1
+    # Re-exec with terminal stdin
+    exec bash "$tmp_script" "$@" < /dev/tty
   fi
 
   # Load config file if specified (CLI flags override)

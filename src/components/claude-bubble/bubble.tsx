@@ -16,10 +16,13 @@ const STORAGE_KEY = "claude-bubble-pos";
 
 export function ClaudeBubble({ onOpen, isRunning, avatarState }: BubbleProps) {
   const [pos, setPos] = useState({ right: 32, bottom: 32 });
+  const posRef = useRef(pos);
   const dragging = useRef(false);
   const startRef = useRef({ x: 0, y: 0, right: 32, bottom: 32 });
   const moved = useRef(false);
   const btnRef = useRef<HTMLButtonElement>(null);
+
+  posRef.current = pos;
 
   // Load saved position
   useEffect(() => {
@@ -50,14 +53,16 @@ export function ClaudeBubble({ onOpen, isRunning, avatarState }: BubbleProps) {
 
       const newRight = Math.max(8, Math.min(window.innerWidth - 72, startRef.current.right - dx));
       const newBottom = Math.max(8, Math.min(window.innerHeight - 72, startRef.current.bottom - dy));
-      setPos({ right: newRight, bottom: newBottom });
+      const newPos = { right: newRight, bottom: newBottom };
+      setPos(newPos);
+      posRef.current = newPos;
     };
 
     const onUp = () => {
       if (dragging.current) {
         dragging.current = false;
         try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(pos));
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(posRef.current));
         } catch {
           // ignore
         }
@@ -70,7 +75,7 @@ export function ClaudeBubble({ onOpen, isRunning, avatarState }: BubbleProps) {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [pos]);
+  }, []);
 
   const handleClick = () => {
     if (!moved.current) {

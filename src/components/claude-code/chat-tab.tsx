@@ -41,6 +41,7 @@ export function ChatTab() {
   const typingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [loadingSessions, setLoadingSessions] = useState(true);
 
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
   const lastUserMsgRef = useRef<string>("");
@@ -191,7 +192,6 @@ export function ChatTab() {
           provider_type: session.provider_type,
         });
         // Re-fetch authoritative messages from server on reconnect
-        setMessages([]);
         setLoadingMessages(true);
         socket.emit("claude:get_messages", { sessionId: session.id });
         // Sync running state after reconnect
@@ -213,8 +213,9 @@ export function ChatTab() {
       setReconnecting(true);
     });
 
-    socket.on("claude:sessions", ({ sessions: s }: { sessions: ClaudeSession[] }) => {
+      socket.on("claude:sessions", ({ sessions: s }: { sessions: ClaudeSession[] }) => {
       setSessions(s);
+      setLoadingSessions(false);
     });
 
     // Session status updates (background persistence)
@@ -488,6 +489,14 @@ export function ChatTab() {
       if (activeSessionRef.current?.id === sessionId) {
         setMessages(msgs);
         setIsRunning(true); // The edited message is being re-sent
+        setTimeout(() => {
+          setIsRunning((current) => {
+            if (current) {
+              console.warn("[chat] isRunning stuck after message edit, resetting");
+            }
+            return false;
+          });
+        }, 120000);
       }
     });
 
@@ -522,6 +531,42 @@ export function ChatTab() {
       setHasError(true);
     });
 
+    socket.on("claude:rate_limited", ({ message }: { message?: string }) => {
+      const msg: ChatMessage = {
+        id: "rate-limited-" + Date.now(),
+        sender_type: "claude",
+        content: message ?? "You are being rate limited. Please wait before sending more messages.",
+        parsed: { type: "error", message: message ?? "You are being rate limited. Please wait before sending more messages." },
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, msg]);
+      setIsRunning(false);
+    });
+
+    socket.on("claude:budget_exceeded", ({ message, type }: { message?: string; type?: string }) => {
+      const content = message ?? `Budget limit exceeded${type ? ` (${type})` : ""}. Please contact an admin.`;
+      const msg: ChatMessage = {
+        id: "budget-exceeded-" + Date.now(),
+        sender_type: "claude",
+        content,
+        parsed: { type: "error", message: content },
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, msg]);
+      setIsRunning(false);
+    });
+
+    socket.on("claude:budget_warning", ({ message }: { message?: string }) => {
+      const content = message ?? "Approaching budget limit. Usage may be restricted soon.";
+      const msg: ChatMessage = {
+        id: "budget-warning-" + Date.now(),
+        sender_type: "claude",
+        content,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, msg]);
+    });
+
     socket.on("security:warn", ({ type: warnType, message: warnMessage }: { type: string; message: string }) => {
       const msg: ChatMessage = {
         id: crypto.randomUUID(),
@@ -550,6 +595,9 @@ export function ChatTab() {
       socket.off("claude:session_ready");
       socket.off("claude:output");
       socket.off("claude:error");
+      socket.off("claude:rate_limited");
+      socket.off("claude:budget_exceeded");
+      socket.off("claude:budget_warning");
       socket.off("claude:session_state");
       socket.off("claude:presence_update");
       socket.off("claude:typing");
@@ -841,6 +889,7 @@ export function ChatTab() {
         onDelete={handleDeleteSession}
         onRename={handleRenameSession}
         onUpdateTags={handleUpdateTags}
+        loading={loadingSessions}
       />
 
       <div className="flex flex-1 flex-col overflow-hidden">
@@ -906,13 +955,9 @@ export function ChatTab() {
         )}
 
         {!connected && (
-          <div className="px-4 py-2 text-caption text-bot-amber border-b border-bot-border bg-bot-amber/5 flex items-center gap-2">
-            <span className="flex gap-0.5">
-              <span className="h-1 w-1 rounded-full bg-bot-amber animate-bounce [animation-delay:0ms]" />
-              <span className="h-1 w-1 rounded-full bg-bot-amber animate-bounce [animation-delay:150ms]" />
-              <span className="h-1 w-1 rounded-full bg-bot-amber animate-bounce [animation-delay:300ms]" />
-            </span>
-            {reconnecting ? "Server restarted — reconnecting…" : "Connecting to server…"}
+          <div className="flex items-center justify-center gap-2 bg-bot-amber/10 border-b border-bot-amber/20 px-4 py-2 text-caption text-bot-amber">
+            <div className="h-2 w-2 rounded-full bg-bot-amber animate-pulse" />
+            {reconnecting ? "Reconnecting to server..." : "Connecting to server..."}
           </div>
         )}
 

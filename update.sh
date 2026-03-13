@@ -222,8 +222,9 @@ info "Dependencies updated"
 # Build
 echo "  Building..."
 if [ -f .env ]; then
-  # shellcheck disable=SC2046
-  export $(grep -E '^CLAUDE_BOT_SLUG=|^CLAUDE_BOT_PATH_PREFIX=' .env | xargs)
+  CLAUDE_BOT_SLUG="$(grep -E '^CLAUDE_BOT_SLUG=' .env | head -1 | cut -d= -f2-)"
+  CLAUDE_BOT_PATH_PREFIX="$(grep -E '^CLAUDE_BOT_PATH_PREFIX=' .env | head -1 | cut -d= -f2-)"
+  export CLAUDE_BOT_SLUG CLAUDE_BOT_PATH_PREFIX
 fi
 BUILD_LOG="$(mktemp)"
 if ! pnpm build > "$BUILD_LOG" 2>&1; then

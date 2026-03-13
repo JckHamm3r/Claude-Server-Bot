@@ -15,7 +15,7 @@ json_ok()    { echo "{\"ok\":true}"; }
 json_fail()  { echo "{\"ok\":false,\"error\":$(printf '%s' "$1" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')}"; exit 0; }
 
 # Validate domain format
-if ! echo "$DOMAIN" | grep -qP '^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$'; then
+if ! echo "$DOMAIN" | grep -qE '^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$'; then
   json_fail "Invalid domain format: $DOMAIN"
 fi
 
