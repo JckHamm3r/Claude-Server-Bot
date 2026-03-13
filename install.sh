@@ -791,17 +791,17 @@ step_prerequisites() {
   if ! command -v pnpm &>/dev/null; then
     if $UNATTENDED; then
       echo "  Installing pnpm..."
-      npm install -g pnpm
+      sudo npm install -g pnpm
     else
       local pnpm_result
       prompt_yn "pnpm not found. Install it now?" "y" && pnpm_result=0 || pnpm_result=$?
       if [ "$pnpm_result" -eq 0 ]; then
         echo "  Installing pnpm..."
-        npm install -g pnpm
+        sudo npm install -g pnpm
       elif [ "$pnpm_result" -eq 2 ]; then
         return  # go back
       else
-        error "pnpm is required. Install it: npm install -g pnpm"
+        error "pnpm is required. Install it: sudo npm install -g pnpm"
         exit 1
       fi
     fi
