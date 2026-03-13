@@ -20,12 +20,19 @@ interface TestResult {
   error?: string;
 }
 
+function getBasePath() {
+  const slug = process.env.NEXT_PUBLIC_CLAUDE_BOT_SLUG ?? "";
+  const prefix = process.env.NEXT_PUBLIC_CLAUDE_BOT_PATH_PREFIX ?? "c";
+  return slug ? `/${prefix}/${slug}` : "";
+}
+
 export default function SetupPage() {
   const router = useRouter();
+  const bp = getBasePath();
   const [step, setStep] = useState<Step>(1);
 
   // Step 1: project
-  const [projectRoot, setProjectRoot] = useState(process.env.NEXT_PUBLIC_CLAUDE_PROJECT_ROOT ?? "");
+  const [projectRoot, setProjectRoot] = useState("");
   const [projectInput, setProjectInput] = useState("");
   const [projectStatus, setProjectStatus] = useState<ProjectStatus | null>(null);
   const [savingProject, setSavingProject] = useState(false);
@@ -37,14 +44,22 @@ export default function SetupPage() {
 
   // Load initial project status
   useEffect(() => {
-    checkProject(projectRoot);
+    fetch(`${bp}/api/bot-identity`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (data?.projectRoot) {
+          setProjectRoot(data.projectRoot);
+          checkProject(data.projectRoot);
+        }
+      })
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function checkProject(path: string) {
     if (!path) return;
     try {
-      const res = await fetch("/api/settings/project", {
+      const res = await fetch(`${bp}/api/settings/project`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectRoot: path }),
@@ -64,7 +79,7 @@ export default function SetupPage() {
     setSavingProject(true);
     setProjectError("");
     try {
-      const res = await fetch("/api/settings/project", {
+      const res = await fetch(`${bp}/api/settings/project`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectRoot: projectInput.trim() }),
@@ -86,7 +101,7 @@ export default function SetupPage() {
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await fetch("/api/claude-code/test");
+      const res = await fetch(`${bp}/api/claude-code/test`);
       const data = await res.json();
       setTestResult(data);
     } catch (err) {
@@ -98,7 +113,7 @@ export default function SetupPage() {
 
   async function handleComplete() {
     try {
-      await fetch("/api/setup/complete", { method: "POST" });
+      await fetch(`${bp}/api/setup/complete`, { method: "POST" });
     } catch {
       // ignore
     }
