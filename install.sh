@@ -377,8 +377,9 @@ check_sudo() {
   if sudo -n true 2>/dev/null; then
     return 0
   fi
-  # Fall back to interactive (may prompt for password)
-  if sudo -v 2>/dev/null; then
+  # Fall back to interactive (will prompt for password if needed)
+  echo "  sudo access is required. You may be prompted for your password."
+  if sudo -v; then
     return 0
   fi
   error "sudo access is required but is not available."
