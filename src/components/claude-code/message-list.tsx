@@ -207,7 +207,7 @@ export function MessageList({
         <div className="mx-auto max-w-3xl px-4 space-y-1">
           {segments.map((seg, segIdx) => {
             if (seg.kind === "tool-group") {
-              const groupKey = seg.messages.map((m) => m.id).join(",");
+              const groupKey = seg.messages[0].id;
               return (
                 <ToolCallGroup
                   key={groupKey}

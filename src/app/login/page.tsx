@@ -3,6 +3,7 @@
 import { useState, useEffect, Suspense } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { apiUrl } from "@/lib/utils";
 
 interface BotIdentity {
   name: string;
@@ -69,7 +70,7 @@ function LoginForm() {
             <img src={botIdentity.avatar} alt={botIdentity.name} className="h-full w-full object-cover" />
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src="/avatars/waiting.png" alt="Claude" className="h-full w-full object-cover" />
+            <img src={apiUrl("/avatars/waiting.png")} alt="Claude" className="h-full w-full object-cover" />
           )}
         </div>
         <h1 className="text-title font-semibold text-bot-text">{botIdentity.name}</h1>

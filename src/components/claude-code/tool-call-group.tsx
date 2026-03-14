@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ChevronDown, ChevronRight, Layers, Loader2, AlertTriangle } from "lucide-react";
 import { ToolCallBlock } from "./tool-call-block";
 import type { ChatMessage } from "./message-list";
@@ -12,7 +12,8 @@ interface ToolCallGroupProps {
 }
 
 export function ToolCallGroup({ messages, searchHighlights, activeHighlight }: ToolCallGroupProps) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
+  const prevCount = useRef(messages.length);
 
   const hasRunning = messages.some((m) => m.parsed?.toolStatus === "running" || m.parsed?.type === "tool_call");
   const hasError = messages.some((m) => m.parsed?.toolStatus === "error");
@@ -26,9 +27,13 @@ export function ToolCallGroup({ messages, searchHighlights, activeHighlight }: T
     if (anyActive) setExpanded(true);
   }, [anyActive]);
 
+  useEffect(() => {
+    if (messages.length > prevCount.current) setExpanded(true);
+    prevCount.current = messages.length;
+  }, [messages.length]);
+
   return (
     <div className={anyActive ? "rounded-lg ring-2 ring-bot-accent bg-bot-accent/5" : anyHighlighted ? "rounded-lg bg-bot-amber/5" : ""}>
-      {/* Group header — only shown when there are hidden items */}
       {hiddenCount > 0 && (
         <button
           onClick={() => setExpanded(!expanded)}
@@ -48,7 +53,6 @@ export function ToolCallGroup({ messages, searchHighlights, activeHighlight }: T
         </button>
       )}
 
-      {/* Expanded: show all tool calls */}
       {expanded && hiddenCount > 0 && (
         <div className="space-y-0">
           {messages.slice(0, -1).map((msg) => {
@@ -76,7 +80,6 @@ export function ToolCallGroup({ messages, searchHighlights, activeHighlight }: T
         </div>
       )}
 
-      {/* Always show the last (most recent) tool call */}
       <div
         id={`msg-${lastMsg.id}`}
         className={

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ChevronDown, ChevronRight, Terminal, FileText, FilePen, Search, Loader2, Check, X, Wrench, Plug } from "lucide-react";
 import type { ParsedOutput } from "@/lib/claude/provider";
 import { BashOutput } from "./tool-renderers/bash-output";
@@ -109,6 +109,15 @@ function ToolDetail({ parsed }: { parsed: ParsedOutput }) {
 
 export function ToolCallBlock({ parsed }: ToolCallBlockProps) {
   const [expanded, setExpanded] = useState(parsed.toolStatus !== "running");
+  const prevStatus = useRef(parsed.toolStatus);
+
+  useEffect(() => {
+    if (prevStatus.current === "running" && parsed.toolStatus !== "running") {
+      setExpanded(true);
+    }
+    prevStatus.current = parsed.toolStatus;
+  }, [parsed.toolStatus]);
+
   const rawToolName = parsed.toolName ?? "Tool";
   const toolName = isMcpTool(rawToolName) ? formatMcpToolName(rawToolName) : rawToolName;
   const hasDetail = parsed.toolResult || parsed.toolInput;
