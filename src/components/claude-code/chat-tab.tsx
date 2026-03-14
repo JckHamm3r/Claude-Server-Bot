@@ -269,36 +269,27 @@ export function ChatTab() {
     }
   }, [sendImmediate]);
 
-  // Connect socket only after NextAuth session is confirmed (avoids
-  // racing the cookie on the first post-login navigation).
-  useEffect(() => {
-    if (sessionStatus === "authenticated") {
-      connectSocket();
-    }
-  }, [sessionStatus]);
-
-  // Setup socket listeners once
+  // Setup socket listeners and connect once authenticated.
+  // Listeners MUST be registered before connect() to avoid missing the
+  // "connect" event that fires synchronously on websocket upgrade.
   useEffect(() => {
     socketRef.current = getSocket();
     const socket = socketRef.current;
 
-    socket.on("connect", () => {
+    const handleConnect = () => {
       setConnected(true);
       setReconnecting(false);
       socket.emit("claude:list_sessions");
-      // Rejoin the active session room after reconnect — lightweight rejoin
-      // that preserves the existing Claude provider session (avoids destroying
-      // conversation context / claudeSessionId and re-sending system prompt).
       const session = activeSessionRef.current;
       if (session && initializedSessionsRef.current.has(session.id)) {
         socket.emit("claude:rejoin_session", { sessionId: session.id });
-        // Re-fetch authoritative messages from server on reconnect
         setLoadingMessages(true);
         socket.emit("claude:get_messages", { sessionId: session.id });
-        // Sync running state after reconnect
         socket.emit("claude:get_session_state", { sessionId: session.id });
       }
-    });
+    };
+
+    socket.on("connect", handleConnect);
 
     socket.on("disconnect", () => {
       setConnected(false);
@@ -699,13 +690,20 @@ export function ChatTab() {
       setCurrentActivity(null);
     });
 
+    // If the socket is already connected (e.g. effect re-ran after auth
+    // state change while socket stayed up), sync state immediately.
     if (socket.connected) {
-      setConnected(true);
-      socket.emit("claude:list_sessions");
+      handleConnect();
+    }
+
+    // Connect only after NextAuth session is confirmed — this must happen
+    // AFTER all listeners are registered above to avoid missing events.
+    if (sessionStatus === "authenticated") {
+      connectSocket();
     }
 
     return () => {
-      socket.off("connect");
+      socket.off("connect", handleConnect);
       socket.off("disconnect");
       socket.off("connect_error");
       socket.off("reconnect_attempt");
@@ -731,7 +729,7 @@ export function ChatTab() {
       socket.off("claude:session_status");
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [sessionStatus]);
 
   // When active session changes, load messages and init subprocess (once per session)
   useEffect(() => {

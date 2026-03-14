@@ -26,10 +26,9 @@ import {
 import { AVAILABLE_MODELS, DEFAULT_MODEL } from "../lib/models";
 import { isSDKAvailable } from "../lib/claude";
 import { logActivity } from "../lib/activity-log";
-import { getAppSetting, getPersonalityPrefix } from "../lib/app-settings";
-import { getCustomizationSystemPrompt, getBotSelfIdentityPrompt } from "../lib/customization";
-import { getSecuritySystemPrompt } from "../lib/security-guard";
+import { getAppSetting } from "../lib/app-settings";
 import { dispatchNotification } from "../lib/notifications";
+import { buildSystemPrompt } from "../lib/system-prompt";
 import db from "../lib/db";
 
 export function registerSessionHandlers(ctx: HandlerContext) {
@@ -82,33 +81,14 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         // Resolve per-session provider
         const sessionProvider = ctx.getSessionProvider(sessionId, sessionProviderType);
 
-        // Build system prompt based on interface_type
-        let systemPrompt: string | undefined;
+        const systemPrompt = await buildSystemPrompt({
+          interfaceType: interface_type,
+          personality: sessionPersonality,
+          personalityCustom: personality_custom,
+          templateSystemPrompt,
+        });
         if (interface_type === "customization_interface") {
-          systemPrompt = await getCustomizationSystemPrompt();
           logActivity("customization_session_started", email, { sessionId });
-        } else if (interface_type === "system_agent") {
-          systemPrompt = undefined; // bare, no personality
-        } else {
-          // Default: ui_chat — personality prefix + bot self-identity (CLAUDE.md)
-          const parts: string[] = [];
-          const selfIdentity = getBotSelfIdentityPrompt();
-          if (selfIdentity) parts.push(selfIdentity);
-          const personalityPrefix = getPersonalityPrefix(sessionPersonality, personality_custom);
-          if (personalityPrefix) parts.push(personalityPrefix);
-          systemPrompt = parts.length > 0 ? parts.join("\n\n") : undefined;
-        }
-
-        // Prepend template system prompt if set
-        if (templateSystemPrompt) {
-          systemPrompt = systemPrompt ? templateSystemPrompt + "\n\n" + systemPrompt : templateSystemPrompt;
-        }
-
-        // Prepend security system prompt if guard rails are enabled
-        const guardEnabled = getAppSetting("guard_rails_enabled", "true") === "true";
-        const securityPrefix = getSecuritySystemPrompt(guardEnabled);
-        if (securityPrefix) {
-          systemPrompt = systemPrompt ? securityPrefix + "\n\n" + systemPrompt : securityPrefix;
         }
 
         sessionProvider.createSession(sessionId, {
@@ -304,7 +284,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
   // claudeSessionId or conversation context.
   socket.on(
     "claude:rejoin_session",
-    ({ sessionId }: { sessionId: string }) => {
+    async ({ sessionId }: { sessionId: string }) => {
       if (!canAccessSession(sessionId, email)) {
         socket.emit("claude:error", { sessionId, message: "Access denied" });
         return;
@@ -320,18 +300,9 @@ export function registerSessionHandlers(ctx: HandlerContext) {
       ctx.connectedUsers.set(socket.id, { email, activeSession: sessionId });
       ctx.broadcastPresence();
 
-      // Build system prompt and (re-)initialize provider session
-      const parts: string[] = [];
-      const guardEnabled = getAppSetting("guard_rails_enabled", "true") === "true";
-      const securityPrefix = getSecuritySystemPrompt(guardEnabled);
-      if (securityPrefix) parts.push(securityPrefix);
-      const selfIdentity = getBotSelfIdentityPrompt();
-      if (selfIdentity) parts.push(selfIdentity);
-      if (dbSession.personality) {
-        const personalityPrefix = getPersonalityPrefix(dbSession.personality);
-        if (personalityPrefix) parts.push(personalityPrefix);
-      }
-      const systemPrompt = parts.length > 0 ? parts.join("\n\n") : undefined;
+      const systemPrompt = await buildSystemPrompt({
+        personality: dbSession.personality ?? undefined,
+      });
 
       const sessionProvider = ctx.getSessionProvider(sessionId, dbSession.provider_type);
       sessionProvider.createSession(sessionId, {

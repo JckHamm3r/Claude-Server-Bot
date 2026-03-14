@@ -375,7 +375,29 @@ Be specific. Each step should be atomic and independently executable. Return onl
       const planSession = getSession(plan.session_id);
       const skipPerms = planSession?.skip_permissions ?? false;
 
-      const completedResults: { summary: string; result: string }[] = [];
+      // Reuse a single session for all steps — Claude CLI maintains context
+      // via --resume, so we don't need to re-feed prior results each time.
+      const planSessionId = `plan-step-${planId}-${Date.now()}`;
+      provider.createSession(planSessionId, { skipPermissions: skipPerms });
+
+      const cleanupPlanSession = () => {
+        provider.offOutput(planSessionId);
+        provider.closeSession(planSessionId);
+      };
+
+      // First message establishes the plan context once
+      const stepSummaries = approvedSteps
+        .map((s, i) => `${i + 1}. ${s.summary}`)
+        .join("\n");
+      const initPrompt = `You are executing a multi-step plan. Execute each step I give you.\n\nOverall goal: ${sanitizePromptInput(plan.goal)}\n\nFull plan (${approvedSteps.length} steps):\n${stepSummaries}\n\nI will now give you each step one at a time. Execute only the step I provide, then stop and wait for the next.`;
+
+      // Send the plan overview as the first message so Claude has full context
+      await new Promise<void>((resolve) => {
+        provider.onOutput(planSessionId, (parsed) => {
+          if (parsed.type === "done") resolve();
+        });
+        provider.sendMessage(planSessionId, initPrompt);
+      });
 
       let stepIdx = 0;
       while (stepIdx < approvedSteps.length) {
@@ -383,28 +405,13 @@ Be specific. Each step should be atomic and independently executable. Return onl
         updatePlanStep(step.id, { status: "executing", executed_at: new Date().toISOString() });
         socket.emit("claude:step_executing", { planId, stepId: step.id });
 
-        const stepSessionId = `plan-step-${step.id}-${Date.now()}`;
-        provider.createSession(stepSessionId, { skipPermissions: skipPerms });
-
-        // Build context-aware prompt with plan goal and prior step results
-        const contextParts: string[] = [];
-        contextParts.push(`Overall plan goal: ${sanitizePromptInput(plan.goal)}`);
-        contextParts.push(`This is step ${stepIdx + 1} of ${approvedSteps.length}.`);
-        if (completedResults.length > 0) {
-          contextParts.push("Previously completed steps:");
-          for (const prev of completedResults) {
-            contextParts.push(`- ${prev.summary}: ${prev.result.slice(0, 500)}`);
-          }
-        }
-        contextParts.push(`\nExecute this step: ${sanitizePromptInput(step.summary)}`);
-        if (step.details) contextParts.push(`Details: ${sanitizePromptInput(step.details)}`);
-        const stepPrompt = contextParts.join("\n");
+        const stepPrompt = `Execute step ${stepIdx + 1}: ${sanitizePromptInput(step.summary)}${step.details ? `\nDetails: ${sanitizePromptInput(step.details)}` : ""}`;
 
         let stepOutput = "";
         let stepError = "";
 
         await new Promise<void>((resolve) => {
-          provider.onOutput(stepSessionId, (parsed) => {
+          provider.onOutput(planSessionId, (parsed) => {
             if (parsed.type === "text" && parsed.content) {
               stepOutput = parsed.content;
               socket.emit("claude:step_progress", { planId, stepId: step.id, content: stepOutput });
@@ -416,12 +423,10 @@ Be specific. Each step should be atomic and independently executable. Return onl
               stepError = parsed.message ?? "Unknown error";
             }
             if (parsed.type === "done") {
-              provider.offOutput(stepSessionId);
-              provider.closeSession(stepSessionId);
               resolve();
             }
           });
-          provider.sendMessage(stepSessionId, stepPrompt);
+          provider.sendMessage(planSessionId, stepPrompt);
         });
 
         if (stepError) {
@@ -439,6 +444,7 @@ Be specific. Each step should be atomic and independently executable. Return onl
           ctx.planResumeCallbacks.delete(planId);
 
           if (action === "cancel") {
+            cleanupPlanSession();
             planExecutionCounts.set(email, (planExecutionCounts.get(email) ?? 1) - 1);
             planOwners.delete(planId);
             updatePlanStatus(planId, "failed");
@@ -452,17 +458,16 @@ Be specific. Each step should be atomic and independently executable. Return onl
             continue;
           }
 
-          // "skip" — advance to next step
           stepIdx++;
           continue;
         }
 
         updatePlanStep(step.id, { status: "completed", result: stepOutput });
-        completedResults.push({ summary: step.summary, result: stepOutput });
         socket.emit("claude:step_completed", { planId, stepId: step.id, result: stepOutput });
         stepIdx++;
       }
 
+      cleanupPlanSession();
       planExecutionCounts.set(email, (planExecutionCounts.get(email) ?? 1) - 1);
       planOwners.delete(planId);
       updatePlanStatus(planId, "completed");

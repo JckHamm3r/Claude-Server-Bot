@@ -13,10 +13,10 @@ import {
   canModifySession,
 } from "../lib/claude-db";
 import { logActivity } from "../lib/activity-log";
-import { getAppSetting, getPersonalityPrefix } from "../lib/app-settings";
-import { checkBotConfigRequest, getSecuritySystemPrompt } from "../lib/security-guard";
+import { getAppSetting } from "../lib/app-settings";
+import { checkBotConfigRequest } from "../lib/security-guard";
 import { dispatchNotification } from "../lib/notifications";
-import { getBotSelfIdentityPrompt } from "../lib/customization";
+import { buildSystemPrompt } from "../lib/system-prompt";
 
 export function registerMessageHandlers(ctx: HandlerContext) {
   const { socket, io, email } = ctx;
@@ -266,18 +266,9 @@ export function registerMessageHandlers(ctx: HandlerContext) {
         ctx.sessionListeners.delete(sessionId);
         ctx.sessionProviders.delete(sessionId);
 
-        // Rebuild system prompt for the new session
-        const parts: string[] = [];
-        const guardEnabled = getAppSetting("guard_rails_enabled", "true") === "true";
-        const securityPrefix = getSecuritySystemPrompt(guardEnabled);
-        if (securityPrefix) parts.push(securityPrefix);
-        const selfIdentity = getBotSelfIdentityPrompt();
-        if (selfIdentity) parts.push(selfIdentity);
-        if (session.personality) {
-          const personalityPrefix = getPersonalityPrefix(session.personality);
-          if (personalityPrefix) parts.push(personalityPrefix);
-        }
-        const systemPrompt = parts.length > 0 ? parts.join("\n\n") : undefined;
+        const systemPrompt = await buildSystemPrompt({
+          personality: session.personality ?? undefined,
+        });
 
         // Re-create with system prompt
         const sessionProvider = ctx.getSessionProvider(sessionId, session.provider_type);
@@ -292,15 +283,22 @@ export function registerMessageHandlers(ctx: HandlerContext) {
         const messages = getMessages(sessionId);
         io.to(`session:${sessionId}`).emit("claude:messages_updated", { sessionId, messages });
 
-        // Rebuild conversation context from prior messages so Claude has history
+        // Provide only recent context — Claude Code sub-agents maintain their own
+        // context via --resume, so we only need enough for the edit to make sense.
         const priorMessages = messages.filter((m) => m.id !== messageId);
         let contextPrefix = "";
         if (priorMessages.length > 0) {
-          const historyLines = priorMessages.map((m) => {
+          const MAX_CONTEXT_MESSAGES = 6;
+          const recent = priorMessages.slice(-MAX_CONTEXT_MESSAGES);
+          const skipped = priorMessages.length - recent.length;
+          const historyLines = recent.map((m) => {
             const role = m.sender_type === "admin" ? "User" : "Assistant";
-            return `${role}: ${(m.content ?? "").slice(0, 2000)}`;
+            return `${role}: ${(m.content ?? "").slice(0, 800)}`;
           });
-          contextPrefix = "Previous conversation context:\n" + historyLines.join("\n") + "\n\nNew message:\n";
+          const preamble = skipped > 0
+            ? `[${skipped} earlier messages omitted]\n`
+            : "";
+          contextPrefix = "Recent conversation context:\n" + preamble + historyLines.join("\n") + "\n\nEdited message:\n";
         }
 
         // Re-send the edited message with conversation context
