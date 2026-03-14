@@ -11,7 +11,6 @@ import {
   Loader2,
   Download,
   Upload,
-  Zap,
   Skull,
   RefreshCw,
   ChevronDown,
@@ -105,8 +104,6 @@ export function SettingsPanel() {
   } | null>(null);
 
   // System actions
-  const [updatingClaude, setUpdatingClaude] = useState(false);
-  const [updateOutput, setUpdateOutput] = useState<string | null>(null);
   const [killingAll, setKillingAll] = useState(false);
   const [killMsg, setKillMsg] = useState<string | null>(null);
 
@@ -116,8 +113,6 @@ export function SettingsPanel() {
   const restoreInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-update
-  const [autoUpdate, setAutoUpdate] = useState("false");
-  const [savingAutoUpdate, setSavingAutoUpdate] = useState(false);
 
   useEffect(() => {
     const socket = getSocket();
@@ -141,7 +136,6 @@ export function SettingsPanel() {
         setRateCmds(d.rate_limit_commands ?? "100");
         setRateRuntime(d.rate_limit_runtime_min ?? "30");
         setRateConcurrent(d.rate_limit_concurrent ?? "3");
-        setAutoUpdate(d.auto_update_enabled ?? "false");
       })
       .catch(() => {});
     return () => { socket.off("claude:settings"); };
@@ -395,18 +389,6 @@ export function SettingsPanel() {
     } catch { /* ignore */ }
   }
 
-  async function handleClaudeUpdate() {
-    setUpdatingClaude(true);
-    setUpdateOutput(null);
-    try {
-      const res = await fetch(apiUrl("/api/system/claude-update"), { method: "POST" });
-      const data = await res.json();
-      setUpdateOutput(data.output ?? (data.ok ? "Updated successfully" : "Update failed"));
-    } finally {
-      setUpdatingClaude(false);
-    }
-  }
-
   async function handleKillAll() {
     setKillingAll(true);
     setKillMsg(null);
@@ -441,18 +423,6 @@ export function SettingsPanel() {
     } finally {
       setRestoring(false);
     }
-  }
-
-  async function handleAutoUpdateToggle() {
-    const newVal = autoUpdate === "true" ? "false" : "true";
-    setSavingAutoUpdate(true);
-    await fetch(apiUrl("/api/app-settings"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ auto_update_enabled: newVal }),
-    });
-    setAutoUpdate(newVal);
-    setSavingAutoUpdate(false);
   }
 
   if (!settings) {
@@ -926,11 +896,10 @@ export function SettingsPanel() {
               {health ? (
                 <div className="space-y-2">
                   {[
-                    { key: "cli_exists", label: "Claude CLI installed" },
-                    { key: "authenticated", label: "Authenticated with Anthropic" },
-                    { key: "responding", label: "Claude is responding" },
-                    { key: "project_accessible", label: "Project directory accessible" },
-                    { key: "disk_ok", label: "Sufficient disk space (>10% free)" },
+                    { key: "database", label: "Database connected" },
+                    { key: "apiKeyConfigured", label: "Anthropic API key configured" },
+                    { key: "sdkInstalled", label: "Claude Agent SDK installed" },
+                    { key: "socketServer", label: "Socket.IO server running" },
                   ].map((c) => (
                     <div key={c.key} className="flex items-center gap-3">
                       {health[c.key] ? (
@@ -967,37 +936,13 @@ export function SettingsPanel() {
               )}
             </div>
 
-            {/* Claude update */}
-            <div className="rounded-lg border border-bot-border bg-bot-surface p-5">
-              <div className="flex items-start gap-4">
-                <Zap className="h-6 w-6 text-bot-accent shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <p className="text-body font-medium text-bot-text mb-1">Update Claude CLI</p>
-                  <p className="text-caption text-bot-muted mb-3">Runs <code className="font-mono text-bot-text">npm update -g @anthropic-ai/claude-code</code>.</p>
-                  <button
-                    onClick={handleClaudeUpdate}
-                    disabled={updatingClaude}
-                    className="inline-flex items-center gap-2 rounded-lg bg-bot-accent px-4 py-2 text-body font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors"
-                  >
-                    {updatingClaude ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-                    {updatingClaude ? "Updating…" : "Run Update"}
-                  </button>
-                  {updateOutput && (
-                    <pre className="mt-3 rounded-md bg-bot-elevated p-3 text-caption font-mono text-bot-text overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap">
-                      {updateOutput}
-                    </pre>
-                  )}
-                </div>
-              </div>
-            </div>
-
             {/* Kill all */}
             <div className="rounded-lg border border-bot-red/30 bg-bot-red/5 p-5">
               <div className="flex items-start gap-4">
                 <Skull className="h-6 w-6 text-bot-red shrink-0 mt-0.5" />
                 <div className="flex-1">
                   <p className="text-body font-medium text-bot-text mb-1">Kill All Sessions</p>
-                  <p className="text-caption text-bot-muted mb-3">Immediately terminate all active Claude subprocesses.</p>
+                  <p className="text-caption text-bot-muted mb-3">Immediately terminate all active Claude sessions.</p>
                   <button
                     onClick={handleKillAll}
                     disabled={killingAll}
@@ -1017,10 +962,9 @@ export function SettingsPanel() {
         {activeSection === "updates" && (
           <div className="mx-auto max-w-2xl">
             <h2 className="mb-6 text-subtitle font-bold text-bot-text">Updates</h2>
-            <SettingRow title="Auto-Update Claude CLI" description="Automatically update Claude CLI every Sunday at 3:00 AM (fixed schedule).">
-              <Toggle checked={autoUpdate === "true"} onChange={handleAutoUpdateToggle} />
-            </SettingRow>
-            {savingAutoUpdate && <p className="mt-2 text-caption text-bot-muted">Saving…</p>}
+            <p className="text-body text-bot-muted">
+              To update, run the update script on your server or re-run the install command.
+            </p>
           </div>
         )}
 
@@ -1432,8 +1376,7 @@ function ApiKeySection() {
     <div className="space-y-4">
       <h3 className="text-subtitle font-bold text-bot-text">Anthropic API Key</h3>
       <p className="text-caption text-bot-muted">
-        Configure an API key to enable the SDK provider. This allows sessions to use the Anthropic API directly
-        instead of the Claude CLI subprocess.
+        Your Anthropic API key is used to communicate with Claude. Get one at console.anthropic.com.
       </p>
 
       <div className="space-y-3">

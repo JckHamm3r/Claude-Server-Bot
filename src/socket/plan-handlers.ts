@@ -373,8 +373,8 @@ Be specific. Each step should be atomic and independently executable. Return onl
       const planSession = getSession(plan.session_id);
       const skipPerms = planSession?.skip_permissions ?? false;
 
-      // Reuse a single session for all steps — Claude CLI maintains context
-      // via --resume, so we don't need to re-feed prior results each time.
+      // Reuse a single session for all steps — the SDK maintains context
+      // via session resume, so we don't need to re-feed prior results each time.
       const planSessionId = `plan-step-${planId}-${Date.now()}`;
       provider.createSession(planSessionId, { skipPermissions: skipPerms });
 

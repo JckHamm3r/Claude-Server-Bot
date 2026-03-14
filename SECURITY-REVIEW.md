@@ -25,7 +25,7 @@ These assumptions inform severity ratings and fix approaches throughout this doc
 - **Trust model:** Non-admin users are semi-trusted (explicitly invited by an admin) but should only see their own sessions unless explicitly invited to collaborate on a specific session.
 - **Session sharing:** Explicit invite model — session owner or admin invites specific users by email. Requires a new `session_participants` DB table. Collaborators can chat/interact but cannot rename, delete, or close sessions they don't own.
 - **Claude's role:** Claude operates on the server filesystem via `CLAUDE_PROJECT_ROOT`. It is *meant* to make changes to the server. Security layers (sandbox, guard rails) are guardrails — not hard blocks for admins. The tool's purpose is to give Claude full development capability.
-- **`--dangerously-skip-permissions`:** Selectable per-session at creation time. When enabled, it bypasses the command sandbox entirely, matching Claude Code CLI behavior. This is intentional.
+- **Skip permissions:** Selectable per-session at creation time. When enabled, it bypasses the command sandbox entirely. This is intentional for trusted tasks.
 - **Agent ownership:** Agents are a shared resource. Any user can use any agent. Only the creator (or an admin) can edit or delete an agent.
 - **Encryption at rest:** Deferred. If an attacker has filesystem access to the SQLite DB, they already own the server. Encrypting API keys/SMTP passwords adds complexity for minimal gain in this deployment model.
 
@@ -133,7 +133,7 @@ These assumptions inform severity ratings and fix approaches throughout this doc
 4. **Command substitution detection** — Detect `$(...)` and backtick substitution; classify the inner command
 5. **Whitelist vs dangerous order** — Check dangerous patterns FIRST. If a whitelisted pattern matches a dangerous command, show a warning to the admin but allow it (don't hard-block — the admin chose to trust it)
 6. **Whitelist pattern validation** — When adding a new `always_allow` pattern, warn if it matches any dangerous command or is empty/blank. Allow the admin to proceed after seeing the warning.
-7. **`skip_permissions` bypass** — When a session has `skip_permissions = true`, bypass sandbox classification entirely. This matches `claude --dangerously-skip-permissions` CLI behavior.
+7. **`skip_permissions` bypass** — When a session has `skip_permissions = true`, bypass sandbox classification entirely.
 8. **Admin vs non-admin enforcement:**
    - Admins: prompted on restricted/dangerous commands (can approve or always-trust)
    - Non-admins: blocked on restricted/dangerous commands (cannot override)
@@ -195,7 +195,7 @@ These assumptions inform severity ratings and fix approaches throughout this doc
 | S4-01 | CRITICAL | `settings/project/route.ts:30-65` | Missing admin check — any authenticated user can change `CLAUDE_PROJECT_ROOT` |
 | S4-02 | CRITICAL | `settings/project/route.ts:9-28` | `.env` injection via newlines in `updateEnvFile` — no sanitization |
 | S4-03 | CRITICAL | `claude-code/upload/route.ts:45-51` | Path traversal via crafted file extension (`path.extname` unsanitized) |
-| S4-04 | MEDIUM | `system/claude-update/route.ts:21-25` | `execSync` shell invocation; output leaked to client. Command is hardcoded (no user input), but should use `execFileSync` to avoid shell and truncate output. |
+| S4-04 | RESOLVED | `system/claude-update/route.ts` | Route now returns 410 Gone — CLI update functionality removed. |
 | S4-05 | HIGH | `setup/complete/route.ts:11-33` | Missing admin check — any user can mark setup as complete. Note: first user through setup IS the admin, so exploitability requires a non-admin reaching the setup page (mitigated by S3-02 fix). |
 | S4-06 | HIGH | `claude-code/upload/[id]/route.ts:39` | Content-Disposition header injection via unsanitized `original_name` |
 | S4-07 | HIGH | `claude-code/test/route.ts:6-54` | No rate limiting — any user can spawn unlimited 15-second Claude tests |
@@ -337,36 +337,20 @@ These assumptions inform severity ratings and fix approaches throughout this doc
 
 ## Segment 8: Claude Provider Layer
 
-**Scope:** `src/lib/claude/subprocess-provider.ts`, `src/lib/claude/sdk-provider.ts`, `src/lib/claude/output-parser.ts`, `src/lib/claude/index.ts`
+**Scope:** `src/lib/claude/sdk-provider.ts`, `src/lib/claude/index.ts`
 
-**Summary:** Potential command injection via input files, zombie process risks, unbounded buffers, global state mutation, and missing timeouts.
+**Summary:** The subprocess provider has been removed. Only the SDK provider remains. Remaining concerns relate to SDK session management, API key handling, and timeouts.
 
 | ID | Severity | File | Description |
 |----|----------|------|-------------|
-| S8-01 | HIGH | `subprocess-provider.ts:126-128` | `inputFiles` paths passed to CLI without validation — could inject flags (e.g. `--some-flag`) |
-| S8-02 | MEDIUM | `subprocess-provider.ts:147-148` | No length validation on message written to stdin. Semi-trusted users are unlikely to send multi-MB messages, but a soft cap prevents accidental resource exhaustion. |
-| S8-03 | MEDIUM | `sdk-provider.ts:54` | API key set on `process.env` globally — leaked to all subprocesses. Fix: pass via subprocess env only, not globally. |
-| S8-04 | MEDIUM | `sdk-provider.ts:61-63` | `Function("return require")()` — effectively eval, defeats CSP. Code quality issue, not a user-facing security risk. Fix: use `require` with eslint-disable or configure `serverComponentsExternalPackages`. |
-| S8-05 | MEDIUM | `subprocess-provider.ts:432-434,447,467` | SIGTERM without SIGKILL fallback — zombie process risk |
-| S8-06 | MEDIUM | `subprocess-provider.ts:150` | Unbounded stdout buffer growth on long lines without newlines |
-| S8-07 | MEDIUM | `subprocess-provider.ts:412-438` | Race condition in `allowTool` — kills process and restarts without waiting for close |
-| S8-08 | MEDIUM | `sdk-provider.ts:86-93` | No timeout for SDK calls — can hang indefinitely |
-| S8-09 | MEDIUM | `sdk-provider.ts:14` | SDK sessions never garbage collected |
-| S8-10 | MEDIUM | `sdk-provider.ts:10,83` | Unbounded `messageHistory` growth |
-| S8-11 | MEDIUM | `sdk-provider.ts:155` | `runSDK` async call not awaited — unhandled rejection risk |
-| S8-12 | LOW | `subprocess-provider.ts:277` | Global mutable `toolCallCounter` shared across sessions |
-| S8-13 | LOW | `subprocess-provider.ts:481-483` | EventEmitter listener leak potential on repeated `onOutput` calls |
-| S8-14 | LOW | `subprocess-provider.ts:34-43` | GC interval never cleared |
-| S8-15 | LOW | `index.ts:39-44` | Unrecognized provider type silently falls back to subprocess |
+| S8-08 | MEDIUM | `sdk-provider.ts` | No timeout for SDK calls — can hang indefinitely |
+| S8-09 | MEDIUM | `sdk-provider.ts` | SDK sessions never garbage collected |
+| S8-10 | MEDIUM | `sdk-provider.ts` | Unbounded `messageHistory` growth |
+| S8-11 | MEDIUM | `sdk-provider.ts` | `runSDK` async call not awaited — unhandled rejection risk |
 
 **Approach:**
-1. Validate `inputFiles` — reject paths starting with `-`, ensure they resolve within allowed directories
-2. Add soft max message length check (e.g. 500KB warning, 2MB hard reject)
-3. Pass API key in the subprocess env copy only, not on `process.env` globally
-4. Replace `Function("return require")()` with `require` + eslint-disable, or add to `serverComponentsExternalPackages` in next.config.js
-5. Add SIGKILL fallback timer for all SIGTERM calls
-6. Cap buffer size
-7. Add SDK timeout via `AbortSignal.timeout()`
+1. Add soft max message length check (e.g. 500KB warning, 2MB hard reject)
+2. Add SDK timeout via `AbortSignal.timeout()`
 8. Add SDK session GC
 
 - [x] S8-01 — `inputFiles` paths validated: rejects `-` prefixed, `..`, and paths outside project root

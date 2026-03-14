@@ -105,7 +105,7 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
     (name: string, skipPermissions: boolean, model?: string, providerType?: string, templateId?: string, personality?: string, personalityCustom?: string) => {
       const id = crypto.randomUUID();
       const sessionModelValue = model ?? DEFAULT_MODEL;
-      const sessionProviderType = providerType ?? "subprocess";
+      const sessionProviderType = providerType ?? "sdk";
       const optimistic: ClaudeSession = {
         id,
         name: name || null,

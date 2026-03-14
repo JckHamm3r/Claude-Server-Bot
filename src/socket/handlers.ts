@@ -198,7 +198,7 @@ const planResumeCallbacks = new Map<string, (action: PlanAction) => void>();
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const ptyProcesses = new Map<string, any>();
 
-// Per-session provider tracking (for SDK vs subprocess per session)
+// Per-session provider tracking
 const sessionProviders = new Map<string, ClaudeCodeProvider>();
 // Per-session pending usage (captured between streaming and done)
 const sessionPendingUsage = new Map<string, TokenUsage>();
@@ -222,7 +222,7 @@ function checkRateLimit(email: string, sessionId: string): { ok: boolean; reason
   const maxRuntimeMin = parseInt(getAppSetting("rate_limit_runtime_min", "30"), 10);
   const maxConcurrent = parseInt(getAppSetting("rate_limit_concurrent", "0"), 10);
 
-  // Count actually-running subprocesses for this user (0 = unlimited)
+  // Count actually-running sessions for this user (0 = unlimited)
   if (maxConcurrent > 0) {
     let runningCount = 0;
     for (const [sid, sp] of sessionProviders.entries()) {
@@ -369,7 +369,7 @@ export function registerHandlers(io: Server) {
     sessionProvider.onOutput(sessionId, async (parsed) => {
       const submittedBy = sessionCommandSubmitter.get(sessionId);
 
-      // Persist Claude CLI session ID to DB for --resume across server restarts
+      // Persist session ID to DB for resume across server restarts
       if (parsed.type === "session_id" && parsed.claudeSessionId) {
         try { updateClaudeSessionId(sessionId, parsed.claudeSessionId); } catch { /* ignore for ephemeral sessions */ }
         return;

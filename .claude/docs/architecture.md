@@ -13,19 +13,19 @@
 
 The app does NOT use the standard Next.js server. `server.ts` creates an HTTP server (or HTTPS when SSL certs are configured), attaches Socket.IO for real-time WebSocket communication, then hands HTTP requests to Next.js. The Socket.IO path is configurable for slug-based multi-tenant routing. When HTTPS is active, the server sets `x-forwarded-proto: https` on requests so Next.js generates correct redirect URLs.
 
-## Claude Provider Abstraction (`src/lib/claude/`)
+## Claude Provider (`src/lib/claude/`)
 
-Two provider modes controlled by `CLAUDE_PROVIDER` env var (default: "subprocess"):
+Uses the `@anthropic-ai/claude-agent-sdk` package with an Anthropic API key:
 
-- **subprocess-provider.ts** — Spawns the `claude` CLI as a child process with `--output-format stream-json`. Manages per-session state (claudeSessionId, running flag, allowedTools, waitingForPermission). Supports session resume via `--resume`. Handles permission denials by pausing until the user grants/denies via the UI.
-- **sdk-provider.ts** — Alternative SDK-based provider using the Anthropic SDK directly.
-- **output-parser.ts** — Parses newline-delimited JSON stream events (text, tool_call, permission_request, done, error).
+- **sdk-provider.ts** — Runs the full agent loop via the SDK. Manages per-session state (claudeSessionId, running flag, allowedTools, waitingForPermission). Supports session resume. Handles permission requests via the `canUseTool` callback.
+- **index.ts** — Exports `getClaudeProvider()` and `isSDKAvailable()`. The SDK is the only provider.
+- **provider.ts** — `ClaudeCodeProvider` interface and `ParsedOutput` type definitions.
 
 ## Real-Time Layer (`src/socket/`)
 
 All Claude interactions flow through Socket.IO events, not REST APIs. Split across handler files:
 
-- **`handlers.ts`** — Core orchestration: token-based auth, user presence tracking, message streaming to/from Claude subprocess, security interception, metrics buffering (flushed to DB every 60s).
+- **`handlers.ts`** — Core orchestration: token-based auth, user presence tracking, message streaming to/from Claude, security interception, metrics buffering (flushed to DB every 60s).
 - **`session-handlers.ts`** — Session CRUD, model switching, state sync, templates, session sharing/collaboration, usage tracking, kill-all.
 - **`message-handlers.ts`** — Send messages, interrupt, tool permissions, edit/delete messages, rate limiting, budget checks, file attachments.
 - **`plan-handlers.ts`** — Agent CRUD, plan generation/approval/execution/refinement, step management.
@@ -76,21 +76,19 @@ SQLite at `./data/claude-bot.db` with WAL mode. Schema auto-migrates on startup 
 
 ## Key Environment Variables
 
-- `CLAUDE_PROJECT_ROOT` — Working directory for Claude subprocess
-- `CLAUDE_CLI_PATH` — Path to claude binary (default: "claude")
-- `CLAUDE_PROVIDER` — "subprocess" or "sdk"
+- `ANTHROPIC_API_KEY` — API key for Claude (also settable via Settings UI)
+- `CLAUDE_PROJECT_ROOT` — Working directory for Claude
 - `CLAUDE_BOT_PATH_PREFIX` — URL path prefix derived from bot name (e.g. "jarvis")
 - `CLAUDE_BOT_SLUG` — Random URL slug for basePath routing (e.g. "a8Bx3kQ9m2pR")
 - `NEXTAUTH_SECRET` — JWT signing secret
 - `DATA_DIR` — Database directory (default: ./data)
 - `SSL_CERT_PATH` / `SSL_KEY_PATH` — Optional SSL certificate paths for HTTPS
-- `ANTHROPIC_API_KEY` — API key (also settable via app_settings)
 
 ## Installation & Deployment
 
 Installed via curl one-liner (`install.sh`). Managed by:
 
-- `install.sh` — Full installation with dependency setup, env generation, build
+- `install.sh` — Full installation with dependency setup, API key prompt, env generation, build
 - `update.sh` — Pull latest, rebuild, health check with auto-rollback
 - `uninstall.sh` — Clean removal
 - `scripts/setup-domain.sh` — Custom domain + SSL setup

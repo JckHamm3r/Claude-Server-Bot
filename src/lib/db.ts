@@ -319,7 +319,7 @@ function addColumnSafe(table: string, col: string, def: string) {
 const migrations: Record<number, () => void> = {
   1: () => {
     addColumnSafe("sessions", "model", "TEXT NOT NULL DEFAULT 'claude-sonnet-4-6'");
-    addColumnSafe("sessions", "provider_type", "TEXT NOT NULL DEFAULT 'subprocess'");
+    addColumnSafe("sessions", "provider_type", "TEXT NOT NULL DEFAULT 'sdk'");
     addColumnSafe("sessions", "status", "TEXT NOT NULL DEFAULT 'idle'");
     addColumnSafe("sessions", "personality", "TEXT");
     addColumnSafe("sessions", "claude_session_id", "TEXT");
@@ -332,7 +332,7 @@ const migrations: Record<number, () => void> = {
         system_prompt TEXT,
         model TEXT NOT NULL DEFAULT 'claude-sonnet-4-6',
         skip_permissions INTEGER NOT NULL DEFAULT 0,
-        provider_type TEXT NOT NULL DEFAULT 'subprocess',
+        provider_type TEXT NOT NULL DEFAULT 'sdk',
         icon TEXT,
         is_default INTEGER NOT NULL DEFAULT 0,
         created_by TEXT NOT NULL,
@@ -354,7 +354,7 @@ for (let v = currentVersion + 1; v <= LATEST_SCHEMA_VERSION; v++) {
   }
 }
 
-// Reset stale statuses on startup (server restart means no subprocess is running)
+// Reset stale statuses on startup (server restart means no session is running)
 db.exec("UPDATE sessions SET status = 'idle' WHERE status IN ('running', 'needs_attention')");
 
 // Seed or sync admin user from env

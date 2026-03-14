@@ -74,7 +74,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         }
 
         const sessionModel = model ?? DEFAULT_MODEL;
-        const sessionProviderType = provider_type ?? "subprocess";
+        const sessionProviderType = provider_type ?? "sdk";
         const sessionPersonality = personality ?? "professional";
         createSession(sessionId, email, skipPermissions ?? false, sessionModel, sessionProviderType, sessionPersonality);
 
@@ -395,12 +395,8 @@ export function registerSessionHandlers(ctx: HandlerContext) {
   // ── Capabilities ─────────────────────────────────────────────────────
 
   socket.on("claude:get_capabilities", () => {
-    const sdkAvailable = isSDKAvailable();
     socket.emit("claude:capabilities", {
-      sdkAvailable,
-      sdkStreaming: sdkAvailable,
-      sdkPermissions: sdkAvailable,
-      sdkSessionResume: sdkAvailable,
+      sdkAvailable: isSDKAvailable(),
       models: AVAILABLE_MODELS,
     });
   });

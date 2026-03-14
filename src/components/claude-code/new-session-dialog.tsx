@@ -45,11 +45,9 @@ export function NewSessionDialog({ onClose, onCreate }: NewSessionDialogProps) {
   const [name, setName] = useState("");
   const [skipPermissions, setSkipPermissions] = useState(false);
   const [model, setModel] = useState(DEFAULT_MODEL);
-  const [providerType, setProviderType] = useState("subprocess");
   const [personality, setPersonality] = useState("professional");
   const [customPrompt, setCustomPrompt] = useState("");
   const [showPersonality, setShowPersonality] = useState(false);
-  const [sdkAvailable, setSdkAvailable] = useState(false);
   const [templates, setTemplates] = useState<SessionTemplate[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
@@ -58,21 +56,14 @@ export function NewSessionDialog({ onClose, onCreate }: NewSessionDialogProps) {
     socketRef.current = getSocket();
     const socket = socketRef.current;
 
-    const handleCapabilities = ({ sdkAvailable: avail }: { sdkAvailable: boolean }) => {
-      setSdkAvailable(avail);
-    };
-
     const handleTemplates = ({ templates: t }: { templates: SessionTemplate[] }) => {
       setTemplates(t);
     };
 
-    socket.on("claude:capabilities", handleCapabilities);
     socket.on("claude:templates", handleTemplates);
-    socket.emit("claude:get_capabilities");
     socket.emit("claude:list_templates");
 
     return () => {
-      socket.off("claude:capabilities", handleCapabilities);
       socket.off("claude:templates", handleTemplates);
     };
   }, []);
@@ -81,7 +72,6 @@ export function NewSessionDialog({ onClose, onCreate }: NewSessionDialogProps) {
     setSelectedTemplate(template.id);
     setModel(template.model);
     setSkipPermissions(template.skip_permissions);
-    setProviderType(template.provider_type);
     if (!name) setName(template.name);
   };
 
@@ -91,7 +81,7 @@ export function NewSessionDialog({ onClose, onCreate }: NewSessionDialogProps) {
       name.trim(),
       skipPermissions,
       model,
-      providerType,
+      "sdk",
       selectedTemplate ?? undefined,
       personality,
       personality === "custom" ? customPrompt : undefined,
@@ -132,7 +122,6 @@ export function NewSessionDialog({ onClose, onCreate }: NewSessionDialogProps) {
                     setSelectedTemplate(null);
                     setModel(DEFAULT_MODEL);
                     setSkipPermissions(false);
-                    setProviderType("subprocess");
                   }}
                   className={cn(
                     "rounded-xl border px-3.5 py-2 text-caption font-medium transition-all duration-200",
@@ -182,42 +171,6 @@ export function NewSessionDialog({ onClose, onCreate }: NewSessionDialogProps) {
               Model
             </label>
             <ModelSelector value={model} onChange={setModel} />
-          </div>
-
-          <div>
-            <label className="mb-2 block text-caption font-medium text-bot-muted">
-              Provider
-            </label>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setProviderType("subprocess")}
-                className={cn(
-                  "rounded-xl border px-3.5 py-2 text-caption font-medium transition-all duration-200",
-                  providerType === "subprocess"
-                    ? "border-bot-accent/50 bg-bot-accent/10 text-bot-accent shadow-glow-sm"
-                    : "border-bot-border/40 bg-bot-elevated/40 text-bot-muted hover:border-bot-accent/30",
-                )}
-              >
-                CLI
-              </button>
-              <button
-                type="button"
-                onClick={() => sdkAvailable && setProviderType("sdk")}
-                disabled={!sdkAvailable}
-                className={cn(
-                  "rounded-xl border px-3.5 py-2 text-caption font-medium transition-all duration-200",
-                  providerType === "sdk"
-                    ? "border-bot-accent/50 bg-bot-accent/10 text-bot-accent shadow-glow-sm"
-                    : "border-bot-border/40 bg-bot-elevated/40 text-bot-muted hover:border-bot-accent/30",
-                  !sdkAvailable && "opacity-40 cursor-not-allowed",
-                )}
-                title={!sdkAvailable ? "Add API key in Settings to enable SDK" : "Use Anthropic SDK directly"}
-              >
-                SDK
-                {!sdkAvailable && <span className="ml-1 text-[10px] opacity-60">(no key)</span>}
-              </button>
-            </div>
           </div>
 
           <div>
@@ -283,7 +236,7 @@ export function NewSessionDialog({ onClose, onCreate }: NewSessionDialogProps) {
                 className="mt-0.5 h-4 w-4 rounded border-bot-border accent-bot-accent"
               />
               <span className="text-body text-bot-text">
-                Skip permissions (--dangerously-skip-permissions)
+                Skip permissions (bypass all tool approvals)
               </span>
             </label>
             <AnimatePresence>

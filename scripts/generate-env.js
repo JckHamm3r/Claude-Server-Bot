@@ -12,7 +12,6 @@
 //   "slug": "...",
 //   "secret": "...",
 //   "email": "admin@example.com",
-//   "cliBin": "/usr/local/bin/claude",
 //   "projectRoot": "/home/user/project",
 //   "installDir": "/home/user/claude-server-bot",
 //   "botName": "Claude-Bot",
@@ -37,7 +36,7 @@ try {
   process.exit(1);
 }
 
-const required = ["password", "port", "baseUrl", "slug", "secret", "email", "cliBin", "projectRoot", "installDir", "botName", "pathPrefix"];
+const required = ["password", "port", "baseUrl", "slug", "secret", "email", "projectRoot", "installDir", "botName", "pathPrefix"];
 for (const key of required) {
   if (config[key] === undefined || config[key] === null) {
     console.error(`Missing required config key: ${key}`);
@@ -70,10 +69,8 @@ const env = [
   "CLAUDE_BOT_NAME=" + config.botName,
   "CLAUDE_BOT_ADMIN_EMAIL=" + config.email,
   "CLAUDE_BOT_ADMIN_HASH=" + escapeForDotenv(hash),
-  "CLAUDE_CLI_PATH=" + config.cliBin,
   "CLAUDE_PROJECT_ROOT=" + config.projectRoot,
   "DATA_DIR=" + path.join(config.installDir, "data"),
-  "CLAUDE_PROVIDER=subprocess",
 ].join("\n") + "\n";
 
 const envPath = path.join(config.installDir, ".env");

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { execSync } from "child_process";
 import db from "@/lib/db";
 
 export async function GET() {
@@ -25,15 +24,6 @@ export async function GET() {
     database = false;
   }
 
-  let claudeProcess = false;
-  try {
-    execSync("which claude");
-    claudeProcess = true;
-  } catch {
-    claudeProcess = false;
-  }
-
-  // Check if an API key is configured (DB or env)
   let apiKeyConfigured = false;
   try {
     const row = db.prepare("SELECT value FROM app_settings WHERE key = 'anthropic_api_key'").get() as { value: string } | undefined;
@@ -42,7 +32,6 @@ export async function GET() {
     apiKeyConfigured = !!process.env.ANTHROPIC_API_KEY;
   }
 
-  // Check if the Agent SDK package is installed
   let sdkInstalled = false;
   try {
     require.resolve("@anthropic-ai/claude-agent-sdk");
@@ -55,7 +44,6 @@ export async function GET() {
 
   return NextResponse.json({
     database,
-    claudeProcess,
     apiKeyConfigured,
     sdkInstalled,
     socketServer,

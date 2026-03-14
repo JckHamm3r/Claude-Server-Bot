@@ -38,7 +38,6 @@ BASE_URL=""
 SLUG=""
 BOT_PATH_PREFIX=""
 NEXTAUTH_SECRET=""
-CLAUDE_BIN=""
 SETUP_SERVICE=false
 SETUP_CF_TUNNEL=false
 
@@ -1078,15 +1077,14 @@ const config = {
   slug: process.argv[4],
   secret: process.argv[5],
   email: process.argv[6],
-  cliBin: process.argv[7],
-  projectRoot: process.argv[8],
-  installDir: process.argv[9],
-  botName: process.argv[10],
-  pathPrefix: process.argv[11]
+  projectRoot: process.argv[7],
+  installDir: process.argv[8],
+  botName: process.argv[9],
+  pathPrefix: process.argv[10]
 };
-fs.writeFileSync(process.argv[12], JSON.stringify(config));
+fs.writeFileSync(process.argv[11], JSON.stringify(config));
 " "$ADMIN_PASSWORD" "$PORT" "$BASE_URL" "$SLUG" "$NEXTAUTH_SECRET" \
-  "$ADMIN_EMAIL" "$CLAUDE_BIN" "$PROJECT_ROOT" "$INSTALL_DIR" "$BOT_NAME" "$BOT_PATH_PREFIX" "$config_file"
+  "$ADMIN_EMAIL" "$PROJECT_ROOT" "$INSTALL_DIR" "$BOT_NAME" "$BOT_PATH_PREFIX" "$config_file"
 
   if [ $? -ne 0 ] || [ ! -s "$config_file" ]; then
     rm -f "$config_file"
@@ -1499,94 +1497,25 @@ run_installation() {
     rm -rf "$backup_dir"
   fi
 
-  # Phase 3: Claude provider setup
-  progress_bar 20 "Setting up Claude provider..."
+  # Phase 3: Anthropic API key
+  progress_bar 20 "Setting up Anthropic API key..."
   echo ""
-  CLAUDE_BIN=""
-
-  # Check if CLI is already installed
-  for c in "$HOME/.local/bin/claude" "$HOME/.npm-global/bin/claude" "/usr/local/bin/claude" "$(command -v claude 2>/dev/null || true)"; do
-    [ -n "$c" ] && [ -x "$c" ] && { CLAUDE_BIN="$c"; break; }
-  done
 
   if [ -n "$CLI_API_KEY" ]; then
-    # API key was passed via --api-key flag
-    info "Anthropic API key provided — using SDK provider (Claude CLI not required)"
-    [ -z "$CLAUDE_BIN" ] && CLAUDE_BIN="claude"
-  elif [ -n "$CLAUDE_BIN" ]; then
-    # CLI found — offer API key as an alternative or use CLI
-    info "Claude CLI found at $CLAUDE_BIN"
-    "$CLAUDE_BIN" --version &>/dev/null 2>&1 && info "Version: $("$CLAUDE_BIN" --version 2>/dev/null || echo 'unknown')"
-    if ! $UNATTENDED; then
-      echo ""
-      echo -e "  ${BOLD}How would you like to connect to Claude?${NC}"
-      echo -e "  1) ${GREEN}API key${NC} (recommended — more reliable, no CLI auth needed)"
-      echo -e "  2) Claude CLI (already installed)"
-      echo ""
-      read -r -p "  Enter your Anthropic API key, or press Enter to use CLI: " api_key_input
-      if [ -n "$api_key_input" ]; then
-        CLI_API_KEY="$api_key_input"
-        info "API key accepted — using SDK provider"
-      fi
+    info "Anthropic API key provided"
+  elif ! $UNATTENDED; then
+    echo -e "  ${BOLD}Enter your Anthropic API key${NC}"
+    echo -e "  ${DIM}Get one at: https://console.anthropic.com/settings/keys${NC}"
+    echo ""
+    read -r -p "  API key (sk-ant-...): " api_key_input
+    if [ -n "$api_key_input" ]; then
+      CLI_API_KEY="$api_key_input"
+      info "API key accepted"
+    else
+      warn "No API key entered — you can add one later in Settings."
     fi
   else
-    # No CLI, no API key yet — ask the user
-    if $UNATTENDED; then
-      warn "No Claude CLI found and no --api-key provided."
-      hint "The bot will need an API key configured in Settings after install."
-      CLAUDE_BIN="claude"
-    else
-      echo ""
-      echo -e "  ${BOLD}How would you like to connect to Claude?${NC}"
-      echo -e "  1) ${GREEN}API key${NC} (recommended — just paste your key)"
-      echo "  2) Install Claude CLI (requires separate auth step)"
-      echo ""
-      read -r -p "  Enter your Anthropic API key, or press Enter to install CLI: " api_key_input
-      if [ -n "$api_key_input" ]; then
-        CLI_API_KEY="$api_key_input"
-        info "API key accepted — using SDK provider"
-        CLAUDE_BIN="claude"
-      else
-        local install_cli_result
-        prompt_yn "Install Claude CLI now?" "y" && install_cli_result=0 || install_cli_result=$?
-        if [ "$install_cli_result" -eq 0 ]; then
-          start_spinner
-          sudo npm install -g @anthropic-ai/claude-code
-          stop_spinner
-          CLAUDE_BIN="$(command -v claude 2>/dev/null || echo 'claude')"
-          info "Claude CLI installed"
-        else
-          hint "Install later: sudo npm install -g @anthropic-ai/claude-code"
-          CLAUDE_BIN="claude"
-        fi
-      fi
-    fi
-  fi
-
-  # Phase 4: Claude auth (only needed when using CLI without API key)
-  if [ -z "$CLI_API_KEY" ]; then
-    progress_bar 28 "Checking Claude CLI auth..."
-    echo ""
-    if [ -n "$CLAUDE_BIN" ] && [ "$CLAUDE_BIN" != "claude" ] && [ -x "$CLAUDE_BIN" ]; then
-      if "$CLAUDE_BIN" --version &>/dev/null 2>&1; then
-        if ! "$CLAUDE_BIN" -p "reply with ok" --output-format json </dev/null &>/dev/null 2>&1; then
-          if ! $UNATTENDED; then
-            warn "Claude CLI not authenticated."
-            echo "  Open a new terminal and run: $CLAUDE_BIN"
-            while true; do
-              read -r -p "  Press Enter when done (or 'skip'): " auth_reply
-              [ "$auth_reply" = "skip" ] && { warn "Skipping — authenticate before using the bot."; break; }
-              "$CLAUDE_BIN" -p "reply with ok" --output-format json </dev/null &>/dev/null 2>&1 && { info "Authenticated!"; break; }
-              warn "Still not authenticated."
-            done
-          else
-            warn "Claude CLI may need authentication."
-          fi
-        else
-          info "Claude CLI authenticated"
-        fi
-      fi
-    fi
+    warn "No --api-key provided. Add one in Settings after install."
   fi
 
   # Phase 5: Dependencies

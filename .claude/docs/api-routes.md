@@ -26,4 +26,4 @@ All routes live under the Next.js App Router (`src/app/api/`).
 | `/api/settings/restore` | Backup restore |
 | `/api/security/*` | Security settings, sandbox, IP protection |
 | `/api/system/resources` | System resource monitoring |
-| `/api/system/claude-update` | Claude CLI update trigger |
+| `/api/system/claude-update` | Deprecated (returns 410) |
