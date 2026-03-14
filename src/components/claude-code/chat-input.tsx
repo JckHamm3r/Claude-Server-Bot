@@ -5,6 +5,9 @@ import { Send, Clock, Paperclip } from "lucide-react";
 import { AttachmentPreview, type PendingAttachment } from "./attachment-preview";
 import { apiUrl } from "@/lib/utils";
 
+const FILE_SEARCH_DEBOUNCE_MS = 150;
+const TYPING_STOP_DELAY_MS = 2_000;
+
 interface ChatInputProps {
   onSend: (message: string, attachments?: string[]) => void;
   disabled?: boolean;
@@ -88,10 +91,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         const data = await res.json();
         setAtFiles(data.files ?? []);
         setAtIndex(0);
-      } catch {
-        /* ignore */
+      } catch (err) {
+        console.warn("[chat-input] File search failed:", err);
       }
-    }, 150);
+    }, FILE_SEARCH_DEBOUNCE_MS);
     return () => {
       if (atDebounceRef.current) clearTimeout(atDebounceRef.current);
     };
@@ -231,7 +234,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       stopTyping();
     } else {
       if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
-      typingTimerRef.current = setTimeout(stopTyping, 2000);
+      typingTimerRef.current = setTimeout(stopTyping, TYPING_STOP_DELAY_MS);
     }
 
     // Slash palette: open if value starts with /
@@ -386,10 +389,13 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
         {/* Slash command palette */}
         {slashOpen && slashMatches.length > 0 && (
-          <div className="mb-2 overflow-hidden rounded-xl border border-bot-border bg-bot-elevated shadow-lg">
+          <div className="mb-2 overflow-hidden rounded-xl border border-bot-border bg-bot-elevated shadow-lg" role="listbox" aria-label="Slash commands" id="slash-palette">
             {slashMatches.map((c, i) => (
               <button
                 key={c.cmd}
+                role="option"
+                aria-selected={i === slashIndex}
+                id={`slash-option-${i}`}
                 onMouseDown={(e) => {
                   e.preventDefault(); // prevent textarea blur
                   applySlashCommand(c);
@@ -415,7 +421,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
         {/* @ file picker */}
         {atOpen && (
-          <div className="mb-2 overflow-hidden rounded-xl border border-bot-border bg-bot-elevated shadow-lg">
+          <div className="mb-2 overflow-hidden rounded-xl border border-bot-border bg-bot-elevated shadow-lg" role="listbox" aria-label="File suggestions" id="file-palette">
             {atFiles.length === 0 ? (
               <div className="px-3 py-2 text-caption text-bot-muted">
                 {atQuery ? "No matches" : "Loading…"}
@@ -425,6 +431,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 {atFiles.map((f, i) => (
                   <button
                     key={f}
+                    role="option"
+                    aria-selected={i === atIndex}
+                    id={`file-option-${i}`}
                     onMouseDown={(e) => {
                       e.preventDefault();
                       applyAtFile(f);
@@ -472,6 +481,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             disabled={disabled}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-bot-muted hover:text-bot-text hover:bg-bot-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             title="Attach file"
+            aria-label="Attach file"
           >
             <Paperclip className="h-4 w-4" />
           </button>
@@ -486,6 +496,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             rows={1}
             placeholder={placeholder}
             disabled={disabled}
+            aria-label="Message input"
+            aria-haspopup="listbox"
+            aria-expanded={slashOpen || atOpen}
+            aria-controls={slashOpen ? "slash-palette" : atOpen ? "file-palette" : undefined}
+            aria-activedescendant={slashOpen ? `slash-option-${slashIndex}` : atOpen ? `file-option-${atIndex}` : undefined}
             className={`flex-1 resize-none rounded-xl border px-4 py-2.5 text-body text-bot-text placeholder-bot-muted/60 outline-none transition-colors ${
               willQueue
                 ? "border-bot-amber/40 bg-bot-elevated focus:border-bot-amber/70"
@@ -502,6 +517,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 : "bg-bot-accent text-white hover:bg-bot-accent/80"
             }`}
             title={willQueue ? "Queue message" : "Send"}
+            aria-label={willQueue ? "Queue message" : "Send message"}
           >
             {willQueue ? <Clock className="h-4 w-4" /> : <Send className="h-4 w-4" />}
           </button>

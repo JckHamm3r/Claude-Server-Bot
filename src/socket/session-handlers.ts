@@ -361,7 +361,12 @@ export function registerSessionHandlers(ctx: HandlerContext) {
           return;
         }
         const usage = getSessionTokenUsage(sessionId);
-        socket.emit("claude:session_usage", { sessionId, usage });
+        const budgetLimits = {
+          session_usd: parseFloat(getAppSetting("budget_limit_session_usd", "0")),
+          daily_usd: parseFloat(getAppSetting("budget_limit_daily_usd", "0")),
+          monthly_usd: parseFloat(getAppSetting("budget_limit_monthly_usd", "0")),
+        };
+        socket.emit("claude:session_usage", { sessionId, usage, budgetLimits });
       } catch (err) {
         socket.emit("claude:error", { message: String(err) });
       }

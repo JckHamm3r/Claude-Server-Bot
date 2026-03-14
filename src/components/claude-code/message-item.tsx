@@ -4,7 +4,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
-import { useState } from "react";
+import { useState, memo } from "react";
 import { Copy, Check, CheckCircle2, Pencil, Trash2, X, FileText, ExternalLink, RotateCcw } from "lucide-react";
 import Image from "next/image";
 import type { ParsedOutput } from "@/lib/claude/provider";
@@ -216,7 +216,7 @@ function TokenBadge({ metadata }: { metadata?: Record<string, unknown> }) {
   );
 }
 
-export function MessageItem({
+export const MessageItem = memo(function MessageItem({
   message,
   onSelectOption,
   onConfirm,
@@ -235,7 +235,7 @@ export function MessageItem({
   const isUser = message.sender_type === "admin";
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState("");
-  const [isHovered, setIsHovered] = useState(false);
+
 
   if (message.parsed) {
     const p = message.parsed;
@@ -429,11 +429,9 @@ export function MessageItem({
     return (
       <div
         className="flex justify-end gap-2.5 py-1 group"
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
       >
-        {isHovered && !isRunning && (
-          <div className="flex items-center gap-0.5 self-center opacity-0 group-hover:opacity-100 transition-opacity">
+        {!isRunning && (
+          <div className="flex items-center gap-0.5 self-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
             <CopyButton text={content} size="xs" />
             {canEdit && (
               <button
@@ -443,6 +441,7 @@ export function MessageItem({
                 }}
                 className="rounded p-1 text-bot-muted hover:text-bot-text hover:bg-bot-elevated transition-colors"
                 title="Edit message"
+                aria-label="Edit message"
               >
                 <Pencil className="h-3 w-3" />
               </button>
@@ -452,6 +451,7 @@ export function MessageItem({
                 onClick={() => onDelete?.(message.id)}
                 className="rounded p-1 text-bot-muted hover:text-bot-red hover:bg-bot-red/10 transition-colors"
                 title="Delete message"
+                aria-label="Delete message"
               >
                 <Trash2 className="h-3 w-3" />
               </button>
@@ -519,8 +519,6 @@ export function MessageItem({
   return (
     <div
       className="flex gap-2.5 py-1 group"
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
     >
       <div className="mt-1 h-7 w-7 shrink-0 rounded-full overflow-hidden">
         <Image unoptimized src={getAvatarPath((isLatest && isRunning) ? (avatarState ?? "waiting") : "waiting")} alt="Claude" width={28} height={28} className="object-cover" />
@@ -548,14 +546,15 @@ export function MessageItem({
           </div>
         )}
       </div>
-      {isHovered && !isRunning && (
-        <div className="flex flex-col items-center gap-0.5 self-center opacity-0 group-hover:opacity-100 transition-opacity">
+      {!isRunning && (
+        <div className="flex flex-col items-center gap-0.5 self-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
           <CopyButton text={content} size="xs" />
           {canDelete && (
             <button
               onClick={() => onDelete?.(message.id)}
               className="rounded p-1 text-bot-muted hover:text-bot-red hover:bg-bot-red/10 transition-colors"
               title="Delete message"
+              aria-label="Delete message"
             >
               <Trash2 className="h-3 w-3" />
             </button>
@@ -564,4 +563,4 @@ export function MessageItem({
       )}
     </div>
   );
-}
+});

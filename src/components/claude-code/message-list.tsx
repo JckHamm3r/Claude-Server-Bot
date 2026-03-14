@@ -178,6 +178,11 @@ export function MessageList({
   runStartTime,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const activeElRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    activeElRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [activeHighlight]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -269,7 +274,7 @@ export function MessageList({
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="flex-1 overflow-y-auto py-4 select-text">
+      <div className="flex-1 overflow-y-auto py-4 select-text" role="log" aria-live="polite" aria-label="Chat messages">
         <div className="mx-auto max-w-3xl px-4 space-y-1">
           {segments.map((seg, segIdx) => {
             if (seg.kind === "tool-group") {
@@ -298,7 +303,7 @@ export function MessageList({
                     ? "rounded-lg bg-bot-amber/5"
                     : ""
                 }
-                ref={isActive ? (el) => el?.scrollIntoView({ behavior: "smooth", block: "center" }) : undefined}
+                ref={isActive ? activeElRef : undefined}
               >
                 <MessageItem
                   message={msg}

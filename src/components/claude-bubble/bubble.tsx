@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { MessageSquare } from "lucide-react";
 import Image from "next/image";
-import { getSocket } from "@/lib/socket";
 import { getAvatarPath, type AvatarState } from "@/lib/avatar-state";
 
 interface BubbleProps {
@@ -110,28 +108,4 @@ export function ClaudeBubble({ onOpen, isRunning, avatarState }: BubbleProps) {
       </div>
     </button>
   );
-}
-
-export function useIsRunning(): boolean {
-  const [running, setRunning] = useState(false);
-
-  useEffect(() => {
-    const socket = getSocket();
-
-    const onOutput = ({ parsed }: { parsed: { type: string } }) => {
-      if (parsed.type !== "done") setRunning(true);
-    };
-
-    const onDone = () => setRunning(false);
-
-    socket.on("claude:output", onOutput);
-    socket.on("claude:command_done", onDone);
-
-    return () => {
-      socket.off("claude:output", onOutput);
-      socket.off("claude:command_done", onDone);
-    };
-  }, []);
-
-  return running;
 }

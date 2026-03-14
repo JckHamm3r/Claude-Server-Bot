@@ -14,6 +14,11 @@ interface ToolCallGroupProps {
 export function ToolCallGroup({ messages, searchHighlights, activeHighlight }: ToolCallGroupProps) {
   const [expanded, setExpanded] = useState(true);
   const prevCount = useRef(messages.length);
+  const activeElRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    activeElRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [activeHighlight]);
 
   const hasRunning = messages.some((m) => m.parsed?.toolStatus === "running" || m.parsed?.type === "tool_call");
   const hasError = messages.some((m) => m.parsed?.toolStatus === "error");
@@ -69,7 +74,7 @@ export function ToolCallGroup({ messages, searchHighlights, activeHighlight }: T
                     ? "rounded-lg bg-bot-amber/5"
                     : ""
                 }
-                ref={isActive ? (el) => el?.scrollIntoView({ behavior: "smooth", block: "center" }) : undefined}
+                ref={isActive ? activeElRef : undefined}
               >
                 <div className="py-0.5">
                   <ToolCallBlock parsed={msg.parsed!} />
@@ -89,7 +94,7 @@ export function ToolCallGroup({ messages, searchHighlights, activeHighlight }: T
             ? "rounded-lg bg-bot-amber/5"
             : ""
         }
-        ref={activeHighlight === lastMsg.id ? (el) => el?.scrollIntoView({ behavior: "smooth", block: "center" }) : undefined}
+        ref={activeHighlight === lastMsg.id ? activeElRef : undefined}
       >
         <div className="py-0.5">
           <ToolCallBlock parsed={lastMsg.parsed!} />

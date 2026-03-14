@@ -5,6 +5,8 @@ import { X, ChevronUp, ChevronDown } from "lucide-react";
 import { apiUrl } from "@/lib/utils";
 import type { SearchResult } from "@/types/chat";
 
+const SEARCH_DEBOUNCE_MS = 300;
+
 interface SessionSearchBarProps {
   sessionId: string;
   onClose: () => void;
@@ -36,14 +38,14 @@ export function SessionSearchBar({ sessionId, onClose, onHighlightsChange }: Ses
       setActiveIndex(0);
       const ids = new Set<string>((data.results ?? []).map((r: SearchResult) => r.messageId));
       onHighlightsChange(ids, data.results?.[0]?.messageId ?? null);
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.warn("[session-search] Search failed:", err);
     }
   }, [sessionId, onHighlightsChange]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => doSearch(query), 300);
+    debounceRef.current = setTimeout(() => doSearch(query), SEARCH_DEBOUNCE_MS);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
