@@ -19,7 +19,7 @@ export interface UserQuestion {
 }
 
 export interface ParsedOutput {
-  type: "text" | "streaming" | "options" | "confirm" | "diff" | "progress" | "done" | "error" | "permission_request" | "security_warn" | "usage" | "tool_call" | "tool_result" | "user_question";
+  type: "text" | "streaming" | "options" | "confirm" | "diff" | "progress" | "done" | "error" | "permission_request" | "security_warn" | "usage" | "tool_call" | "tool_result" | "user_question" | "session_id";
   content?: string;
   choices?: string[];       // for 'options'
   prompt?: string;          // for 'confirm'
@@ -38,16 +38,21 @@ export interface ParsedOutput {
   toolResult?: string;      // for 'tool_result'
   exitCode?: number;        // for 'tool_result'
   questions?: UserQuestion[]; // for 'user_question'
+  claudeSessionId?: string;   // for 'session_id' — the CLI resume ID
 }
 
 export interface ClaudeCodeProvider {
-  createSession(sessionId: string, opts?: { skipPermissions?: boolean; systemPrompt?: string; model?: string }): void;
+  createSession(sessionId: string, opts?: { skipPermissions?: boolean; systemPrompt?: string; model?: string; claudeSessionId?: string }): void;
   sendMessage(sessionId: string, message: string, opts?: { skipPermissions?: boolean; model?: string; inputFiles?: string[] }): void;
   interrupt(sessionId: string): void;
+  /** Kill active process and remove all state — use for permanent deletion. */
   closeSession(sessionId: string): void;
+  /** Kill active process but preserve claudeSessionId for later --resume. */
+  suspendSession(sessionId: string): void;
   onOutput(sessionId: string, cb: (output: ParsedOutput) => void): void;
   offOutput(sessionId: string): void;
   allowTool(sessionId: string, toolName: string, scope: "session" | "once"): void;
   denyPermission(sessionId: string): void;
   isRunning(sessionId: string): boolean;
+  getClaudeSessionId?(sessionId: string): string | null;
 }

@@ -16,7 +16,6 @@ import { logActivity } from "../lib/activity-log";
 import { getAppSetting } from "../lib/app-settings";
 import { checkBotConfigRequest } from "../lib/security-guard";
 import { dispatchNotification } from "../lib/notifications";
-import { buildSystemPrompt } from "../lib/system-prompt";
 
 export function registerMessageHandlers(ctx: HandlerContext) {
   const { socket, io, email } = ctx;
@@ -259,52 +258,21 @@ export function registerMessageHandlers(ctx: HandlerContext) {
         // Update the edited message content
         updateMessageContent(messageId, newContent);
 
-        // Close and recreate the provider session (reset Claude context)
-        const sp = ctx.getSessionProvider(sessionId);
-        sp.offOutput(sessionId);
-        sp.closeSession(sessionId);
-        ctx.sessionListeners.delete(sessionId);
-        ctx.sessionProviders.delete(sessionId);
-
-        const systemPrompt = await buildSystemPrompt({
-          personality: session.personality ?? undefined,
-        });
-
-        // Re-create with system prompt
-        const sessionProvider = ctx.getSessionProvider(sessionId, session.provider_type);
-        sessionProvider.createSession(sessionId, {
-          skipPermissions: session.skip_permissions,
-          model: session.model,
-          ...(systemPrompt ? { systemPrompt } : {}),
-        });
-        ctx.ensureSessionListener(sessionId);
-
         // Send refreshed messages to UI
         const messages = getMessages(sessionId);
         io.to(`session:${sessionId}`).emit("claude:messages_updated", { sessionId, messages });
 
-        // Provide only recent context — Claude Code sub-agents maintain their own
-        // context via --resume, so we only need enough for the edit to make sense.
-        const priorMessages = messages.filter((m) => m.id !== messageId);
-        let contextPrefix = "";
-        if (priorMessages.length > 0) {
-          const MAX_CONTEXT_MESSAGES = 6;
-          const recent = priorMessages.slice(-MAX_CONTEXT_MESSAGES);
-          const skipped = priorMessages.length - recent.length;
-          const historyLines = recent.map((m) => {
-            const role = m.sender_type === "admin" ? "User" : "Assistant";
-            return `${role}: ${(m.content ?? "").slice(0, 800)}`;
-          });
-          const preamble = skipped > 0
-            ? `[${skipped} earlier messages omitted]\n`
-            : "";
-          contextPrefix = "Recent conversation context:\n" + preamble + historyLines.join("\n") + "\n\nEdited message:\n";
-        }
+        const sessionProvider = ctx.getSessionProvider(sessionId, session.provider_type);
+        ctx.ensureSessionListener(sessionId);
 
-        // Re-send the edited message with conversation context
+        // Use --resume when possible: send the edit as a continuation rather
+        // than destroying the session and replaying context as plain text.
+        // This avoids re-ingesting the system prompt and full history.
+        const editPrefix = "[The user edited their previous message. Disregard the earlier version and respond to this updated request instead.]\n\n";
+
         ctx.sessionCommandSubmitter.set(sessionId, email);
         io.to(`session:${sessionId}`).emit("claude:command_started", { sessionId, submittedBy: email });
-        sessionProvider.sendMessage(sessionId, contextPrefix + newContent);
+        sessionProvider.sendMessage(sessionId, editPrefix + newContent);
       } catch (err) {
         socket.emit("claude:error", { message: String(err) });
       }

@@ -17,6 +17,7 @@ export interface ClaudeSession {
   provider_type: string;
   status: SessionStatus;
   personality: string | null;
+  claude_session_id: string | null;
 }
 
 export interface ClaudeMessage {
@@ -52,6 +53,7 @@ function rowToSession(row: Record<string, unknown>): ClaudeSession {
     provider_type: (row.provider_type as string) ?? "subprocess",
     status: (row.status as SessionStatus) ?? "idle",
     personality: (row.personality as string | null) ?? null,
+    claude_session_id: (row.claude_session_id as string | null) ?? null,
   };
 }
 
@@ -140,6 +142,10 @@ export function updateSessionTags(id: string, tags: string[]): void {
 
 export function updateSessionStatus(id: string, status: SessionStatus): void {
   db.prepare("UPDATE sessions SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, id);
+}
+
+export function updateClaudeSessionId(id: string, claudeSessionId: string): void {
+  db.prepare("UPDATE sessions SET claude_session_id = ?, updated_at = datetime('now') WHERE id = ?").run(claudeSessionId, id);
 }
 
 // ==================== MESSAGE EDIT / DELETE ====================

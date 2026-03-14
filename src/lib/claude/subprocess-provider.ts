@@ -314,6 +314,10 @@ function handleEvent(state: SessionState, event: Record<string, unknown>): void 
     const sid = event.session_id as string;
     if (sid && !state.claudeSessionId) {
       state.claudeSessionId = sid;
+      state.emitter.emit("output", {
+        type: "session_id",
+        claudeSessionId: sid,
+      } as ParsedOutput);
     }
   }
 
@@ -442,6 +446,9 @@ export const subprocessProvider: ClaudeCodeProvider = {
     state.skipPermissions = opts.skipPermissions ?? false;
     if (opts.systemPrompt) state.systemPrompt = opts.systemPrompt;
     if (opts.model) state.model = opts.model;
+    if (opts.claudeSessionId && !state.claudeSessionId) {
+      state.claudeSessionId = opts.claudeSessionId;
+    }
   },
 
   sendMessage(sessionId, message, opts) {
@@ -522,6 +529,23 @@ export const subprocessProvider: ClaudeCodeProvider = {
     sessions.delete(sessionId);
   },
 
+  suspendSession(sessionId) {
+    const state = sessions.get(sessionId);
+    if (!state) return;
+    if (state.activeProc) {
+      state.generation++;
+      killProcess(state.activeProc);
+      state.activeProc = undefined;
+    }
+    if (state.timeoutTimer) {
+      clearTimeout(state.timeoutTimer);
+      state.timeoutTimer = undefined;
+    }
+    state.running = false;
+    state.waitingForPermission = false;
+    state.emitter.removeAllListeners("output");
+  },
+
   onOutput(sessionId, cb) {
     const state = getOrCreate(sessionId);
     state.emitter.removeAllListeners("output");
@@ -535,5 +559,9 @@ export const subprocessProvider: ClaudeCodeProvider = {
 
   isRunning(sessionId) {
     return sessions.get(sessionId)?.running ?? false;
+  },
+
+  getClaudeSessionId(sessionId) {
+    return sessions.get(sessionId)?.claudeSessionId ?? null;
   },
 };

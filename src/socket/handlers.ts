@@ -1,7 +1,7 @@
 import type { Server, Socket } from "socket.io";
 import { getClaudeProvider } from "../lib/claude";
 import type { ClaudeCodeProvider, TokenUsage } from "../lib/claude/provider";
-import { saveMessage, updateSessionStatus } from "../lib/claude-db";
+import { saveMessage, updateSessionStatus, updateClaudeSessionId } from "../lib/claude-db";
 import type { SessionStatus } from "../lib/claude-db";
 import { getToken } from "next-auth/jwt";
 import { logActivity } from "../lib/activity-log";
@@ -305,6 +305,12 @@ export function registerHandlers(io: Server) {
 
     sessionProvider.onOutput(sessionId, async (parsed) => {
       const submittedBy = sessionCommandSubmitter.get(sessionId);
+
+      // Persist Claude CLI session ID to DB for --resume across server restarts
+      if (parsed.type === "session_id" && parsed.claudeSessionId) {
+        try { updateClaudeSessionId(sessionId, parsed.claudeSessionId); } catch { /* ignore for ephemeral sessions */ }
+        return;
+      }
 
       // Capture usage data for later inclusion in saved message
       if (parsed.type === "usage" && parsed.usage) {

@@ -242,12 +242,10 @@ export function registerSessionHandlers(ctx: HandlerContext) {
       return;
     }
     const sp = ctx.getSessionProvider(sessionId);
-    sp.offOutput(sessionId);
-    sp.closeSession(sessionId);
+    // Suspend instead of close — preserves claudeSessionId for --resume
+    sp.suspendSession(sessionId);
     ctx.setSessionStatus(sessionId, "idle");
     ctx.sessionListeners.delete(sessionId);
-    ctx.sessionStartTimes.delete(sessionId);
-    ctx.sessionProviders.delete(sessionId);
     ctx.sessionStreamingContent.delete(sessionId);
     ctx.sessionPendingUsage.delete(sessionId);
     ctx.sessionCommandSubmitter.delete(sessionId);
@@ -300,16 +298,23 @@ export function registerSessionHandlers(ctx: HandlerContext) {
       ctx.connectedUsers.set(socket.id, { email, activeSession: sessionId });
       ctx.broadcastPresence();
 
-      const systemPrompt = await buildSystemPrompt({
-        personality: dbSession.personality ?? undefined,
-      });
-
       const sessionProvider = ctx.getSessionProvider(sessionId, dbSession.provider_type);
-      sessionProvider.createSession(sessionId, {
-        skipPermissions: dbSession.skip_permissions,
-        model: dbSession.model,
-        ...(systemPrompt ? { systemPrompt } : {}),
-      });
+
+      // Only rebuild system prompt + call createSession when the provider
+      // has no in-memory state (e.g. after server restart). If the session
+      // is still alive in memory, just re-attach the listener.
+      const hasResumeId = sessionProvider.getClaudeSessionId?.(sessionId) != null;
+      if (!hasResumeId) {
+        const systemPrompt = await buildSystemPrompt({
+          personality: dbSession.personality ?? undefined,
+        });
+        sessionProvider.createSession(sessionId, {
+          skipPermissions: dbSession.skip_permissions,
+          model: dbSession.model,
+          ...(systemPrompt ? { systemPrompt } : {}),
+          ...(dbSession.claude_session_id ? { claudeSessionId: dbSession.claude_session_id } : {}),
+        });
+      }
 
       ctx.ensureSessionListener(sessionId);
 

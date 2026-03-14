@@ -198,6 +198,17 @@ export const sdkProvider: ClaudeCodeProvider = {
     sessions.delete(sessionId);
   },
 
+  suspendSession(sessionId) {
+    const state = sessions.get(sessionId);
+    if (!state) return;
+    if (state.abortController) {
+      state.abortController.abort();
+      state.abortController = undefined;
+    }
+    state.running = false;
+    state.emitter.removeAllListeners("output");
+  },
+
   onOutput(sessionId, cb) {
     const state = getOrCreate(sessionId);
     state.emitter.on("output", cb);

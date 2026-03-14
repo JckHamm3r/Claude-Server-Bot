@@ -291,6 +291,10 @@ try { db.exec("ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'idl
 
 // Store which personality was active when the session was created
 try { db.exec("ALTER TABLE sessions ADD COLUMN personality TEXT"); } catch (err: unknown) { if (!(err instanceof Error && err.message.includes("duplicate column"))) throw err; }
+
+// Persist Claude CLI session ID so --resume survives server restarts
+try { db.exec("ALTER TABLE sessions ADD COLUMN claude_session_id TEXT"); } catch (err: unknown) { if (!(err instanceof Error && err.message.includes("duplicate column"))) throw err; }
+
 // Reset stale statuses on startup (server restart means no subprocess is running)
 db.exec("UPDATE sessions SET status = 'idle' WHERE status IN ('running', 'needs_attention')");
 

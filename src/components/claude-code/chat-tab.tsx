@@ -784,6 +784,7 @@ export function ChatTab() {
         provider_type: sessionProviderType,
         status: "idle",
         personality: personality ?? null,
+        claude_session_id: null,
       };
       setSessions((prev) => [optimistic, ...prev]);
       setMessages([]);
