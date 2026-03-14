@@ -92,11 +92,25 @@ export function ChatTab() {
     document.title = needsAttention > 0 ? `(${needsAttention}) ${baseTitle}` : baseTitle;
   }, [sessions]);
 
-  // Watchdog: force-reset isRunning if no "done" arrives within 5.5min
+  // Heartbeat: while isRunning, periodically ask server if Claude is still running.
+  // Catches cases where the "done" event was lost (socket blip, race condition).
   useEffect(() => {
-    if (isRunning) {
-      if (doneWatchdogRef.current) clearTimeout(doneWatchdogRef.current);
-      doneWatchdogRef.current = setTimeout(() => {
+    if (!isRunning) {
+      if (doneWatchdogRef.current) {
+        clearTimeout(doneWatchdogRef.current);
+        doneWatchdogRef.current = null;
+      }
+      return;
+    }
+    let checks = 0;
+    const poll = () => {
+      checks++;
+      const session = activeSessionRef.current;
+      if (session && socketRef.current?.connected) {
+        socketRef.current.emit("claude:get_session_state", { sessionId: session.id });
+      }
+      // After 5 minutes of running with no response, force-reset
+      if (checks >= 20) {
         setIsRunning(false);
         setCurrentActivity(null);
         drainPending();
@@ -110,13 +124,11 @@ export function ChatTab() {
             timestamp: new Date().toISOString(),
           },
         ]);
-      }, 330_000); // 5.5 minutes
-    } else {
-      if (doneWatchdogRef.current) {
-        clearTimeout(doneWatchdogRef.current);
-        doneWatchdogRef.current = null;
+        return;
       }
-    }
+      doneWatchdogRef.current = setTimeout(poll, 15_000);
+    };
+    doneWatchdogRef.current = setTimeout(poll, 15_000);
     return () => {
       if (doneWatchdogRef.current) clearTimeout(doneWatchdogRef.current);
     };
