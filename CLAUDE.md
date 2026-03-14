@@ -214,24 +214,23 @@ Tailwind CSS with class-based dark mode. Custom CSS variables for theming define
 
 ## Widget for User-Built Pages
 
-When creating HTML pages, web apps, or any content served via HTTP on this server, **always include the Claude chat widget** by adding this script tag before the closing `</body>` tag. Build the URL from the environment:
+A chat widget is available that can be embedded in HTML pages you create. It shows a floating chat bubble that opens the full Claude interface in a panel. The widget script requires authentication — it returns a no-op for unauthenticated users, so nothing is exposed to visitors.
 
-- Scheme: `https` if SSL certs are configured, else `http`
-- Host: the server's public hostname or IP
-- Port: `$PORT` (default 3000)
-- Base path: `/$CLAUDE_BOT_PATH_PREFIX/$CLAUDE_BOT_SLUG`
+**Security:** The widget script URL contains the bot's base path (including the slug). The script itself is only served to authenticated users (returns empty JS otherwise, and is marked `Cache-Control: private, no-store`). However, the `<script src="...">` tag in the HTML source is visible to anyone who views page source. For this reason:
+- **Include the widget** when the admin asks for it, or when the page is private / not publicly accessible.
+- **Do NOT include the widget** on public-facing production pages unless the admin explicitly approves it.
+
+When including the widget, add this script tag before the closing `</body>` tag:
 
 ```html
 <script src="{scheme}://{host}:{port}/{prefix}/{slug}/api/widget"></script>
 ```
 
-The widget:
-- Only renders if the user is authenticated with the Claude Server Bot
-- Shows a floating chat bubble in the bottom-right corner
-- Opens the full chat interface in an embedded panel when clicked
-- Is completely invisible to unauthenticated visitors
-
-**Important:** Always include this widget in any HTML you create so the admin can chat with you while viewing the page.
+Build the URL from the environment:
+- Scheme: `https` if SSL certs are configured, else `http`
+- Host: the server's public hostname or IP
+- Port: `$PORT` (default 3000)
+- Base path: `/$CLAUDE_BOT_PATH_PREFIX/$CLAUDE_BOT_SLUG`
 
 ## Installation & Deployment
 
