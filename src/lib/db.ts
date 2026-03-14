@@ -142,6 +142,14 @@ db.exec(`
     );
   `);
 
+// Seed bot name from CLAUDE_BOT_NAME env var (set during install)
+const envBotName = process.env.CLAUDE_BOT_NAME;
+if (envBotName) {
+  db.prepare(
+    "UPDATE bot_settings SET name = ? WHERE id = 1 AND name = 'Claude Server Bot'"
+  ).run(envBotName);
+}
+
 // Seed default app_settings if missing
 const defaultAppSettings: Record<string, string> = {
   rate_limit_commands: "100",

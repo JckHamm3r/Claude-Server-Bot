@@ -16,6 +16,9 @@ app.prepare().then(() => {
     registerHandlers: (io: Server) => void;
   };
 
+  const slug = process.env.CLAUDE_BOT_SLUG ?? "";
+  const prefix = process.env.CLAUDE_BOT_PATH_PREFIX ?? "c";
+
   // Use HTTPS if cert files are configured and exist
   const certPath = process.env.SSL_CERT_PATH ?? "";
   const keyPath = process.env.SSL_KEY_PATH ?? "";
@@ -120,8 +123,6 @@ app.prepare().then(() => {
       )
     : createHttpServer(handler);
 
-  const slug = process.env.CLAUDE_BOT_SLUG ?? "";
-  const prefix = process.env.CLAUDE_BOT_PATH_PREFIX ?? "c";
   const socketPath = slug ? `/${prefix}/${slug}/socket.io` : "/socket.io";
 
   const io = new Server(httpServer, {
