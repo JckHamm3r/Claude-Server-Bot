@@ -10,7 +10,13 @@ module.exports = {
   async headers() {
     return [
       {
-        source: "/:path*",
+        source: "/widget",
+        headers: [
+          { key: "Content-Security-Policy", value: "frame-ancestors *" },
+        ],
+      },
+      {
+        source: "/((?!widget).*)",
         headers: [
           { key: "X-Frame-Options", value: "SAMEORIGIN" },
           { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
