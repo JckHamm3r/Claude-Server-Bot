@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import { useSession } from "next-auth/react";
 import { getSocket } from "@/lib/socket";
 import { cn, apiUrl } from "@/lib/utils";
 import type { ClaudeUserSettings } from "@/lib/claude-db";
@@ -42,6 +43,8 @@ type SectionKey =
   | "budgets";
 
 export function SettingsPanel() {
+  const { data: sessionData } = useSession();
+  const currentEmail = sessionData?.user?.email ?? "";
   const [settings, setSettings] = useState<ClaudeUserSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState(false);
@@ -54,6 +57,10 @@ export function SettingsPanel() {
   const [addingUser, setAddingUser] = useState(false);
   const [newUserPassword, setNewUserPassword] = useState<{ email: string; password: string } | null>(null);
   const [deletingEmail, setDeletingEmail] = useState<string | null>(null);
+  const [editingUser, setEditingUser] = useState<{ email: string; is_admin: number } | null>(null);
+  const [editForm, setEditForm] = useState({ email: "", isAdmin: false });
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   // Project state
   const [projectRoot, setProjectRoot] = useState(process.env.NEXT_PUBLIC_CLAUDE_PROJECT_ROOT ?? "");
@@ -212,6 +219,71 @@ export function SettingsPanel() {
       setDeletingEmail(null);
     } else {
       setDeletingEmail(email);
+    }
+  }
+
+  function startEditUser(user: { email: string; is_admin: number }) {
+    setEditingUser(user);
+    setEditForm({ email: user.email, isAdmin: Boolean(user.is_admin) });
+    setEditError(null);
+    setDeletingEmail(null);
+  }
+
+  async function handleSaveEdit() {
+    if (!editingUser || savingEdit) return;
+    setSavingEdit(true);
+    setEditError(null);
+    try {
+      const patch: Record<string, unknown> = { email: editingUser.email };
+      if (editForm.email.trim() && editForm.email.trim() !== editingUser.email) {
+        patch.newEmail = editForm.email.trim();
+      }
+      if (editForm.isAdmin !== Boolean(editingUser.is_admin)) {
+        patch.is_admin = editForm.isAdmin;
+      }
+      const res = await fetch(apiUrl("/api/users"), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setEditError(data.error ?? "Failed to update user");
+        return;
+      }
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.email === editingUser.email
+            ? { ...u, email: data.email, is_admin: editForm.isAdmin ? 1 : 0 }
+            : u
+        )
+      );
+      setEditingUser(null);
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  async function handleResetPassword(email: string) {
+    setSavingEdit(true);
+    setEditError(null);
+    try {
+      const res = await fetch(apiUrl("/api/users"), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, resetPassword: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setEditError(data.error ?? "Failed to reset password");
+        return;
+      }
+      if (data.password) {
+        setNewUserPassword({ email: data.email, password: data.password });
+      }
+      setEditingUser(null);
+    } finally {
+      setSavingEdit(false);
     }
   }
 
@@ -599,7 +671,7 @@ export function SettingsPanel() {
             <h2 className="mb-6 text-subtitle font-bold text-bot-text">Users</h2>
             {newUserPassword && (
               <div className="mb-6 rounded-lg border border-bot-green/40 bg-bot-green/10 p-4">
-                <p className="text-body font-medium text-bot-green mb-2">User created: {newUserPassword.email}</p>
+                <p className="text-body font-medium text-bot-green mb-2">{newUserPassword.email}</p>
                 <p className="text-caption text-bot-muted mb-2">Password (shown once only):</p>
                 <div className="flex items-center gap-2">
                   <code className="flex-1 rounded bg-bot-elevated px-3 py-2 font-mono text-caption text-bot-text break-all">{newUserPassword.password}</code>
@@ -620,17 +692,87 @@ export function SettingsPanel() {
                 <p className="px-4 py-6 text-center text-body text-bot-muted">No users yet</p>
               ) : (
                 users.map((user) => (
-                  <div key={user.email} className="flex items-center justify-between px-4 py-3 border-b border-bot-border last:border-b-0">
-                    <div>
-                      <p className="text-body text-bot-text">{user.email}</p>
-                      <p className="text-caption text-bot-muted">{user.is_admin ? "Admin" : "User"} · Joined {new Date(user.created_at).toLocaleDateString()}</p>
-                    </div>
-                    <button
-                      onClick={() => handleDeleteUser(user.email)}
-                      className={cn("rounded px-3 py-1.5 text-caption font-medium transition-colors", deletingEmail === user.email ? "bg-bot-red text-white" : "text-bot-muted hover:text-bot-red hover:bg-bot-red/10")}
-                    >
-                      {deletingEmail === user.email ? "Confirm Delete" : "Delete"}
-                    </button>
+                  <div key={user.email} className="border-b border-bot-border last:border-b-0">
+                    {editingUser?.email === user.email ? (
+                      <div className="px-4 py-4 space-y-3 bg-bot-surface/50">
+                        <div className="space-y-2">
+                          <label className="block text-caption font-medium text-bot-muted">Email</label>
+                          <input
+                            type="email"
+                            value={editForm.email}
+                            onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
+                            className="w-full rounded-lg border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent"
+                          />
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-body text-bot-text">Admin role</p>
+                            <p className="text-caption text-bot-muted">Grant full administrative privileges</p>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={user.email === currentEmail}
+                            onClick={() => setEditForm((f) => ({ ...f, isAdmin: !f.isAdmin }))}
+                            className={cn(
+                              "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
+                              editForm.isAdmin ? "bg-bot-accent" : "bg-bot-muted/40",
+                              user.email === currentEmail && "opacity-50 cursor-not-allowed"
+                            )}
+                            title={user.email === currentEmail ? "Cannot change your own admin role" : undefined}
+                          >
+                            <span className={cn("inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform", editForm.isAdmin ? "translate-x-4" : "translate-x-1")} />
+                          </button>
+                        </div>
+                        {editError && <p className="text-caption text-bot-red">{editError}</p>}
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            onClick={handleSaveEdit}
+                            disabled={savingEdit}
+                            className="rounded-lg bg-bot-accent px-3 py-1.5 text-caption font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors"
+                          >
+                            {savingEdit ? "Saving…" : "Save"}
+                          </button>
+                          <button
+                            onClick={() => setEditingUser(null)}
+                            disabled={savingEdit}
+                            className="rounded-lg border border-bot-border px-3 py-1.5 text-caption font-medium text-bot-muted hover:text-bot-text transition-colors"
+                          >
+                            Cancel
+                          </button>
+                          <div className="flex-1" />
+                          <button
+                            onClick={() => handleResetPassword(user.email)}
+                            disabled={savingEdit}
+                            className="rounded-lg bg-bot-amber/10 px-3 py-1.5 text-caption font-medium text-bot-amber hover:bg-bot-amber/20 disabled:opacity-50 transition-colors"
+                          >
+                            Reset Password
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between px-4 py-3">
+                        <div>
+                          <p className="text-body text-bot-text">{user.email}</p>
+                          <p className="text-caption text-bot-muted">{user.is_admin ? "Admin" : "User"} · Joined {new Date(user.created_at).toLocaleDateString()}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => startEditUser(user)}
+                            className="rounded px-3 py-1.5 text-caption font-medium text-bot-muted hover:text-bot-accent hover:bg-bot-accent/10 transition-colors"
+                          >
+                            Edit
+                          </button>
+                          {user.email !== currentEmail && (
+                            <button
+                              onClick={() => handleDeleteUser(user.email)}
+                              className={cn("rounded px-3 py-1.5 text-caption font-medium transition-colors", deletingEmail === user.email ? "bg-bot-red text-white" : "text-bot-muted hover:text-bot-red hover:bg-bot-red/10")}
+                            >
+                              {deletingEmail === user.email ? "Confirm Delete" : "Delete"}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))
               )}

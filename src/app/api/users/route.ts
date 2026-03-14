@@ -95,5 +95,80 @@ export async function DELETE(request: NextRequest) {
   }
 
   db.prepare("DELETE FROM users WHERE email = ?").run(email);
+  db.prepare("DELETE FROM user_settings WHERE email = ?").run(email);
   return NextResponse.json({ ok: true });
+}
+
+export async function PATCH(request: NextRequest) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const requester = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(session.user.email) as
+    | { is_admin: number }
+    | undefined;
+  if (!requester?.is_admin) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  let body: { email: string; newEmail?: string; is_admin?: boolean; resetPassword?: boolean };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const { email, newEmail, is_admin, resetPassword } = body;
+  if (!email || typeof email !== "string") {
+    return NextResponse.json({ error: "Missing email" }, { status: 400 });
+  }
+
+  const target = db.prepare("SELECT email, is_admin FROM users WHERE email = ?").get(email) as
+    | { email: string; is_admin: number }
+    | undefined;
+  if (!target) {
+    return NextResponse.json({ error: "User not found" }, { status: 404 });
+  }
+
+  const seedEmail = process.env.CLAUDE_BOT_ADMIN_EMAIL;
+
+  // Prevent changing the env-seeded admin's email
+  if (newEmail && email === seedEmail) {
+    return NextResponse.json({ error: "Cannot change the primary admin email" }, { status: 400 });
+  }
+
+  // Prevent demoting yourself
+  if (is_admin === false && email === session.user.email) {
+    return NextResponse.json({ error: "Cannot remove your own admin role" }, { status: 400 });
+  }
+
+  const result: { password?: string } = {};
+
+  if (newEmail && newEmail !== email) {
+    if (typeof newEmail !== "string" || !newEmail.includes("@")) {
+      return NextResponse.json({ error: "Invalid new email" }, { status: 400 });
+    }
+    const clash = db.prepare("SELECT email FROM users WHERE email = ?").get(newEmail);
+    if (clash) {
+      return NextResponse.json({ error: "Email already in use" }, { status: 409 });
+    }
+    db.prepare("UPDATE users SET email = ? WHERE email = ?").run(newEmail, email);
+    db.prepare("UPDATE user_settings SET email = ? WHERE email = ?").run(newEmail, email);
+  }
+
+  const effectiveEmail = newEmail && newEmail !== email ? newEmail : email;
+
+  if (typeof is_admin === "boolean") {
+    db.prepare("UPDATE users SET is_admin = ? WHERE email = ?").run(is_admin ? 1 : 0, effectiveEmail);
+  }
+
+  if (resetPassword) {
+    const password = generatePassword();
+    const hash = await bcrypt.hash(password, 12);
+    db.prepare("UPDATE users SET hash = ? WHERE email = ?").run(hash, effectiveEmail);
+    result.password = password;
+  }
+
+  return NextResponse.json({ ok: true, email: effectiveEmail, ...result });
 }
