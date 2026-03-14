@@ -381,24 +381,28 @@ export function ChatTab() {
 
         if (parsed.type === "done") {
           streamingMsgIdRef.current = null;
-          // If a permission request is pending, the subprocess exited but will
-          // respawn after the user grants permission — don't reset the UI.
           setPendingInteraction((prev) => {
             if (prev?.type === "permission_request") return prev;
             return null;
           });
           setCurrentActivity(null);
           setIsRunning(false);
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: crypto.randomUUID(),
-              sender_type: "claude",
-              parsed: { type: "done" },
-              content: "",
-              timestamp: new Date().toISOString(),
-            },
-          ]);
+          setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (last?.parsed?.type === "error" && last.parsed.retryable) {
+              return prev;
+            }
+            return [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                sender_type: "claude",
+                parsed: { type: "done" },
+                content: "",
+                timestamp: new Date().toISOString(),
+              },
+            ];
+          });
           drainPending();
           return;
         }
@@ -473,6 +477,10 @@ export function ChatTab() {
         }
 
         setIsRunning(parsed.type !== "error");
+        if (parsed.type === "error") {
+          setHasError(true);
+          setCurrentActivity(null);
+        }
 
         // Track interactive messages
         if (parsed.type === "options" || parsed.type === "confirm" || parsed.type === "permission_request") {
@@ -836,10 +844,24 @@ export function ChatTab() {
   }, [activeSession, emit]);
 
   const handleRetryLast = useCallback(() => {
-    if (lastUserMsgRef.current && activeSession && !isRunning) {
-      sendImmediate(lastUserMsgRef.current, activeSession.id);
-    }
-  }, [activeSession, isRunning, sendImmediate]);
+    if (!lastUserMsgRef.current || !activeSession || isRunning) return;
+    setMessages((prev) => {
+      const cleaned = [...prev];
+      while (cleaned.length > 0) {
+        const last = cleaned[cleaned.length - 1];
+        if (last.parsed?.type === "error" || last.parsed?.type === "done") {
+          cleaned.pop();
+        } else {
+          break;
+        }
+      }
+      return cleaned;
+    });
+    streamingMsgIdRef.current = null;
+    setIsRunning(true);
+    setHasError(false);
+    emit("claude:message", { sessionId: activeSession.id, content: lastUserMsgRef.current });
+  }, [activeSession, isRunning, emit]);
 
   const handleDeleteSession = useCallback(
     (session: ClaudeSession) => {
@@ -1083,6 +1105,7 @@ export function ChatTab() {
             loadingMessages={loadingMessages}
             avatarState={avatarState}
             onSendStarter={(msg) => handleSend(msg)}
+            onRetry={handleRetryLast}
           />
         )}
 

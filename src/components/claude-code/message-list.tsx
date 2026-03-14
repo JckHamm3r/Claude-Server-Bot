@@ -33,6 +33,7 @@ interface MessageListProps {
   onAlwaysAllow?: (sessionId: string, toolName: string, command: string) => void;
   onEditMessage?: (messageId: string, newContent: string) => void;
   onDeleteMessage?: (messageId: string) => void;
+  onRetry?: () => void;
   isRunning?: boolean;
   currentActivity?: ActivityState | null;
   searchHighlights?: Set<string>;
@@ -100,6 +101,7 @@ export function MessageList({
   onAlwaysAllow,
   onEditMessage,
   onDeleteMessage,
+  onRetry,
   isRunning,
   currentActivity,
   searchHighlights,
@@ -241,6 +243,7 @@ export function MessageList({
                   onAlwaysAllow={onAlwaysAllow}
                   onEdit={onEditMessage}
                   onDelete={onDeleteMessage}
+                  onRetry={msg.parsed?.type === "error" && msg.parsed.retryable ? onRetry : undefined}
                   isLatest={isLastMsg && msg.id === messages[messages.length - 1]?.id}
                   isRunning={isRunning}
                   isInteractive={pendingInteraction?.messageId === msg.id}

@@ -5,7 +5,7 @@ import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { useState } from "react";
-import { Copy, Check, CheckCircle2, Pencil, Trash2, X, FileText, ExternalLink } from "lucide-react";
+import { Copy, Check, CheckCircle2, Pencil, Trash2, X, FileText, ExternalLink, RotateCcw } from "lucide-react";
 import Image from "next/image";
 import type { ParsedOutput } from "@/lib/claude/provider";
 import { getAvatarPath, type AvatarState } from "@/lib/avatar-state";
@@ -33,6 +33,7 @@ interface MessageItemProps {
   onAlwaysAllow?: (sessionId: string, toolName: string, command: string) => void;
   onEdit?: (messageId: string, newContent: string) => void;
   onDelete?: (messageId: string) => void;
+  onRetry?: () => void;
   sessionId: string;
   isLatest?: boolean;
   isRunning?: boolean;
@@ -229,6 +230,7 @@ export function MessageItem({
   onAlwaysAllow,
   onEdit,
   onDelete,
+  onRetry,
   sessionId,
   isLatest,
   isRunning,
@@ -339,10 +341,20 @@ export function MessageItem({
     if (p.type === "error") {
       return (
         <div className="rounded-xl border border-bot-red/40 bg-bot-red/10 px-4 py-3 text-body text-bot-red my-1">
-          {p.message}
-          {p.retryable && (
-            <span className="ml-2 text-caption opacity-70">(retryable)</span>
-          )}
+          <div className="flex items-center justify-between gap-3">
+            <span>
+              {p.message}
+            </span>
+            {p.retryable && onRetry && !isRunning && (
+              <button
+                onClick={onRetry}
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-bot-red/30 bg-bot-red/10 px-3 py-1.5 text-caption font-medium text-bot-red hover:bg-bot-red/20 transition-colors"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Retry
+              </button>
+            )}
+          </div>
         </div>
       );
     }
