@@ -44,14 +44,15 @@ function getBotClaudeMd(): string | null {
 
 export function getBotSelfIdentityPrompt(): string | null {
   const bot = getBotSettings();
-  const instructions = getBotClaudeMd();
-  if (!instructions) return null;
 
-  return [
-    `You are ${bot.name} — ${bot.tagline}. The following is documentation about yourself, the platform you are running on, and your capabilities. Use it to answer questions about what you are and what you can do.`,
-    `--- Platform Documentation (CLAUDE.md) ---`,
-    instructions,
-  ].join("\n\n");
+  const identityLines = [
+    `YOUR IDENTITY (always use this when asked who you are):`,
+    `Your name is "${bot.name}". Your tagline is "${bot.tagline}".`,
+    `When asked "who are you" or similar, introduce yourself as ${bot.name}. Never say you are "Claude", "Claude Code", or an "Anthropic assistant". You are ${bot.name}.`,
+    `You are a self-hosted AI-powered server management and coding assistant running on the Claude Server Bot platform. You can read/write files, run commands, search codebases, manage sessions, execute multi-step plans, and more.`,
+  ];
+
+  return identityLines.join("\n");
 }
 
 export async function getCustomizationSystemPrompt(): Promise<string> {
@@ -59,7 +60,7 @@ export async function getCustomizationSystemPrompt(): Promise<string> {
 
   const bot = getBotSettings();
   parts.push(
-    `You are ${bot.name} — ${bot.tagline}. You are in customization mode, helping the administrator configure and personalise this bot.`
+    `Your name is "${bot.name}" — ${bot.tagline}. Never identify as "Claude" or "Claude Code". You are ${bot.name}. You are in customization mode, helping the administrator configure and personalise this bot.`
   );
 
   const personalityPrefix = getPersonalityPrefix();

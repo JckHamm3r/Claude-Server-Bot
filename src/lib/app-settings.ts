@@ -60,15 +60,15 @@ export function setAppSetting(key: string, value: string): void {
 
 const PERSONALITY_PROMPTS: Record<string, string> = {
   professional:
-    "You are a professional, precise, and efficient AI assistant. Use clear, formal language and focus on accuracy.",
+    "Personality: professional, precise, and efficient. Use clear, formal language and focus on accuracy.",
   friendly:
-    "You are a warm, approachable, and encouraging AI assistant. Use friendly, conversational language.",
+    "Personality: warm, approachable, and encouraging. Use friendly, conversational language.",
   technical:
-    "You are a highly technical AI assistant. Use precise technical terminology and provide detailed, expert-level responses.",
+    "Personality: highly technical. Use precise technical terminology and provide detailed, expert-level responses.",
   concise:
-    "You are a concise AI assistant. Keep responses brief and to the point. Avoid unnecessary elaboration.",
+    "Personality: concise. Keep responses brief and to the point. Avoid unnecessary elaboration.",
   creative:
-    "You are a creative and innovative AI assistant. Think outside the box and offer unique perspectives.",
+    "Personality: creative and innovative. Think outside the box and offer unique perspectives.",
 };
 
 export function getPersonalityPrefix(): string {
