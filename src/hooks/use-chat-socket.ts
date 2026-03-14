@@ -160,6 +160,7 @@ export function useChatSocket({
   const doneWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const watchdogChecksRef = useRef(0);
   const editRecoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingInteractionRef = useRef<{ type: string; messageId: string } | null>(null);
 
   // ── Derived ────────────────────────────────────────────────────────────
   const avatarState: AvatarState = useMemo(() => {
@@ -174,6 +175,10 @@ export function useChatSocket({
   useEffect(() => {
     autoAcceptRef.current = autoAccept;
   }, [autoAccept]);
+
+  useEffect(() => {
+    pendingInteractionRef.current = pendingInteraction;
+  }, [pendingInteraction]);
 
   useEffect(() => {
     if (!isRunning) {
@@ -253,6 +258,12 @@ export function useChatSocket({
     }
     watchdogChecksRef.current = 0;
     const poll = () => {
+      // Don't count ticks while waiting for user input (permission / question)
+      if (pendingInteractionRef.current) {
+        watchdogChecksRef.current = 0;
+        doneWatchdogRef.current = setTimeout(poll, WATCHDOG_POLL_MS);
+        return;
+      }
       watchdogChecksRef.current++;
       const session = activeSessionRef.current;
       if (session && socketRef.current?.connected) {
@@ -389,6 +400,9 @@ export function useChatSocket({
       "claude:output",
       ({ sessionId, parsed }: { sessionId: string; parsed: ParsedOutput }) => {
         if (!activeSessionRef.current || activeSessionRef.current.id !== sessionId) return;
+
+        // Any output from the server means the session is alive — reset watchdog
+        watchdogChecksRef.current = 0;
 
         if (parsed.type === "done") {
           streamingMsgIdRef.current = null;

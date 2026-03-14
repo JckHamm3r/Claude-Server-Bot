@@ -208,6 +208,21 @@ function runClaude(
     if (state.generation !== gen) return;
     lastStdoutTime = Date.now();
     state.lastActivity = Date.now();
+
+    // Reset inactivity timeout — the process is still producing output
+    if (state.timeoutTimer) clearTimeout(state.timeoutTimer);
+    state.timeoutTimer = setTimeout(() => {
+      if (state.generation !== gen) return;
+      if (state.activeProc === proc) {
+        killProcess(proc);
+        state.emitter.emit("output", {
+          type: "error",
+          message: "Claude process timed out. You can retry your message.",
+          retryable: true,
+        } as ParsedOutput);
+      }
+    }, SUBPROCESS_TIMEOUT_MS);
+
     buffer += chunk.toString();
     if (buffer.length > MAX_BUFFER_SIZE) {
       buffer = buffer.slice(-MAX_BUFFER_SIZE);
