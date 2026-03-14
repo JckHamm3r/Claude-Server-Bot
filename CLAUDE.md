@@ -212,6 +212,19 @@ Tailwind CSS with class-based dark mode. Custom CSS variables for theming define
 - **`permission-card.tsx`** — Tool permission approval UI (Allow for Session / Allow Once / Always Allow)
 - **`session-sidebar.tsx`** — Session list with search, tags, and template selection
 
+## Web Development & Hosting Guidance
+
+This bot runs on a server with a public IP or domain configured during installation. The server address is derived from `NEXTAUTH_URL` in the `.env` file.
+
+**When asked to build, create, or deploy web apps, APIs, or any network service:**
+1. **Always ask the user** how they want the service to be accessible. Present options:
+   - Public address (the configured hostname/IP) — accessible from the internet
+   - Localhost only (127.0.0.1) — accessible only from the machine
+   - All interfaces (0.0.0.0) — accessible from any network interface
+2. **Never default to localhost** unless the user explicitly requests it. The server's public address is available at runtime via `NEXTAUTH_URL`.
+3. Use the correct scheme (`https` if SSL is configured, `http` otherwise) and the server's port in URLs.
+4. For static HTML or web content served on this server, reference assets using the public address so they work for remote visitors.
+
 ## Widget for User-Built Pages
 
 When creating HTML pages, web apps, or any web content served on this server, **always include the Claude chat widget** by adding this script tag before the closing `</body>` tag:
@@ -221,7 +234,7 @@ When creating HTML pages, web apps, or any web content served on this server, **
 ```
 
 - Scheme: `https` if SSL certs are configured, else `http`
-- Host: the server's public hostname or IP
+- Host: the server's public hostname or IP (from `NEXTAUTH_URL`)
 - Port: `$PORT` (default 3000)
 
 The widget is secure by design:
