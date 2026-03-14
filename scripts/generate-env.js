@@ -53,18 +53,23 @@ if (!bcrypt.compareSync(config.password, hash)) {
   process.exit(1);
 }
 
+// Escape $ in values to prevent dotenv-expand from treating them as variable refs
+function escapeForDotenv(value) {
+  return String(value).replace(/\$/g, "\\$");
+}
+
 const env = [
   "NODE_ENV=production",
   "PORT=" + config.port,
   "NEXTAUTH_URL=" + config.baseUrl + "/" + config.pathPrefix + "/" + config.slug,
-  "NEXTAUTH_SECRET=" + config.secret,
+  "NEXTAUTH_SECRET=" + escapeForDotenv(config.secret),
   "CLAUDE_BOT_PATH_PREFIX=" + config.pathPrefix,
   "NEXT_PUBLIC_CLAUDE_BOT_PATH_PREFIX=" + config.pathPrefix,
   "CLAUDE_BOT_SLUG=" + config.slug,
   "NEXT_PUBLIC_CLAUDE_BOT_SLUG=" + config.slug,
   "CLAUDE_BOT_NAME=" + config.botName,
   "CLAUDE_BOT_ADMIN_EMAIL=" + config.email,
-  "CLAUDE_BOT_ADMIN_HASH=" + hash,
+  "CLAUDE_BOT_ADMIN_HASH=" + escapeForDotenv(hash),
   "CLAUDE_CLI_PATH=" + config.cliBin,
   "CLAUDE_PROJECT_ROOT=" + config.projectRoot,
   "DATA_DIR=" + path.join(config.installDir, "data"),

@@ -892,7 +892,7 @@ screen_confirm() {
   else
     ADMIN_PASSWORD=""
     for _ in $(seq 1 5); do
-      ADMIN_PASSWORD=$(openssl rand -base64 64 2>/dev/null | tr -dc 'a-zA-Z0-9_+=.\-' | head -c32)
+      ADMIN_PASSWORD=$(openssl rand -base64 64 2>/dev/null | tr -dc 'a-zA-Z0-9' | head -c32)
       [ ${#ADMIN_PASSWORD} -eq 32 ] && break
     done
     [ ${#ADMIN_PASSWORD} -ne 32 ] && { error "Failed to generate password"; exit 1; }

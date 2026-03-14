@@ -28,7 +28,8 @@ try {
 
 function getEnvValue(content, key) {
   const match = content.match(new RegExp("^" + key + "=(.*)$", "m"));
-  return match ? match[1] : null;
+  if (!match) return null;
+  return match[1].replace(/\\\$/g, "$");
 }
 
 const email = getEnvValue(envContent, "CLAUDE_BOT_ADMIN_EMAIL");
