@@ -48,6 +48,7 @@ function CopyButton({ text, size = "sm" }: { text: string; size?: "sm" | "xs" })
       }}
       className="p-1 rounded text-bot-muted hover:text-bot-text hover:bg-bot-elevated transition-colors"
       title={copied ? "Copied!" : "Copy"}
+      aria-label={copied ? "Copied" : "Copy"}
     >
       {copied ? <Check className={iconClass} /> : <Copy className={iconClass} />}
     </button>

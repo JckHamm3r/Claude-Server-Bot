@@ -102,6 +102,7 @@ export interface UseChatSocketReturn {
   chatInputRef: React.RefObject<ChatInputHandle>;
 
   emit: (event: string, data?: unknown) => void;
+  resetSessionState: () => void;
   handleSend: (content: string, attachments?: string[]) => void;
   handleInterrupt: () => void;
   handleRetryLast: () => void;
@@ -220,6 +221,16 @@ export function useChatSocket({
       clearTimeout(editRecoveryTimerRef.current);
       editRecoveryTimerRef.current = null;
     }
+  }, []);
+
+  const resetSessionState = useCallback(() => {
+    streamingMsgIdRef.current = null;
+    setMessages([]);
+    setCurrentActivity(null);
+    setCommandRunner(null);
+    setTypingUsers(new Set());
+    pendingQueueRef.current = [];
+    setPendingCount(0);
   }, []);
 
   // ── Watchdog ───────────────────────────────────────────────────────────
@@ -860,7 +871,7 @@ export function useChatSocket({
     setMessages, setSessionModel, setSessionUsage, setIsRunning,
     setCurrentActivity, setLoadingMessages,
     activeSessionRef, initializedSessionsRef, freshSessionsRef, chatInputRef,
-    emit, handleSend, handleInterrupt, handleRetryLast, handleSelectOption,
+    emit, resetSessionState, handleSend, handleInterrupt, handleRetryLast, handleSelectOption,
     handleConfirm, handleAllowTool, handleAnswerQuestion, handleAlwaysAllow,
     handleEditMessage, handleDeleteMessage,
   };

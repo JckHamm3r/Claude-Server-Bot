@@ -80,8 +80,7 @@ export function ChatTab() {
   }, [activeSession, chat.messages, chat.chatInputRef]);
 
   const handleSelectSession = useCallback((session: ClaudeSession) => {
-    chat.setMessages([]);
-    chat.setCurrentActivity(null);
+    chat.resetSessionState();
     chat.activeSessionRef.current = session;
     setActiveSession(session);
     chat.emit("claude:set_active_session", { sessionId: session.id });
@@ -107,8 +106,7 @@ export function ChatTab() {
         claude_session_id: null,
       };
       setSessions((prev) => [optimistic, ...prev]);
-      chat.setMessages([]);
-      chat.setCurrentActivity(null);
+      chat.resetSessionState();
       chat.setSessionModel(sessionModelValue);
       chat.setSessionUsage(null);
       chat.activeSessionRef.current = optimistic;
@@ -172,8 +170,7 @@ export function ChatTab() {
       if (chat.activeSessionRef.current?.id === session.id) {
         chat.activeSessionRef.current = null;
         setActiveSession(null);
-        chat.setMessages([]);
-        chat.setCurrentActivity(null);
+        chat.resetSessionState();
         chat.setIsRunning(false);
       }
     },
@@ -213,8 +210,7 @@ export function ChatTab() {
   const handleClearContext = useCallback(() => {
     if (!activeSession) return;
     chat.emit("claude:close_session", { sessionId: activeSession.id });
-    chat.setMessages([]);
-    chat.setCurrentActivity(null);
+    chat.resetSessionState();
     chat.setIsRunning(false);
     chat.emit("claude:create_session", {
       sessionId: activeSession.id,
