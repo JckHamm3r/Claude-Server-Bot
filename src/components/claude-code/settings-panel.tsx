@@ -19,7 +19,7 @@ import {
 import { DomainsSection } from "@/components/claude-code/settings/domains-section";
 import { SmtpSection } from "@/components/claude-code/settings/smtp-section";
 import { NotificationsSection } from "@/components/claude-code/settings/notifications-section";
-import { CustomizationSection } from "@/components/claude-code/settings/customization-section";
+
 import { SecuritySection } from "@/components/claude-code/settings/security-section";
 import { TemplatesSection } from "@/components/claude-code/settings/templates-section";
 
@@ -36,7 +36,6 @@ type SectionKey =
   | "domains"
   | "smtp"
   | "notifications"
-  | "customization"
   | "security"
   | "api_key"
   | "templates"
@@ -402,7 +401,6 @@ export function SettingsPanel() {
     { key: "updates", label: "Updates", adminOnly: true },
     { key: "domains", label: "Domains", adminOnly: true },
     { key: "smtp", label: "Email / SMTP", adminOnly: true },
-    { key: "customization", label: "Customization", adminOnly: true },
     { key: "security", label: "Security", adminOnly: true },
     { key: "templates", label: "Templates", adminOnly: true },
     { key: "budgets", label: "Budgets", adminOnly: true },
@@ -885,9 +883,6 @@ export function SettingsPanel() {
 
         {/* ── Notifications ── */}
         {activeSection === "notifications" && <NotificationsSection />}
-
-        {/* ── Customization ── */}
-        {activeSection === "customization" && <CustomizationSection />}
 
         {activeSection === "security" && <SecuritySection />}
 

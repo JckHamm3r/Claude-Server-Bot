@@ -751,7 +751,7 @@ export function ChatTab() {
   }, [emit]);
 
   const handleCreateSession = useCallback(
-    (name: string, skipPermissions: boolean, model?: string, providerType?: string, templateId?: string) => {
+    (name: string, skipPermissions: boolean, model?: string, providerType?: string, templateId?: string, personality?: string, personalityCustom?: string) => {
       const id = crypto.randomUUID();
       const sessionModelValue = model ?? DEFAULT_MODEL;
       const sessionProviderType = providerType ?? "subprocess";
@@ -766,7 +766,7 @@ export function ChatTab() {
         model: sessionModelValue,
         provider_type: sessionProviderType,
         status: "idle",
-        personality: null,
+        personality: personality ?? null,
       };
       setSessions((prev) => [optimistic, ...prev]);
       setMessages([]);
@@ -785,6 +785,8 @@ export function ChatTab() {
         model: sessionModelValue,
         provider_type: sessionProviderType,
         templateId,
+        personality: personality ?? "professional",
+        personality_custom: personalityCustom,
       });
       emit("claude:set_active_session", { sessionId: id });
       if (name) {

@@ -44,6 +44,8 @@ export function registerSessionHandlers(ctx: HandlerContext) {
       model,
       provider_type,
       templateId,
+      personality,
+      personality_custom,
     }: {
       sessionId: string;
       skipPermissions?: boolean;
@@ -51,6 +53,8 @@ export function registerSessionHandlers(ctx: HandlerContext) {
       model?: string;
       provider_type?: string;
       templateId?: string;
+      personality?: string;
+      personality_custom?: string;
     }) => {
       try {
         if (!/^[a-zA-Z0-9_-]{1,64}$/.test(sessionId)) {
@@ -72,8 +76,8 @@ export function registerSessionHandlers(ctx: HandlerContext) {
 
         const sessionModel = model ?? DEFAULT_MODEL;
         const sessionProviderType = provider_type ?? "subprocess";
-        const currentPersonality = getAppSetting("personality", "professional");
-        createSession(sessionId, email, skipPermissions ?? false, sessionModel, sessionProviderType, currentPersonality);
+        const sessionPersonality = personality ?? "professional";
+        createSession(sessionId, email, skipPermissions ?? false, sessionModel, sessionProviderType, sessionPersonality);
 
         // Resolve per-session provider
         const sessionProvider = ctx.getSessionProvider(sessionId, sessionProviderType);
@@ -90,7 +94,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
           const parts: string[] = [];
           const selfIdentity = getBotSelfIdentityPrompt();
           if (selfIdentity) parts.push(selfIdentity);
-          const personalityPrefix = getPersonalityPrefix();
+          const personalityPrefix = getPersonalityPrefix(sessionPersonality, personality_custom);
           if (personalityPrefix) parts.push(personalityPrefix);
           systemPrompt = parts.length > 0 ? parts.join("\n\n") : undefined;
         }

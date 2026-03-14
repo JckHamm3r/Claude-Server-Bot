@@ -7,6 +7,23 @@ import { DEFAULT_MODEL } from "@/lib/models";
 import { getSocket } from "@/lib/socket";
 import { cn } from "@/lib/utils";
 
+interface PersonalityOption {
+  value: string;
+  label: string;
+  description: string;
+}
+
+const PERSONALITY_OPTIONS: PersonalityOption[] = [
+  { value: "professional", label: "Professional", description: "Clear, formal, and business-like" },
+  { value: "friendly", label: "Friendly", description: "Warm and encouraging" },
+  { value: "technical", label: "Technical", description: "Expert-level and precise" },
+  { value: "concise", label: "Concise", description: "Brief, to the point" },
+  { value: "verbose", label: "Verbose", description: "Detailed with examples" },
+  { value: "creative", label: "Creative", description: "Inventive, unconventional" },
+  { value: "strict_engineer", label: "Strict Engineer", description: "Correctness-first" },
+  { value: "custom", label: "Custom", description: "Your own prompt prefix" },
+];
+
 interface SessionTemplate {
   id: string;
   name: string;
@@ -20,7 +37,7 @@ interface SessionTemplate {
 
 interface NewSessionDialogProps {
   onClose: () => void;
-  onCreate: (name: string, skipPermissions: boolean, model: string, providerType: string, templateId?: string) => void;
+  onCreate: (name: string, skipPermissions: boolean, model: string, providerType: string, templateId?: string, personality?: string, personalityCustom?: string) => void;
 }
 
 export function NewSessionDialog({ onClose, onCreate }: NewSessionDialogProps) {
@@ -28,6 +45,9 @@ export function NewSessionDialog({ onClose, onCreate }: NewSessionDialogProps) {
   const [skipPermissions, setSkipPermissions] = useState(false);
   const [model, setModel] = useState(DEFAULT_MODEL);
   const [providerType, setProviderType] = useState("subprocess");
+  const [personality, setPersonality] = useState("professional");
+  const [customPrompt, setCustomPrompt] = useState("");
+  const [showPersonality, setShowPersonality] = useState(false);
   const [sdkAvailable, setSdkAvailable] = useState(false);
   const [templates, setTemplates] = useState<SessionTemplate[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
@@ -66,7 +86,15 @@ export function NewSessionDialog({ onClose, onCreate }: NewSessionDialogProps) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onCreate(name.trim(), skipPermissions, model, providerType, selectedTemplate ?? undefined);
+    onCreate(
+      name.trim(),
+      skipPermissions,
+      model,
+      providerType,
+      selectedTemplate ?? undefined,
+      personality,
+      personality === "custom" ? customPrompt : undefined,
+    );
     onClose();
   };
 
@@ -182,6 +210,50 @@ export function NewSessionDialog({ onClose, onCreate }: NewSessionDialogProps) {
                 {!sdkAvailable && <span className="ml-1 text-[10px] opacity-60">(no key)</span>}
               </button>
             </div>
+          </div>
+
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowPersonality((p) => !p)}
+              className="mb-1.5 flex items-center gap-1.5 text-caption font-medium text-bot-muted hover:text-bot-text transition-colors"
+            >
+              <span className={cn("transition-transform text-[10px]", showPersonality ? "rotate-90" : "")}>&#9654;</span>
+              Personality
+              <span className="rounded bg-bot-elevated px-1.5 py-px text-[10px] font-normal text-bot-accent">
+                {PERSONALITY_OPTIONS.find((o) => o.value === personality)?.label ?? "Professional"}
+              </span>
+            </button>
+            {showPersonality && (
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-1.5">
+                  {PERSONALITY_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setPersonality(opt.value)}
+                      className={cn(
+                        "flex flex-col items-start rounded-md border px-3 py-2 text-left transition-colors",
+                        personality === opt.value
+                          ? "border-bot-accent bg-bot-accent/10 text-bot-accent"
+                          : "border-bot-border bg-bot-elevated text-bot-text hover:bg-bot-surface",
+                      )}
+                    >
+                      <span className="font-medium text-caption">{opt.label}</span>
+                      <span className="text-[10px] text-bot-muted">{opt.description}</span>
+                    </button>
+                  ))}
+                </div>
+                {personality === "custom" && (
+                  <textarea
+                    className="w-full rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-caption text-bot-text outline-none focus:border-bot-accent resize-y min-h-[80px]"
+                    value={customPrompt}
+                    onChange={(e) => setCustomPrompt(e.target.value)}
+                    placeholder="Enter a custom system prompt prefix..."
+                  />
+                )}
+              </div>
+            )}
           </div>
 
           <div>

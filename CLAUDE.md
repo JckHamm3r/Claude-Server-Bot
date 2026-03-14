@@ -15,7 +15,7 @@ Next.js 14 App Router + custom Socket.IO server + SQLite. Installed via curl one
 
 - `@/*` maps to `./src/*`
 - All Claude interactions go through Socket.IO, not REST
-- Settings UI: "Customization" is the single place for personality config; "Command Sandbox" toggle lives only in Security > Command Sandbox sub-tab
+- Personality is set per-session at creation time (in the New Session dialog), not in global settings; "Command Sandbox" toggle lives only in Security > Command Sandbox sub-tab
 - System prompt composition order: security → template → identity + server context → personality
 
 ## Detailed Docs (read on demand — not auto-ingested)

@@ -71,10 +71,10 @@ const PERSONALITY_PROMPTS: Record<string, string> = {
     "Personality: creative and innovative. Think outside the box and offer unique perspectives.",
 };
 
-export function getPersonalityPrefix(): string {
-  const personality = getAppSetting("personality", "professional");
+export function getPersonalityPrefix(override?: string, customPrompt?: string): string {
+  const personality = override ?? getAppSetting("personality", "professional");
   if (personality === "custom") {
-    return getAppSetting("personality_custom", "");
+    return customPrompt ?? getAppSetting("personality_custom", "");
   }
   return PERSONALITY_PROMPTS[personality] ?? PERSONALITY_PROMPTS.professional;
 }
