@@ -3,6 +3,7 @@
 import { useRef, useImperativeHandle, forwardRef, KeyboardEvent, useState, useEffect, useCallback } from "react";
 import { Send, Clock, Paperclip } from "lucide-react";
 import { AttachmentPreview, type PendingAttachment } from "./attachment-preview";
+import { QueuedMessages } from "./queued-messages";
 import { apiUrl } from "@/lib/utils";
 
 const FILE_SEARCH_DEBOUNCE_MS = 150;
@@ -13,6 +14,9 @@ interface ChatInputProps {
   disabled?: boolean;
   isRunning?: boolean;
   pendingCount?: number;
+  pendingQueue?: string[];
+  onEditQueueItem?: (index: number, newContent: string) => void;
+  onDeleteQueueItem?: (index: number) => void;
   onTypingStart?: () => void;
   onTypingStop?: () => void;
   sessionId?: string;
@@ -39,6 +43,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   disabled,
   isRunning,
   pendingCount = 0,
+  pendingQueue = [],
+  onEditQueueItem,
+  onDeleteQueueItem,
   onTypingStart,
   onTypingStop,
   sessionId,
@@ -348,14 +355,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   return (
     <div className="border-t border-bot-border/30 bg-bot-surface/80 backdrop-blur-md py-3">
       <div className="mx-auto max-w-3xl px-4">
-        {pendingCount > 0 && (
-          <div className="mb-2 flex items-center gap-1.5 text-[11px] text-bot-muted">
-            <Clock className="h-3 w-3 text-bot-amber" />
-            <span className="text-bot-amber font-medium">
-              {pendingCount} message{pendingCount > 1 ? "s" : ""} queued
-            </span>
-            <span className="opacity-50">— will send after Claude finishes</span>
-          </div>
+        {pendingCount > 0 && onEditQueueItem && onDeleteQueueItem && (
+          <QueuedMessages
+            queue={pendingQueue}
+            onEdit={onEditQueueItem}
+            onDelete={onDeleteQueueItem}
+          />
         )}
 
         {slashOpen && slashMatches.length > 0 && (

@@ -349,6 +349,9 @@ export function ChatTab() {
           disabled={!chat.connected || !activeSession}
           isRunning={chat.isRunning}
           pendingCount={chat.pendingCount}
+          pendingQueue={chat.pendingQueue}
+          onEditQueueItem={chat.handleEditQueueItem}
+          onDeleteQueueItem={chat.handleDeleteQueueItem}
           sessionId={activeSession?.id}
           onTypingStart={() => activeSession && chat.emit("claude:typing_start", { sessionId: activeSession.id })}
           onTypingStop={() => activeSession && chat.emit("claude:typing_stop", { sessionId: activeSession.id })}

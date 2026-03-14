@@ -86,6 +86,7 @@ export interface UseChatSocketReturn {
   pendingInteraction: { type: string; messageId: string } | null;
   runStartTime: number | null;
   pendingCount: number;
+  pendingQueue: string[];
   loadingMessages: boolean;
   avatarState: AvatarState;
 
@@ -113,6 +114,8 @@ export interface UseChatSocketReturn {
   handleAlwaysAllow: (sessionId: string, toolName: string, command: string) => void;
   handleEditMessage: (messageId: string, newContent: string) => void;
   handleDeleteMessage: (messageId: string) => void;
+  handleEditQueueItem: (index: number, newContent: string) => void;
+  handleDeleteQueueItem: (index: number) => void;
 }
 
 export { type PresenceUser };
@@ -140,6 +143,7 @@ export function useChatSocket({
   const [hasError, setHasError] = useState(false);
   const [runStartTime, setRunStartTime] = useState<number | null>(null);
   const [pendingCount, setPendingCount] = useState(0);
+  const [pendingQueue, setPendingQueue] = useState<string[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
 
   // ── Refs ───────────────────────────────────────────────────────────────
@@ -205,16 +209,21 @@ export function useChatSocket({
     [emit],
   );
 
+  const syncQueue = useCallback((queue: string[]) => {
+    pendingQueueRef.current = queue;
+    setPendingCount(queue.length);
+    setPendingQueue([...queue]);
+  }, []);
+
   const drainPending = useCallback(() => {
     const sessionId = activeSessionRef.current?.id;
     if (!sessionId) return;
     if (pendingQueueRef.current.length > 0) {
       const [next, ...rest] = pendingQueueRef.current;
-      pendingQueueRef.current = rest;
-      setPendingCount(rest.length);
+      syncQueue(rest);
       sendImmediate(next, sessionId);
     }
-  }, [sendImmediate]);
+  }, [sendImmediate, syncQueue]);
 
   const clearEditRecoveryTimer = useCallback(() => {
     if (editRecoveryTimerRef.current) {
@@ -229,9 +238,8 @@ export function useChatSocket({
     setCurrentActivity(null);
     setCommandRunner(null);
     setTypingUsers(new Set());
-    pendingQueueRef.current = [];
-    setPendingCount(0);
-  }, []);
+    syncQueue([]);
+  }, [syncQueue]);
 
   // ── Watchdog ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -749,8 +757,7 @@ export function useChatSocket({
     (content: string, attachments?: string[]) => {
       if (!activeSession) return;
       if (isRunning) {
-        pendingQueueRef.current = [...pendingQueueRef.current, content];
-        setPendingCount(pendingQueueRef.current.length);
+        syncQueue([...pendingQueueRef.current, content]);
         return;
       }
       sendImmediate(content, activeSession.id, attachments);
@@ -763,9 +770,8 @@ export function useChatSocket({
     emit("claude:interrupt", { sessionId: activeSession.id });
     setIsRunning(false);
     setCurrentActivity(null);
-    pendingQueueRef.current = [];
-    setPendingCount(0);
-  }, [activeSession, emit]);
+    syncQueue([]);
+  }, [activeSession, emit, syncQueue]);
 
   const handleRetryLast = useCallback(() => {
     if (!lastUserMsgRef.current || !activeSession || isRunning) return;
@@ -869,16 +875,36 @@ export function useChatSocket({
     [activeSession, emit],
   );
 
+  const handleEditQueueItem = useCallback(
+    (index: number, newContent: string) => {
+      const updated = [...pendingQueueRef.current];
+      if (index < 0 || index >= updated.length) return;
+      updated[index] = newContent;
+      syncQueue(updated);
+    },
+    [syncQueue],
+  );
+
+  const handleDeleteQueueItem = useCallback(
+    (index: number) => {
+      const updated = [...pendingQueueRef.current];
+      if (index < 0 || index >= updated.length) return;
+      updated.splice(index, 1);
+      syncQueue(updated);
+    },
+    [syncQueue],
+  );
+
   return {
     messages, isRunning, currentActivity, connected, reconnecting,
     presenceUsers, typingUsers, commandRunner, sessionUsage, budgetLimits,
     sessionModel, hasError, pendingInteraction, runStartTime, pendingCount,
-    loadingMessages, avatarState,
+    pendingQueue, loadingMessages, avatarState,
     setMessages, setSessionModel, setSessionUsage, setIsRunning,
     setCurrentActivity, setLoadingMessages,
     activeSessionRef, initializedSessionsRef, freshSessionsRef, chatInputRef,
     emit, resetSessionState, handleSend, handleInterrupt, handleRetryLast, handleSelectOption,
     handleConfirm, handleAllowTool, handleAnswerQuestion, handleAlwaysAllow,
-    handleEditMessage, handleDeleteMessage,
+    handleEditMessage, handleDeleteMessage, handleEditQueueItem, handleDeleteQueueItem,
   };
 }
