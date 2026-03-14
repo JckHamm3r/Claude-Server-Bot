@@ -3,7 +3,12 @@ import fs from "fs";
 import db from "./db";
 import { getPersonalityPrefix } from "./app-settings";
 
-const PROJECT_ROOT = process.env.CLAUDE_PROJECT_ROOT ?? process.cwd();
+/**
+ * The bot's own install directory. The subprocess cwd (CLAUDE_PROJECT_ROOT) may
+ * point to the user's project, so we resolve from this source file to reach the
+ * repo root where the bot's own CLAUDE.md lives.
+ */
+const BOT_INSTALL_DIR = path.resolve(__dirname, "../..");
 
 interface BotSettings {
   name: string;
@@ -24,6 +29,31 @@ function getBotSettings(): BotSettings {
   }
 }
 
+function getBotClaudeMd(): string | null {
+  const claudeMdPath = path.join(BOT_INSTALL_DIR, "CLAUDE.md");
+  if (fs.existsSync(claudeMdPath)) {
+    try {
+      const content = fs.readFileSync(claudeMdPath, "utf-8").trim();
+      return content || null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+export function getBotSelfIdentityPrompt(): string | null {
+  const bot = getBotSettings();
+  const instructions = getBotClaudeMd();
+  if (!instructions) return null;
+
+  return [
+    `You are ${bot.name} — ${bot.tagline}. The following is documentation about yourself, the platform you are running on, and your capabilities. Use it to answer questions about what you are and what you can do.`,
+    `--- Platform Documentation (CLAUDE.md) ---`,
+    instructions,
+  ].join("\n\n");
+}
+
 export async function getCustomizationSystemPrompt(): Promise<string> {
   const parts: string[] = [];
 
@@ -37,17 +67,9 @@ export async function getCustomizationSystemPrompt(): Promise<string> {
     parts.push(personalityPrefix);
   }
 
-  // Include CLAUDE.md project instructions if present
-  const claudeMdPath = path.join(PROJECT_ROOT, "CLAUDE.md");
-  if (fs.existsSync(claudeMdPath)) {
-    try {
-      const instructions = fs.readFileSync(claudeMdPath, "utf-8").trim();
-      if (instructions) {
-        parts.push(`--- Project Instructions ---\n${instructions}`);
-      }
-    } catch {
-      // ignore read errors
-    }
+  const instructions = getBotClaudeMd();
+  if (instructions) {
+    parts.push(`--- Project Instructions ---\n${instructions}`);
   }
 
   return parts.join("\n\n");

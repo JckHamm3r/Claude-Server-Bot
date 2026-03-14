@@ -27,7 +27,7 @@ import { AVAILABLE_MODELS, DEFAULT_MODEL } from "../lib/models";
 import { isSDKAvailable } from "../lib/claude";
 import { logActivity } from "../lib/activity-log";
 import { getAppSetting, getPersonalityPrefix } from "../lib/app-settings";
-import { getCustomizationSystemPrompt } from "../lib/customization";
+import { getCustomizationSystemPrompt, getBotSelfIdentityPrompt } from "../lib/customization";
 import { getSecuritySystemPrompt } from "../lib/security-guard";
 import { dispatchNotification } from "../lib/notifications";
 import db from "../lib/db";
@@ -85,9 +85,13 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         } else if (interface_type === "system_agent") {
           systemPrompt = undefined; // bare, no personality
         } else {
-          // Default: ui_chat — personality prefix only
+          // Default: ui_chat — personality prefix + bot self-identity (CLAUDE.md)
+          const parts: string[] = [];
+          const selfIdentity = getBotSelfIdentityPrompt();
+          if (selfIdentity) parts.push(selfIdentity);
           const personalityPrefix = getPersonalityPrefix();
-          systemPrompt = personalityPrefix || undefined;
+          if (personalityPrefix) parts.push(personalityPrefix);
+          systemPrompt = parts.length > 0 ? parts.join("\n\n") : undefined;
         }
 
         // Prepend template system prompt if set
