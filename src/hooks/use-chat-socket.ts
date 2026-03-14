@@ -300,11 +300,12 @@ export function useChatSocket({
     const socket = socketRef.current;
 
     const handleConnect = () => {
+      console.log("[socket] connected via", socket.io.engine.transport.name);
       setConnected(true);
       setReconnecting(false);
       socket.emit("claude:list_sessions");
       const session = activeSessionRef.current;
-      if (session && initializedSessionsRef.current.has(session.id)) {
+      if (session) {
         socket.emit("claude:rejoin_session", { sessionId: session.id });
         setLoadingMessages(true);
         socket.emit("claude:get_messages", { sessionId: session.id });

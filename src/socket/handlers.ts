@@ -111,6 +111,11 @@ const sessionStartTimes = new Map<string, number>();
 const userSessionCommands = new Map<string, Map<string, number>>();
 const sessionCmdStartTimes = new Map<string, number>();
 
+// Ring buffer of recent output events per session for replay on reconnect.
+// Capped at MAX_EVENT_BUFFER_SIZE; cleared on "done".
+const MAX_EVENT_BUFFER_SIZE = 50;
+const sessionEventBuffers = new Map<string, { sessionId: string; parsed: unknown; submittedBy?: string }[]>();
+
 const MAX_LATENCIES = 10000;
 
 // In-memory metrics counter (flushed to DB every minute)
@@ -407,12 +412,21 @@ export function registerHandlers(io: Server) {
 
       io.to(`session:${sessionId}`).emit("claude:output", { sessionId, parsed, submittedBy });
 
+      // Buffer recent events for replay when a client reconnects mid-stream
+      if (parsed.type !== "progress") {
+        let buf = sessionEventBuffers.get(sessionId);
+        if (!buf) { buf = []; sessionEventBuffers.set(sessionId, buf); }
+        buf.push({ sessionId, parsed, submittedBy });
+        if (buf.length > MAX_EVENT_BUFFER_SIZE) buf.shift();
+      }
+
       if ((parsed.type === "text" || parsed.type === "streaming") && parsed.content) {
         pendingContent = parsed.content;
         sessionStreamingContent.set(sessionId, parsed.content);
       }
 
       if (parsed.type === "done") {
+        sessionEventBuffers.delete(sessionId);
         // Check if session is waiting for permission before setting idle
         const sp = getSessionProvider(sessionId);
         if (!sp?.isRunning(sessionId)) {
@@ -503,6 +517,7 @@ export function registerHandlers(io: Server) {
       sessionStartTimes,
       sessionProviders,
       sessionPendingUsage,
+      sessionEventBuffers,
       userSessionCommands,
       metricsBuffer,
       planResumeCallbacks,

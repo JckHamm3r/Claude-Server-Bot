@@ -18,6 +18,7 @@ export interface HandlerContext {
   sessionStartTimes: Map<string, number>;
   sessionProviders: Map<string, ClaudeCodeProvider>;
   sessionPendingUsage: Map<string, TokenUsage>;
+  sessionEventBuffers: Map<string, { sessionId: string; parsed: unknown; submittedBy?: string }[]>;
   userSessionCommands: Map<string, Map<string, number>>;
   metricsBuffer: { session_count: number; command_count: number; agent_count: number; latencies: number[] };
   planResumeCallbacks: Map<string, (action: PlanAction) => void>;

@@ -1160,7 +1160,12 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_connect_timeout 10;
+        proxy_send_timeout 86400;
         proxy_read_timeout 86400;
+        proxy_buffering off;
+        proxy_cache off;
+        client_max_body_size 10m;
     }
 }
 NGINX
@@ -1264,13 +1269,15 @@ setup_systemd() {
 [Unit]
 Description=Claude Server Bot (${BOT_NAME})
 After=network.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 [Service]
 Type=simple
 User=$USER
 WorkingDirectory=$INSTALL_DIR
 ExecStart=$pnpm_bin start
-Restart=on-failure
-RestartSec=5
+Restart=always
+RestartSec=3
 StandardOutput=journal
 StandardError=journal
 Environment=NODE_ENV=production

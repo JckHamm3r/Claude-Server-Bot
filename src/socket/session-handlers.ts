@@ -318,13 +318,22 @@ export function registerSessionHandlers(ctx: HandlerContext) {
 
       ctx.ensureSessionListener(sessionId);
 
-      const currentContent = ctx.sessionStreamingContent.get(sessionId);
-      if (currentContent && sessionProvider.isRunning(sessionId)) {
-        socket.emit("claude:output", {
-          sessionId,
-          parsed: { type: "streaming", content: currentContent },
-          submittedBy: ctx.sessionCommandSubmitter.get(sessionId),
-        });
+      // Replay buffered events that the client may have missed during disconnect
+      const eventBuffer = ctx.sessionEventBuffers.get(sessionId);
+      if (eventBuffer && eventBuffer.length > 0 && sessionProvider.isRunning(sessionId)) {
+        for (const evt of eventBuffer) {
+          socket.emit("claude:output", evt);
+        }
+      } else {
+        // Fallback: replay last streaming content if no buffer
+        const currentContent = ctx.sessionStreamingContent.get(sessionId);
+        if (currentContent && sessionProvider.isRunning(sessionId)) {
+          socket.emit("claude:output", {
+            sessionId,
+            parsed: { type: "streaming", content: currentContent },
+            submittedBy: ctx.sessionCommandSubmitter.get(sessionId),
+          });
+        }
       }
       socket.emit("claude:session_ready", {
         sessionId,
