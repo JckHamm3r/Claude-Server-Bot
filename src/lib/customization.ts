@@ -1,5 +1,6 @@
 import path from "path";
 import fs from "fs";
+import { execSync } from "child_process";
 import db from "./db";
 import { getPersonalityPrefix } from "./app-settings";
 
@@ -56,6 +57,45 @@ function isPublicHost(hostname: string): boolean {
 }
 
 /**
+ * Detect whether nginx is installed and proxying to the app's port.
+ * Returns { installed, proxyDomain, proxyPort } or null fields.
+ */
+function detectNginxProxy(appPort: string): { installed: boolean; proxyDomain: string | null; proxyPort: string | null } {
+  try {
+    execSync("command -v nginx", { stdio: "ignore" });
+  } catch {
+    return { installed: false, proxyDomain: null, proxyPort: null };
+  }
+
+  // nginx is installed — try to find a config that proxies to our app port
+  try {
+    const confDirs = ["/etc/nginx/sites-enabled", "/etc/nginx/conf.d"];
+    for (const dir of confDirs) {
+      if (!fs.existsSync(dir)) continue;
+      const files = fs.readdirSync(dir);
+      for (const f of files) {
+        if (f === "default" || f.startsWith(".")) continue;
+        try {
+          const content = fs.readFileSync(path.join(dir, f), "utf-8");
+          if (content.includes(`proxy_pass http://127.0.0.1:${appPort}`) || content.includes(`proxy_pass http://localhost:${appPort}`)) {
+            const domainMatch = content.match(/server_name\s+([^\s;]+)/);
+            const listenMatch = content.match(/listen\s+(\d+)/);
+            return {
+              installed: true,
+              proxyDomain: domainMatch?.[1] ?? null,
+              proxyPort: listenMatch?.[1] ?? "80",
+            };
+          }
+        } catch { /* skip unreadable files */ }
+      }
+    }
+    return { installed: true, proxyDomain: null, proxyPort: null };
+  } catch {
+    return { installed: true, proxyDomain: null, proxyPort: null };
+  }
+}
+
+/**
  * Derives scheme, hostname, and port from NEXTAUTH_URL so the AI knows the
  * server's network context and can make appropriate hosting suggestions.
  */
@@ -76,38 +116,84 @@ function getServerEnvironmentContext(): string | null {
     const projectRoot = process.env.CLAUDE_PROJECT_ROOT ?? process.cwd();
     const hasPublicAddress = isPublicHost(hostname);
 
+    const nginxInfo = detectNginxProxy(port);
+    const hasNginxProxy = nginxInfo.installed && !!nginxInfo.proxyDomain;
+
+    // Compute the public URL users should use in their browser
+    let publicUrl: string;
+    if (hasNginxProxy) {
+      const proxyScheme = nginxInfo.proxyPort === "443" ? "https" : scheme;
+      const portSuffix = (nginxInfo.proxyPort === "80" || nginxInfo.proxyPort === "443") ? "" : `:${nginxInfo.proxyPort}`;
+      publicUrl = `${proxyScheme}://${nginxInfo.proxyDomain}${portSuffix}`;
+    } else if (port === "80" || port === "443") {
+      publicUrl = `${scheme}://${hostname}`;
+    } else {
+      publicUrl = `${scheme}://${hostname}:${port}`;
+    }
+
     const lines = [
       `SERVER ENVIRONMENT (use this when building, deploying, or serving anything):`,
-      `Server address: ${scheme}://${hostname}:${port}`,
+      `App server address: ${scheme}://${hostname}:${port} (this is the Node.js process)`,
+      `Public URL (what users type in browsers): ${publicUrl}`,
       `Hostname / IP: ${hostname}`,
-      `Port: ${port}`,
+      `App port: ${port}`,
       `Scheme: ${scheme}`,
       `SSL configured: ${hasSSL ? "yes" : "no"}`,
       `Public-facing: ${hasPublicAddress ? "yes" : "no"}`,
       `Project root: ${projectRoot}`,
-      ``,
-      `When the user asks you to build, create, deploy, or serve a web app, site, API, or any network service:`,
-      `- ASK the user how they want it hosted before choosing a bind address.`,
     ];
 
-    if (hasPublicAddress) {
+    if (hasNginxProxy) {
       lines.push(
-        `- This server has a public address (${hostname}). Offer options such as:`,
-        `  1) Serve on the public address (${hostname}:PORT) — accessible from the internet`,
-        `  2) Serve on localhost only (127.0.0.1:PORT) — local access only`,
-        `  3) Serve on all interfaces (0.0.0.0:PORT) — accessible from any network interface`,
-        `- When generating URLs in HTML, configs, or API responses, use ${scheme}://${hostname}:${port} as the default base URL unless the user says otherwise.`,
+        `Reverse proxy: nginx is active, proxying ${nginxInfo.proxyDomain} → 127.0.0.1:${port}`,
+        `Users access this server at ${publicUrl} (no port number needed).`,
+      );
+    } else if (nginxInfo.installed) {
+      lines.push(
+        `Reverse proxy: nginx is installed but not configured for this app's port (${port}).`,
+        `Users currently must include the port: ${scheme}://${hostname}:${port}`,
       );
     } else {
       lines.push(
-        `- This server is on a local/private address (${hostname}). Localhost is a reasonable default, but still confirm with the user.`,
-        `- If the user wants remote access, suggest binding to 0.0.0.0 and note they may need to configure port forwarding or a reverse proxy.`,
+        `Reverse proxy: none detected (no nginx). Users must include the port: ${scheme}://${hostname}:${port}`,
       );
     }
 
+    lines.push(
+      ``,
+      `HOSTING & SERVING GUIDANCE:`,
+    );
+
+    if (hasPublicAddress) {
+      lines.push(
+        `- This server has a public address (${hostname}).`,
+        `- The public URL for browser access is: ${publicUrl}`,
+        `- When generating URLs in HTML, configs, or API responses, use ${publicUrl} as the base URL.`,
+      );
+      if (!hasNginxProxy && port !== "80" && port !== "443") {
+        lines.push(
+          `- The app runs on port ${port}. There is no reverse proxy, so URLs MUST include the port number.`,
+          `- If the user wants a URL without a port number, you can set up nginx as a reverse proxy to forward port 80/443 → ${port}.`,
+        );
+      }
+    } else {
+      lines.push(
+        `- This server is on a local/private address (${hostname}).`,
+        `- If the user wants remote access, suggest binding to 0.0.0.0 and configuring port forwarding or a reverse proxy.`,
+      );
+    }
+
+    lines.push(
+      `- To serve a standalone HTML file, page, or small app the user creates, you have these options:`,
+      `  1) Start a simple HTTP server (e.g. python3 -m http.server PORT or npx serve -l PORT) and give the user the URL with that port`,
+      `  2) If nginx is available, add a location block to serve the directory`,
+      `  3) Place the file in the project and configure the app to serve it`,
+      `- NEVER say "I don't have enough information" about the server — you have all the details above. Use them confidently.`,
+    );
+
     const botName = getBotSettings().name;
     lines.push(
-      `- If the user wants to embed the ${botName} chat widget, include: <script src="${scheme}://${hostname}:${port}/api/w.js"></script>`,
+      `- If the user wants to embed the ${botName} chat widget, include: <script src="${publicUrl}/api/w.js"></script>`,
     );
 
     return lines.join("\n");
