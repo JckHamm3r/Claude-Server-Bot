@@ -12,8 +12,7 @@ interface ToolCallGroupProps {
 }
 
 export function ToolCallGroup({ messages, searchHighlights, activeHighlight }: ToolCallGroupProps) {
-  const [expanded, setExpanded] = useState(true);
-  const prevCount = useRef(messages.length);
+  const [expanded, setExpanded] = useState(false);
   const activeElRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -32,11 +31,6 @@ export function ToolCallGroup({ messages, searchHighlights, activeHighlight }: T
     if (anyActive) setExpanded(true);
   }, [anyActive]);
 
-  useEffect(() => {
-    if (messages.length > prevCount.current) setExpanded(true);
-    prevCount.current = messages.length;
-  }, [messages.length]);
-
   return (
     <div className={anyActive ? "rounded-lg ring-2 ring-bot-accent bg-bot-accent/5" : anyHighlighted ? "rounded-lg bg-bot-amber/5" : ""}>
       {hiddenCount > 0 && (
@@ -51,7 +45,7 @@ export function ToolCallGroup({ messages, searchHighlights, activeHighlight }: T
           )}
           <Layers className="h-3 w-3 text-bot-muted" />
           <span className="text-[11px] font-mono text-bot-muted">
-            {expanded ? `${messages.length} tool calls` : `${hiddenCount} more tool call${hiddenCount > 1 ? "s" : ""}`}
+            {expanded ? `${messages.length} tool calls` : `${hiddenCount} more tool call${hiddenCount > 1 ? "s" : ""} · ${lastMsg.parsed?.toolName ?? "tool"}`}
           </span>
           {hasRunning && <Loader2 className="h-3 w-3 animate-spin text-bot-accent" />}
           {hasError && !hasRunning && <AlertTriangle className="h-3 w-3 text-bot-amber" />}

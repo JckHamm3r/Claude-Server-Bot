@@ -41,10 +41,7 @@ function StatusBadge({ status }: { status?: string }) {
   if (status === "error") {
     return <X className="h-3.5 w-3.5 text-bot-red" />;
   }
-  if (status === "done") {
-    return <Check className="h-3.5 w-3.5 text-bot-green" />;
-  }
-  return <Loader2 className="h-3.5 w-3.5 animate-spin text-bot-muted" />;
+  return <Check className="h-3.5 w-3.5 text-bot-green" />;
 }
 
 function ToolDetail({ parsed }: { parsed: ParsedOutput }) {

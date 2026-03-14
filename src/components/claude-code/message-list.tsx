@@ -147,7 +147,6 @@ function ActivityStrip({ activity, isRunning, runStartTime }: { activity: Activi
           )}
         </span>
         <span className="ml-auto shrink-0 text-[10px] opacity-40 font-mono tabular-nums">
-          {activity && activity.count > 1 && <span className="mr-2">{activity.count}x</span>}
           {elapsed > 0 && formatElapsed(elapsed)}
         </span>
       </div>

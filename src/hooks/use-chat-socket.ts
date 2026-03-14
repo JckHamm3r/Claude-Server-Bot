@@ -423,6 +423,12 @@ export function useChatSocket({
         }
 
         if (parsed.type === "tool_call") {
+          setCurrentActivity({
+            toolName: parsed.toolName ?? "tool",
+            message: `Using ${parsed.toolName ?? "tool"}`,
+            toolInput: parsed.toolInput,
+            count: 0,
+          });
           setMessages((prev) => [
             ...prev,
             {
