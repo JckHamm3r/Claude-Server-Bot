@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import Image from "next/image";
 import { Terminal, Code2, FileSearch, MessageSquare, Slash } from "lucide-react";
 import { MessageItem } from "./message-item";
+import { ToolCallGroup } from "./tool-call-group";
 import type { ParsedOutput } from "@/lib/claude/provider";
 import { getAvatarPath, type AvatarState } from "@/lib/avatar-state";
 
@@ -41,6 +42,10 @@ interface MessageListProps {
   avatarState?: AvatarState;
   onSendStarter?: (message: string) => void;
 }
+
+type Segment =
+  | { kind: "single"; message: ChatMessage }
+  | { kind: "tool-group"; messages: ChatMessage[] };
 
 const STARTER_PROMPTS = [
   { icon: Terminal, label: "Run a command", prompt: "Run `git status` and summarize the current state of the repo" },
@@ -110,6 +115,33 @@ export function MessageList({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, currentActivity, isRunning]);
 
+  const segments = useMemo<Segment[]>(() => {
+    const result: Segment[] = [];
+    let toolGroup: ChatMessage[] = [];
+
+    const flushGroup = () => {
+      if (toolGroup.length === 0) return;
+      if (toolGroup.length === 1) {
+        result.push({ kind: "single", message: toolGroup[0] });
+      } else {
+        result.push({ kind: "tool-group", messages: [...toolGroup] });
+      }
+      toolGroup = [];
+    };
+
+    for (const msg of messages) {
+      const t = msg.parsed?.type;
+      if (t === "tool_call" || t === "tool_result") {
+        toolGroup.push(msg);
+      } else {
+        flushGroup();
+        result.push({ kind: "single", message: msg });
+      }
+    }
+    flushGroup();
+    return result;
+  }, [messages]);
+
   if (messages.length === 0 && !isRunning) {
     if (loadingMessages) {
       return (
@@ -171,7 +203,20 @@ export function MessageList({
     <div className="flex flex-1 flex-col overflow-hidden">
       <div className="flex-1 overflow-y-auto py-4 select-text">
         <div className="mx-auto max-w-3xl px-4 space-y-1">
-          {messages.map((msg, i) => {
+          {segments.map((seg, segIdx) => {
+            if (seg.kind === "tool-group") {
+              const groupKey = seg.messages.map((m) => m.id).join(",");
+              return (
+                <ToolCallGroup
+                  key={groupKey}
+                  messages={seg.messages}
+                  searchHighlights={searchHighlights}
+                  activeHighlight={activeHighlight}
+                />
+              );
+            }
+            const msg = seg.message;
+            const isLastMsg = segIdx === segments.length - 1;
             const isHighlighted = searchHighlights?.has(msg.id);
             const isActive = activeHighlight === msg.id;
             return (
@@ -196,7 +241,7 @@ export function MessageList({
                   onAlwaysAllow={onAlwaysAllow}
                   onEdit={onEditMessage}
                   onDelete={onDeleteMessage}
-                  isLatest={i === messages.length - 1}
+                  isLatest={isLastMsg && msg.id === messages[messages.length - 1]?.id}
                   isRunning={isRunning}
                   isInteractive={pendingInteraction?.messageId === msg.id}
                   avatarState={avatarState}
