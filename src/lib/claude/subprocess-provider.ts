@@ -4,7 +4,7 @@ import path from "path";
 import type { ClaudeCodeProvider, ParsedOutput, TokenUsage } from "./provider";
 
 const CLAUDE_BIN = process.env.CLAUDE_CLI_PATH ?? "claude";
-const SUBPROCESS_TIMEOUT_MS = parseInt(process.env.CLAUDE_SUBPROCESS_TIMEOUT_MS ?? "300000", 10); // 5min default
+const SUBPROCESS_TIMEOUT_MS = parseInt(process.env.CLAUDE_SUBPROCESS_TIMEOUT_MS ?? "600000", 10); // 10min default
 const IDLE_GC_MS = 30 * 60 * 1000; // 30min idle threshold for GC
 const GC_INTERVAL_MS = 60 * 1000; // check every 60s
 

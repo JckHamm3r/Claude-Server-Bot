@@ -101,6 +101,7 @@ export function ChatTab() {
 
   // Watchdog timer: if isRunning stays true for too long, force-reset
   const doneWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const watchdogChecksRef = useRef(0);
 
   // Pending interactive message (options/confirm/permission_request)
   const [pendingInteraction, setPendingInteraction] = useState<{ type: string; messageId: string } | null>(null);
@@ -150,23 +151,25 @@ export function ChatTab() {
 
   // Heartbeat: while isRunning, periodically ask server if Claude is still running.
   // Catches cases where the "done" event was lost (socket blip, race condition).
+  // Counter resets when server confirms Claude is still running (via session_state handler).
   useEffect(() => {
     if (!isRunning) {
       if (doneWatchdogRef.current) {
         clearTimeout(doneWatchdogRef.current);
         doneWatchdogRef.current = null;
       }
+      watchdogChecksRef.current = 0;
       return;
     }
-    let checks = 0;
+    watchdogChecksRef.current = 0;
     const poll = () => {
-      checks++;
+      watchdogChecksRef.current++;
       const session = activeSessionRef.current;
       if (session && socketRef.current?.connected) {
         socketRef.current.emit("claude:get_session_state", { sessionId: session.id });
       }
-      // After 5 minutes of running with no response, force-reset
-      if (checks >= 20) {
+      // After 10 minutes of consecutive polls with no server-side reset, force-reset
+      if (watchdogChecksRef.current >= 40) {
         setIsRunning(false);
         setCurrentActivity(null);
         drainPending();
@@ -624,7 +627,11 @@ export function ChatTab() {
     socket.on("claude:session_state", ({ sessionId, running }: { sessionId: string; running: boolean }) => {
       if (activeSessionRef.current?.id !== sessionId) return;
       setIsRunning(running);
-      if (!running) {
+      if (running) {
+        // Server confirmed Claude is still active — reset watchdog counter
+        // so long-running tasks don't get falsely timed out
+        watchdogChecksRef.current = 0;
+      } else {
         setCurrentActivity(null);
         drainPending();
       }

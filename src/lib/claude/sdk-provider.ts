@@ -104,7 +104,7 @@ async function runSDK(state: SDKSessionState, message: string): Promise<void> {
     state.messageHistory = state.messageHistory.slice(-MAX_HISTORY);
   }
 
-  const timeoutMs = 300_000; // 5 minutes
+  const timeoutMs = 600_000; // 10 minutes
   const timeoutId = setTimeout(() => {
     state.abortController?.abort();
   }, timeoutMs);
