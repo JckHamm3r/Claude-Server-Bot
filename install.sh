@@ -1586,12 +1586,18 @@ run_installation() {
   # Phase 12: Health check
   progress_bar 92 "Health check..."
   echo ""
-  local health_url="http://localhost:${PORT}/$BOT_PATH_PREFIX/$SLUG/api/health/ping"
+  local health_scheme="http"
+  local health_curl_flags="-s -o /dev/null -w %{http_code}"
+  if $USE_HTTPS && [ "$HTTPS_METHOD" = "selfsigned" ] && ! $SETUP_NGINX; then
+    health_scheme="https"
+    health_curl_flags="-sk -o /dev/null -w %{http_code}"
+  fi
+  local health_url="${health_scheme}://localhost:${PORT}/$BOT_PATH_PREFIX/$SLUG/api/health/ping"
   sleep 3
   local healthy=false
   for _ in $(seq 1 5); do
     local http_code
-    http_code=$(curl -s -o /dev/null -w "%{http_code}" "$health_url" 2>/dev/null || echo "000")
+    http_code=$(curl $health_curl_flags "$health_url" 2>/dev/null || echo "000")
     [ "$http_code" = "200" ] && { healthy=true; break; }
     sleep 2
   done

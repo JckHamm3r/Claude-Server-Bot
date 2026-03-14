@@ -84,15 +84,22 @@ restart_service() {
 
 # ─── Health check ──────────────────────────────────────────────────────────
 health_check() {
-  local port slug prefix health_url
+  local port slug prefix health_url scheme curl_flags
   port=$(grep -E '^PORT=' .env 2>/dev/null | cut -d= -f2 || echo "3000")
   slug=$(grep -E '^CLAUDE_BOT_SLUG=' .env 2>/dev/null | cut -d= -f2 || echo "")
   prefix=$(grep -E '^CLAUDE_BOT_PATH_PREFIX=' .env 2>/dev/null | cut -d= -f2 || echo "c")
 
+  scheme="http"
+  curl_flags="-s -o /dev/null -w %{http_code}"
+  if grep -qE '^SSL_CERT_PATH=.+' .env 2>/dev/null && grep -qE '^SSL_KEY_PATH=.+' .env 2>/dev/null; then
+    scheme="https"
+    curl_flags="-sk -o /dev/null -w %{http_code}"
+  fi
+
   if [ -n "$slug" ]; then
-    health_url="http://localhost:${port}/${prefix}/${slug}/api/health/ping"
+    health_url="${scheme}://localhost:${port}/${prefix}/${slug}/api/health/ping"
   else
-    health_url="http://localhost:${port}/api/health/ping"
+    health_url="${scheme}://localhost:${port}/api/health/ping"
   fi
 
   echo "  Running health check..."
@@ -101,7 +108,7 @@ health_check() {
   for attempt in $(seq 1 5); do
     echo -e "  ${DIM}Attempt ${attempt}/5...${NC}"
     local http_code
-    http_code=$(curl -s -o /dev/null -w "%{http_code}" "$health_url" 2>/dev/null || echo "000")
+    http_code=$(curl $curl_flags "$health_url" 2>/dev/null || echo "000")
     if [ "$http_code" = "200" ]; then
       return 0
     fi
