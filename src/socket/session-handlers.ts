@@ -72,7 +72,8 @@ export function registerSessionHandlers(ctx: HandlerContext) {
 
         const sessionModel = model ?? DEFAULT_MODEL;
         const sessionProviderType = provider_type ?? "subprocess";
-        createSession(sessionId, email, skipPermissions ?? false, sessionModel, sessionProviderType);
+        const currentPersonality = getAppSetting("personality", "professional");
+        createSession(sessionId, email, skipPermissions ?? false, sessionModel, sessionProviderType, currentPersonality);
 
         // Resolve per-session provider
         const sessionProvider = ctx.getSessionProvider(sessionId, sessionProviderType);

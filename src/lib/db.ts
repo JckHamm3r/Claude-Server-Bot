@@ -288,6 +288,9 @@ try { db.exec("ALTER TABLE sessions ADD COLUMN provider_type TEXT NOT NULL DEFAU
 
 // Session status tracking for background persistence
 try { db.exec("ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'idle'"); } catch (err: unknown) { if (!(err instanceof Error && err.message.includes("duplicate column"))) throw err; }
+
+// Store which personality was active when the session was created
+try { db.exec("ALTER TABLE sessions ADD COLUMN personality TEXT"); } catch (err: unknown) { if (!(err instanceof Error && err.message.includes("duplicate column"))) throw err; }
 // Reset stale statuses on startup (server restart means no subprocess is running)
 db.exec("UPDATE sessions SET status = 'idle' WHERE status IN ('running', 'needs_attention')");
 

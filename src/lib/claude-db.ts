@@ -16,6 +16,7 @@ export interface ClaudeSession {
   model: string;
   provider_type: string;
   status: SessionStatus;
+  personality: string | null;
 }
 
 export interface ClaudeMessage {
@@ -50,6 +51,7 @@ function rowToSession(row: Record<string, unknown>): ClaudeSession {
     model: (row.model as string) ?? "claude-sonnet-4-6",
     provider_type: (row.provider_type as string) ?? "subprocess",
     status: (row.status as SessionStatus) ?? "idle",
+    personality: (row.personality as string | null) ?? null,
   };
 }
 
@@ -72,12 +74,13 @@ export function createSession(
   skipPermissions = false,
   model = "claude-sonnet-4-6",
   providerType = "subprocess",
+  personality?: string,
 ): ClaudeSession {
   db.prepare(`
-    INSERT INTO sessions (id, created_by, skip_permissions, model, provider_type)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO sessions (id, created_by, skip_permissions, model, provider_type, personality)
+    VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET updated_at = datetime('now')
-  `).run(id, createdBy, skipPermissions ? 1 : 0, model, providerType);
+  `).run(id, createdBy, skipPermissions ? 1 : 0, model, providerType, personality ?? null);
   const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(id) as Record<string, unknown>;
   return rowToSession(row);
 }

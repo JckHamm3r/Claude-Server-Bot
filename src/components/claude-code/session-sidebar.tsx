@@ -220,6 +220,11 @@ export function SessionSidebar({
 
                 <p className="truncate text-caption text-bot-muted">
                   {new Date(session.updated_at).toLocaleDateString()}
+                  {session.personality && (
+                    <span className="ml-1.5 inline-flex items-center rounded-full bg-bot-accent/10 px-1.5 py-px text-[10px] font-medium text-bot-accent">
+                      {session.personality}
+                    </span>
+                  )}
                 </p>
 
                 {/* Tag pills */}
