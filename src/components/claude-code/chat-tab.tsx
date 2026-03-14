@@ -108,6 +108,9 @@ export function ChatTab() {
   // Track whether last event was an error (for avatar state)
   const [hasError, setHasError] = useState(false);
 
+  // Track when the current run started for elapsed time display
+  const [runStartTime, setRunStartTime] = useState<number | null>(null);
+
   // Search state
   const [showSessionSearch, setShowSessionSearch] = useState(false);
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
@@ -127,6 +130,16 @@ export function ChatTab() {
   useEffect(() => {
     autoAcceptRef.current = autoAccept;
   }, [autoAccept]);
+
+  // Track runStartTime: set when isRunning transitions to true, clear on false
+  useEffect(() => {
+    if (!isRunning) {
+      setRunStartTime(null);
+    } else if (runStartTime === null) {
+      setRunStartTime(Date.now());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRunning]);
 
   // Browser tab title badge: show count of sessions needing attention
   useEffect(() => {
@@ -234,6 +247,7 @@ export function ChatTab() {
       };
       setMessages((prev) => [...prev, msg]);
       setIsRunning(true);
+      setRunStartTime(Date.now());
       setHasError(false);
       emit("claude:message", { sessionId, content, attachments });
     },
@@ -1108,6 +1122,7 @@ export function ChatTab() {
             avatarState={avatarState}
             onSendStarter={(msg) => handleSend(msg)}
             onRetry={handleRetryLast}
+            runStartTime={runStartTime}
           />
         )}
 

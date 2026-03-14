@@ -194,13 +194,14 @@ function runClaude(
   // ── Heartbeat for long operations ────────────────────────────────────────
   const heartbeatInterval = setInterval(() => {
     if (state.generation !== gen) { clearInterval(heartbeatInterval); return; }
-    if (Date.now() - lastStdoutTime > 30_000) {
+    const silenceMs = Date.now() - lastStdoutTime;
+    if (silenceMs > 8_000) {
       state.emitter.emit("output", {
         type: "progress",
-        message: "Processing...",
+        message: silenceMs > 60_000 ? "Still processing…" : "Processing…",
       } as ParsedOutput);
     }
-  }, 30_000);
+  }, 10_000);
   if (heartbeatInterval.unref) heartbeatInterval.unref();
 
   proc.stdout.on("data", (chunk: Buffer) => {

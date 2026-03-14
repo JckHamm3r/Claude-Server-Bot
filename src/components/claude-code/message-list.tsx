@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useMemo } from "react";
+import { useEffect, useRef, useMemo, useState } from "react";
 import Image from "next/image";
 import { Terminal, Code2, FileSearch, MessageSquare, Slash } from "lucide-react";
 import { MessageItem } from "./message-item";
@@ -42,6 +42,7 @@ interface MessageListProps {
   loadingMessages?: boolean;
   avatarState?: AvatarState;
   onSendStarter?: (message: string) => void;
+  runStartTime?: number | null;
 }
 
 type Segment =
@@ -55,7 +56,72 @@ const STARTER_PROMPTS = [
   { icon: MessageSquare, label: "Explain something", prompt: "Explain how " },
 ];
 
-function ActivityStrip({ activity, isRunning }: { activity: ActivityState | null; isRunning: boolean }) {
+function ThinkingBubble({ avatarState, runStartTime }: { avatarState?: AvatarState; runStartTime?: number | null }) {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (!runStartTime) {
+      setElapsed(0);
+      return;
+    }
+    setElapsed(Math.floor((Date.now() - runStartTime) / 1000));
+    const timer = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - runStartTime) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [runStartTime]);
+
+  return (
+    <div className="flex gap-3 py-2 justify-start">
+      <div className="mt-1 h-6 w-6 shrink-0 rounded-full overflow-hidden">
+        <Image unoptimized src={getAvatarPath(avatarState ?? "thinking")} alt="Claude" width={24} height={24} className="object-cover" />
+      </div>
+      <div className="rounded-2xl rounded-bl-sm bg-bot-elevated px-3 py-2.5 flex items-center gap-2">
+        <span className="flex gap-1 items-center">
+          <span className="h-1.5 w-1.5 rounded-full bg-bot-muted animate-bounce [animation-delay:0ms]" />
+          <span className="h-1.5 w-1.5 rounded-full bg-bot-muted animate-bounce [animation-delay:150ms]" />
+          <span className="h-1.5 w-1.5 rounded-full bg-bot-muted animate-bounce [animation-delay:300ms]" />
+        </span>
+        {elapsed >= 3 && (
+          <span className="text-[11px] text-bot-muted font-mono tabular-nums">
+            {formatElapsed(elapsed)}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function formatElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}m ${s}s`;
+}
+
+function getThinkingPhase(seconds: number): string {
+  if (seconds < 10) return "Thinking…";
+  if (seconds < 30) return "Still thinking…";
+  if (seconds < 60) return "Deep thinking, hang tight…";
+  if (seconds < 120) return "Working on a complex response…";
+  return "Still processing…";
+}
+
+function ActivityStrip({ activity, isRunning, runStartTime }: { activity: ActivityState | null; isRunning: boolean; runStartTime: number | null }) {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (!isRunning || !runStartTime) {
+      setElapsed(0);
+      return;
+    }
+    setElapsed(Math.floor((Date.now() - runStartTime) / 1000));
+    const timer = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - runStartTime) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isRunning, runStartTime]);
+
   if (!isRunning) return null;
 
   const input = activity?.toolInput && typeof activity.toolInput === "object"
@@ -70,6 +136,8 @@ function ActivityStrip({ activity, isRunning }: { activity: ActivityState | null
     ? String(input.pattern)
     : null;
 
+  const label = activity ? activity.message : getThinkingPhase(elapsed);
+
   return (
     <div className="mx-auto w-full max-w-3xl px-4 pb-2">
       <div className="flex items-center gap-2 rounded-lg border border-bot-border/60 bg-bot-elevated/60 px-3 py-2 text-caption text-bot-muted">
@@ -79,14 +147,15 @@ function ActivityStrip({ activity, isRunning }: { activity: ActivityState | null
           <span className="h-1.5 w-1.5 rounded-full bg-bot-accent/70 animate-bounce [animation-delay:300ms]" />
         </span>
         <span className="font-mono text-[11px] truncate">
-          {activity ? activity.message : "Thinking…"}
+          {label}
           {detail && (
             <span className="opacity-60"> · {detail}</span>
           )}
         </span>
-        {activity && activity.count > 1 && (
-          <span className="ml-auto shrink-0 text-[10px] opacity-40 font-mono">{activity.count}×</span>
-        )}
+        <span className="ml-auto shrink-0 text-[10px] opacity-40 font-mono tabular-nums">
+          {activity && activity.count > 1 && <span className="mr-2">{activity.count}×</span>}
+          {elapsed > 0 && formatElapsed(elapsed)}
+        </span>
       </div>
     </div>
   );
@@ -110,6 +179,7 @@ export function MessageList({
   loadingMessages,
   avatarState,
   onSendStarter,
+  runStartTime,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -258,23 +328,14 @@ export function MessageList({
             const lastType = messages[messages.length - 1]?.parsed?.type;
             return lastType !== "streaming";
           })() && (
-            <div className="flex gap-3 py-2 justify-start">
-              <div className="mt-1 h-6 w-6 shrink-0 rounded-full overflow-hidden">
-                <Image unoptimized src={getAvatarPath(avatarState ?? "thinking")} alt="Claude" width={24} height={24} className="object-cover" />
-              </div>
-              <div className="rounded-2xl rounded-bl-sm bg-bot-elevated px-3 py-2.5 flex items-center gap-1">
-                <span className="h-1.5 w-1.5 rounded-full bg-bot-muted animate-bounce [animation-delay:0ms]" />
-                <span className="h-1.5 w-1.5 rounded-full bg-bot-muted animate-bounce [animation-delay:150ms]" />
-                <span className="h-1.5 w-1.5 rounded-full bg-bot-muted animate-bounce [animation-delay:300ms]" />
-              </div>
-            </div>
+            <ThinkingBubble avatarState={avatarState} runStartTime={runStartTime} />
           )}
 
           <div ref={bottomRef} />
         </div>
       </div>
 
-      <ActivityStrip activity={currentActivity ?? null} isRunning={isRunning ?? false} />
+      <ActivityStrip activity={currentActivity ?? null} isRunning={isRunning ?? false} runStartTime={runStartTime ?? null} />
     </div>
   );
 }
