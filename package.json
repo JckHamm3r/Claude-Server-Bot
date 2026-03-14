@@ -10,6 +10,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.76",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^11.0.0",
     "class-variance-authority": "^0.7.1",

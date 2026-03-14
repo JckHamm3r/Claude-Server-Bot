@@ -395,8 +395,12 @@ export function registerSessionHandlers(ctx: HandlerContext) {
   // ── Capabilities ─────────────────────────────────────────────────────
 
   socket.on("claude:get_capabilities", () => {
+    const sdkAvailable = isSDKAvailable();
     socket.emit("claude:capabilities", {
-      sdkAvailable: isSDKAvailable(),
+      sdkAvailable,
+      sdkStreaming: sdkAvailable,
+      sdkPermissions: sdkAvailable,
+      sdkSessionResume: sdkAvailable,
       models: AVAILABLE_MODELS,
     });
   });

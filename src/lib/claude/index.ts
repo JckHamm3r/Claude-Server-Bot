@@ -30,19 +30,32 @@ export function isSDKAvailable(): boolean {
     const row = db.prepare("SELECT value FROM app_settings WHERE key = 'anthropic_api_key'").get() as { value: string } | undefined;
     const keyFromDB = row?.value ?? "";
     const keyFromEnv = process.env.ANTHROPIC_API_KEY ?? "";
-    return !!(keyFromDB || keyFromEnv);
+    if (!(keyFromDB || keyFromEnv)) return false;
+    // Verify the SDK package is importable (installed via install.sh)
+    try {
+      require.resolve("@anthropic-ai/claude-agent-sdk");
+    } catch {
+      return false;
+    }
+    return true;
   } catch {
     return !!process.env.ANTHROPIC_API_KEY;
   }
 }
 
 export function getClaudeProvider(type?: string): ClaudeCodeProvider {
-  const mode = type ?? process.env.CLAUDE_PROVIDER ?? "subprocess";
-  if (mode === "sdk") {
-    return getSDKProvider();
+  // Explicit override always wins
+  const explicit = type ?? process.env.CLAUDE_PROVIDER;
+  if (explicit === "sdk") return getSDKProvider();
+  if (explicit === "subprocess") return getSubprocessProvider();
+  if (explicit && explicit !== "sdk" && explicit !== "subprocess") {
+    console.warn(`Unknown provider type "${explicit}", falling back to subprocess`);
+    return getSubprocessProvider();
   }
-  if (mode !== "subprocess") {
-    console.warn(`Unknown provider type "${mode}", falling back to subprocess`);
+
+  // Auto-select: prefer SDK when an API key is available, else subprocess
+  if (isSDKAvailable()) {
+    return getSDKProvider();
   }
   return getSubprocessProvider();
 }

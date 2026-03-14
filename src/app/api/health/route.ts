@@ -33,7 +33,31 @@ export async function GET() {
     claudeProcess = false;
   }
 
+  // Check if an API key is configured (DB or env)
+  let apiKeyConfigured = false;
+  try {
+    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'anthropic_api_key'").get() as { value: string } | undefined;
+    apiKeyConfigured = !!(row?.value || process.env.ANTHROPIC_API_KEY);
+  } catch {
+    apiKeyConfigured = !!process.env.ANTHROPIC_API_KEY;
+  }
+
+  // Check if the Agent SDK package is installed
+  let sdkInstalled = false;
+  try {
+    require.resolve("@anthropic-ai/claude-agent-sdk");
+    sdkInstalled = true;
+  } catch {
+    sdkInstalled = false;
+  }
+
   const socketServer = true;
 
-  return NextResponse.json({ database, claudeProcess, socketServer });
+  return NextResponse.json({
+    database,
+    claudeProcess,
+    apiKeyConfigured,
+    sdkInstalled,
+    socketServer,
+  });
 }
