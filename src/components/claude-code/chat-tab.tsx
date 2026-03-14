@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { getSocket } from "@/lib/socket";
+import { useSession } from "next-auth/react";
+import { getSocket, connectSocket } from "@/lib/socket";
 import type { ParsedOutput } from "@/lib/claude/provider";
 import type { ClaudeSession } from "@/lib/claude-db";
 import { DEFAULT_MODEL } from "@/lib/models";
@@ -24,6 +25,7 @@ interface SessionUsage {
 }
 
 export function ChatTab() {
+  const { status: sessionStatus } = useSession();
   const [sessions, setSessions] = useState<ClaudeSession[]>([]);
   const [activeSession, setActiveSession] = useState<ClaudeSession | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -208,6 +210,14 @@ export function ChatTab() {
       sendImmediate(next, sessionId);
     }
   }, [sendImmediate]);
+
+  // Connect socket only after NextAuth session is confirmed (avoids
+  // racing the cookie on the first post-login navigation).
+  useEffect(() => {
+    if (sessionStatus === "authenticated") {
+      connectSocket();
+    }
+  }, [sessionStatus]);
 
   // Setup socket listeners once
   useEffect(() => {

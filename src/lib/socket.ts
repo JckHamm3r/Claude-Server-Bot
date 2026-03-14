@@ -12,6 +12,7 @@ export function getSocket(): Socket {
   socket = io({
     path: socketPath,
     transports: ["websocket"],
+    autoConnect: false,
     reconnection: true,
     reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
@@ -21,6 +22,13 @@ export function getSocket(): Socket {
   });
 
   return socket;
+}
+
+export function connectSocket(): void {
+  const s = getSocket();
+  if (!s.connected && !s.active) {
+    s.connect();
+  }
 }
 
 export function disconnectSocket() {
