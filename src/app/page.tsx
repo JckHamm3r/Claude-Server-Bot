@@ -1,46 +1,56 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { ClaudeBubble, useIsRunning } from "@/components/claude-bubble/bubble";
-import { ClaudePanel } from "@/components/claude-bubble/claude-panel";
+import { useState } from "react";
+import { cn } from "@/lib/utils";
+import { ChatTab } from "@/components/claude-code/chat-tab";
+import { AgentsTab } from "@/components/claude-code/agents-tab";
+import { PlanModeTab } from "@/components/claude-code/plan-mode-tab";
+import { MemoryTab } from "@/components/claude-code/memory-tab";
+import { SettingsPanel } from "@/components/claude-code/settings-panel";
+
+type TabKey = "chat" | "agents" | "plan" | "memory" | "settings";
+
+const TABS: { key: TabKey; label: string }[] = [
+  { key: "chat", label: "Chat" },
+  { key: "agents", label: "Agents" },
+  { key: "plan", label: "Plan Mode" },
+  { key: "memory", label: "Memory" },
+  { key: "settings", label: "Settings" },
+];
 
 export default function DashboardPage() {
-  const [panelOpen, setPanelOpen] = useState(true);
-  const [projectRoot, setProjectRoot] = useState("");
-  const isRunning = useIsRunning();
-
-  const hostname = typeof window !== "undefined" ? window.location.hostname : "";
-
-  useEffect(() => {
-    // Fetch project root only after authentication (not baked into client bundle)
-    const slug = process.env.NEXT_PUBLIC_CLAUDE_BOT_SLUG ?? "";
-    const prefix = process.env.NEXT_PUBLIC_CLAUDE_BOT_PATH_PREFIX ?? "c";
-    const bp = slug ? `/${prefix}/${slug}` : "";
-    fetch(`${bp}/api/bot-identity`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => {
-        if (data?.projectRoot) setProjectRoot(data.projectRoot);
-      })
-      .catch(() => {});
-  }, []);
+  const [activeTab, setActiveTab] = useState<TabKey>("chat");
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center bg-bot-bg">
-      <div className="text-center space-y-2 select-none">
-        <h1 className="text-h1 font-semibold text-bot-text">{hostname}</h1>
-        {projectRoot && (
-          <p className="text-body text-bot-muted font-mono">{projectRoot}</p>
-        )}
-        <p className="text-caption text-bot-muted">
-          Click the bubble to open Claude Code
-        </p>
+    <div className="flex flex-col h-screen bg-bot-bg">
+      {/* Tab bar */}
+      <div className="flex items-center border-b border-bot-border px-4 py-2 shrink-0">
+        <div className="flex items-center gap-1">
+          {TABS.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={cn(
+                "rounded-md px-3 py-1.5 text-body font-medium transition-colors",
+                activeTab === tab.key
+                  ? "bg-bot-accent/10 text-bot-accent"
+                  : "text-bot-muted hover:text-bot-text hover:bg-bot-elevated",
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <ClaudeBubble onOpen={() => setPanelOpen(true)} isRunning={isRunning} />
-
-      {panelOpen && (
-        <ClaudePanel onClose={() => setPanelOpen(false)} />
-      )}
-    </main>
+      {/* Content */}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        {activeTab === "chat" && <ChatTab />}
+        {activeTab === "agents" && <AgentsTab />}
+        {activeTab === "plan" && <PlanModeTab />}
+        {activeTab === "memory" && <MemoryTab />}
+        {activeTab === "settings" && <SettingsPanel />}
+      </div>
+    </div>
   );
 }
