@@ -59,11 +59,7 @@ function expandToolCallsFromMetadata(msgs: ChatMessage[]): ChatMessage[] {
   return expanded;
 }
 
-interface SessionUsage {
-  total_input_tokens: number;
-  total_output_tokens: number;
-  total_cost_usd: number;
-}
+import type { SessionUsage } from "@/types/chat";
 
 export function ChatTab() {
   const { status: sessionStatus } = useSession();
@@ -641,12 +637,13 @@ export function ChatTab() {
       setHasError(true);
     });
 
-    socket.on("claude:rate_limited", ({ message }: { message?: string }) => {
+    socket.on("claude:rate_limited", ({ reason }: { reason?: string }) => {
+      const text = reason ?? "You are being rate limited. Please wait before sending more messages.";
       const msg: ChatMessage = {
         id: "rate-limited-" + Date.now(),
         sender_type: "claude",
-        content: message ?? "You are being rate limited. Please wait before sending more messages.",
-        parsed: { type: "error", message: message ?? "You are being rate limited. Please wait before sending more messages." },
+        content: text,
+        parsed: { type: "error", message: text },
         timestamp: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, msg]);

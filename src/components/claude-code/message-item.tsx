@@ -16,18 +16,10 @@ import { DiffView } from "./diff-view";
 import { PermissionCard } from "./permission-card";
 import { ToolCallBlock } from "./tool-call-block";
 import { UserQuestionCard } from "./user-question-card";
-
-interface Message {
-  id: string;
-  sender_type: "admin" | "claude";
-  content?: string;
-  parsed?: ParsedOutput;
-  timestamp: string;
-  metadata?: Record<string, unknown>;
-}
+import type { ChatMessage } from "@/types/chat";
 
 interface MessageItemProps {
-  message: Message;
+  message: ChatMessage;
   onSelectOption?: (sessionId: string, choice: string) => void;
   onConfirm?: (sessionId: string, value: boolean) => void;
   onAllowTool?: (sessionId: string, toolName: string, scope: "session" | "once") => void;

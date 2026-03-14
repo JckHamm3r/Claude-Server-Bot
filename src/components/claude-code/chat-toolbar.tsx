@@ -4,25 +4,7 @@ import { useState } from "react";
 import { Square, RotateCcw, Trash2, Zap, Search, Download, ChevronDown, ClipboardCopy, Check } from "lucide-react";
 import { cn, apiUrl } from "@/lib/utils";
 import { ModelSelector } from "./model-selector";
-
-interface SessionUsage {
-  total_input_tokens: number;
-  total_output_tokens: number;
-  total_cost_usd: number;
-}
-
-interface BudgetLimits {
-  session_usd: number;
-  daily_usd: number;
-  monthly_usd: number;
-}
-
-interface ChatMessage {
-  sender_type: "admin" | "claude";
-  content?: string;
-  parsed?: { content?: string; type?: string };
-  timestamp: string;
-}
+import type { ChatMessage, SessionUsage, BudgetLimits } from "@/types/chat";
 
 interface ChatToolbarProps {
   onInterrupt: () => void;

@@ -3,16 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { X, ChevronUp, ChevronDown } from "lucide-react";
 import { apiUrl } from "@/lib/utils";
-
-interface SearchResult {
-  messageId: string;
-  sessionId: string;
-  sessionName: string | null;
-  senderType: string;
-  content: string;
-  snippet: string;
-  timestamp: string;
-}
+import type { SearchResult } from "@/types/chat";
 
 interface SessionSearchBarProps {
   sessionId: string;

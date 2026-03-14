@@ -18,3 +18,19 @@ function getBasePath(): string {
 export function apiUrl(path: string): string {
   return `${getBasePath()}${path}`;
 }
+
+/**
+ * Sanitize FTS5 snippet HTML: escape all entities first, then restore
+ * our controlled highlight markers as <mark> tags.
+ */
+export function sanitizeSnippet(raw: string): string {
+  const escaped = raw
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+  return escaped
+    .replace(/\[\[highlight\]\]/g, "<mark>")
+    .replace(/\[\[\/highlight\]\]/g, "</mark>");
+}

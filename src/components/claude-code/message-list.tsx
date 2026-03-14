@@ -7,15 +7,9 @@ import { MessageItem } from "./message-item";
 import { ToolCallGroup } from "./tool-call-group";
 import type { ParsedOutput } from "@/lib/claude/provider";
 import { getAvatarPath, type AvatarState } from "@/lib/avatar-state";
+import type { ChatMessage } from "@/types/chat";
 
-export interface ChatMessage {
-  id: string;
-  sender_type: "admin" | "claude";
-  content?: string;
-  parsed?: ParsedOutput;
-  timestamp: string;
-  metadata?: Record<string, unknown>;
-}
+export type { ChatMessage };
 
 export interface ActivityState {
   toolName: string;

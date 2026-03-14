@@ -395,14 +395,24 @@ export function registerSessionHandlers(ctx: HandlerContext) {
       return;
     }
     try {
-      const allSessionIds = Array.from(ctx.sessionStreamingContent.keys());
+      const allSessionIds = new Set([
+        ...ctx.sessionStreamingContent.keys(),
+        ...ctx.sessionProviders.keys(),
+      ]);
       for (const sid of allSessionIds) {
-        try { ctx.provider.interrupt(sid); } catch { /* ignore */ }
+        try {
+          const provider = ctx.sessionProviders.get(sid) ?? ctx.provider;
+          provider.interrupt(sid);
+        } catch { /* ignore */ }
         ctx.sessionStreamingContent.delete(sid);
         ctx.sessionListeners.delete(sid);
+        ctx.sessionProviders.delete(sid);
+        ctx.sessionCommandSubmitter.delete(sid);
+        ctx.sessionPendingUsage.delete(sid);
+        ctx.sessionStartTimes.delete(sid);
       }
       logActivity("kill_all", email);
-      socket.emit("claude:kill_all_done", { killed: allSessionIds.length });
+      socket.emit("claude:kill_all_done", { killed: allSessionIds.size });
       io.emit("claude:sessions_aborted");
 
       // Notify all admins

@@ -24,6 +24,11 @@ export function registerMessageHandlers(ctx: HandlerContext) {
     "claude:message",
     async ({ sessionId, content, attachments }: { sessionId: string; content: string; attachments?: string[] }) => {
       try {
+        if (typeof content !== "string" || (!content.trim() && (!attachments || attachments.length === 0))) {
+          socket.emit("claude:error", { sessionId, message: "Message content is required" });
+          return;
+        }
+
         if (!canAccessSession(sessionId, email)) {
           socket.emit("claude:error", { sessionId, message: "Access denied" });
           return;
@@ -136,9 +141,12 @@ export function registerMessageHandlers(ctx: HandlerContext) {
                 inputFiles.push(filePath);
                 imageMetadata.push({ id: upload.id, name: upload.original_name, mime_type: upload.mime_type });
               } else {
-                // For text/code files, include content directly
                 try {
-                  const fileContent = fs.readFileSync(filePath, "utf-8");
+                  const MAX_ATTACHMENT_BYTES = 512_000; // 500 KB per file
+                  let fileContent = fs.readFileSync(filePath, "utf-8") as string;
+                  if (fileContent.length > MAX_ATTACHMENT_BYTES) {
+                    fileContent = fileContent.slice(0, MAX_ATTACHMENT_BYTES) + "\n\n[truncated — file exceeded 500 KB limit]";
+                  }
                   contextParts.push(`--- File: ${upload.original_name} ---\n${fileContent}\n--- End of ${upload.original_name} ---`);
                 } catch {
                   contextParts.push(`[Attached file: ${upload.original_name}] (could not read contents)`);
@@ -247,29 +255,71 @@ export function registerMessageHandlers(ctx: HandlerContext) {
           socket.emit("claude:error", { sessionId, message: "Access denied" });
           return;
         }
+
+        const rl = ctx.checkRateLimit(email, sessionId);
+        if (!rl.ok) {
+          socket.emit("claude:rate_limited", {
+            sessionId,
+            reason: rl.reason,
+            limits: {
+              commands: getAppSetting("rate_limit_commands", "100"),
+              runtime_min: getAppSetting("rate_limit_runtime_min", "30"),
+              concurrent: getAppSetting("rate_limit_concurrent", "3"),
+            },
+          });
+          return;
+        }
+
+        const sessionBudget = parseFloat(getAppSetting("budget_limit_session_usd", "0"));
+        if (sessionBudget > 0) {
+          const sessionUsage = getSessionTokenUsage(sessionId);
+          if (sessionUsage.total_cost_usd >= sessionBudget) {
+            socket.emit("claude:budget_exceeded", { sessionId, type: "session", limit: sessionBudget, current: sessionUsage.total_cost_usd });
+            return;
+          }
+        }
+
+        const dailyBudget = parseFloat(getAppSetting("budget_limit_daily_usd", "0"));
+        if (dailyBudget > 0) {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const dailyUsage = getGlobalTokenUsage({ since: today.toISOString(), userId: email });
+          if (dailyUsage.total_cost_usd >= dailyBudget) {
+            socket.emit("claude:budget_exceeded", { sessionId, type: "daily", limit: dailyBudget, current: dailyUsage.total_cost_usd });
+            return;
+          }
+        }
+
+        const monthlyBudget = parseFloat(getAppSetting("budget_limit_monthly_usd", "0"));
+        if (monthlyBudget > 0) {
+          const monthStart = new Date();
+          monthStart.setDate(1);
+          monthStart.setHours(0, 0, 0, 0);
+          const monthlyUsage = getGlobalTokenUsage({ since: monthStart.toISOString(), userId: email });
+          if (monthlyUsage.total_cost_usd >= monthlyBudget) {
+            socket.emit("claude:budget_exceeded", { sessionId, type: "monthly", limit: monthlyBudget, current: monthlyUsage.total_cost_usd });
+            return;
+          }
+        }
+
         const session = getSession(sessionId);
         if (!session) return;
 
         const msg = getMessage(messageId);
         if (!msg || msg.session_id !== sessionId) return;
 
-        // Delete all messages after the edited one
         deleteMessagesAfter(sessionId, msg.timestamp);
-        // Update the edited message content
         updateMessageContent(messageId, newContent);
 
-        // Send refreshed messages to UI
         const messages = getMessages(sessionId);
         io.to(`session:${sessionId}`).emit("claude:messages_updated", { sessionId, messages });
 
         const sessionProvider = ctx.getSessionProvider(sessionId, session.provider_type);
         ctx.ensureSessionListener(sessionId);
 
-        // Use --resume when possible: send the edit as a continuation rather
-        // than destroying the session and replaying context as plain text.
-        // This avoids re-ingesting the system prompt and full history.
         const editPrefix = "[The user edited their previous message. Disregard the earlier version and respond to this updated request instead.]\n\n";
 
+        ctx.incrementSessionCommands(email, sessionId);
         ctx.sessionCommandSubmitter.set(sessionId, email);
         io.to(`session:${sessionId}`).emit("claude:command_started", { sessionId, submittedBy: email });
         sessionProvider.sendMessage(sessionId, editPrefix + newContent);

@@ -2,17 +2,8 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Search, X, MessageSquare } from "lucide-react";
-import { apiUrl } from "@/lib/utils";
-
-interface SearchResult {
-  messageId: string;
-  sessionId: string;
-  sessionName: string | null;
-  senderType: string;
-  content: string;
-  snippet: string;
-  timestamp: string;
-}
+import { apiUrl, sanitizeSnippet } from "@/lib/utils";
+import type { SearchResult } from "@/types/chat";
 
 interface GlobalSearchDialogProps {
   onClose: () => void;
@@ -130,7 +121,7 @@ export function GlobalSearchDialog({ onClose, onNavigate }: GlobalSearchDialogPr
                   </div>
                   <p
                     className="text-caption text-bot-text line-clamp-2"
-                    dangerouslySetInnerHTML={{ __html: item.snippet }}
+                    dangerouslySetInnerHTML={{ __html: sanitizeSnippet(item.snippet) }}
                   />
                 </button>
               ))}
