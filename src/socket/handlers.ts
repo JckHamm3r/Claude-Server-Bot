@@ -468,6 +468,7 @@ export function registerHandlers(io: Server) {
   io.on("connection", async (socket) => {
     const authorized = await verifySocket(socket);
     if (!authorized) {
+      console.warn("[socket] unauthorized connection rejected:", socket.id);
       socket.emit("claude:error", { message: "Unauthorized" });
       socket.disconnect(true);
       return;

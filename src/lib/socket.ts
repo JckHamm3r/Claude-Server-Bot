@@ -13,7 +13,7 @@ export function getSocket(): Socket {
 
   socket = io({
     path: buildSocketPath(),
-    transports: ["websocket"],
+    transports: ["polling", "websocket"],
     autoConnect: false,
     reconnection: true,
     reconnectionAttempts: Infinity,
