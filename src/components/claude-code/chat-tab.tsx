@@ -308,8 +308,8 @@ export function ChatTab() {
       setReconnecting(false);
     });
 
-    socket.on("connect_error", (err) => {
-      console.warn("[socket] connect_error:", err.message);
+    socket.on("connect_error", (err: Error & { description?: unknown }) => {
+      console.warn("[socket] connect_error:", err.message, err.description ?? "");
       setConnected(false);
       setReconnecting(true);
     });

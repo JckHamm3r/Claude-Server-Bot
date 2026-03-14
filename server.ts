@@ -127,11 +127,15 @@ app.prepare().then(() => {
 
   const io = new Server(httpServer, {
     path: socketPath,
-    cors: { origin: false },
+    cors: { origin: true, credentials: true },
     maxHttpBufferSize: 1e6,
   });
 
   registerHandlers(io);
+
+  io.engine.on("connection_error", (err: { code: number; message: string; context?: unknown }) => {
+    console.warn("[socket] engine connection_error:", err.code, err.message);
+  });
 
   const port = parseInt(process.env.PORT ?? "3000", 10);
   httpServer.listen(port, () => {
