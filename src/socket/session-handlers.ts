@@ -296,9 +296,12 @@ export function registerSessionHandlers(ctx: HandlerContext) {
   );
 
   // ── Lightweight session rejoin (reconnection) ─────────────────────
-  // Re-joins the socket room and re-attaches the output listener without
-  // destroying the existing provider session (preserves claudeSessionId,
-  // conversation context, and avoids re-sending the system prompt).
+  // Re-joins the socket room and re-attaches the output listener.
+  // Always calls createSession (idempotent via getOrCreate) so that
+  // after a server restart the provider session is re-initialized
+  // and subsequent messages work. For sessions still alive in memory,
+  // createSession just updates lastActivity without destroying the
+  // claudeSessionId or conversation context.
   socket.on(
     "claude:rejoin_session",
     ({ sessionId }: { sessionId: string }) => {
@@ -306,14 +309,41 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         socket.emit("claude:error", { sessionId, message: "Access denied" });
         return;
       }
+
+      const dbSession = getSession(sessionId);
+      if (!dbSession) {
+        socket.emit("claude:error", { sessionId, message: "Session not found" });
+        return;
+      }
+
       socket.join(`session:${sessionId}`);
       ctx.connectedUsers.set(socket.id, { email, activeSession: sessionId });
       ctx.broadcastPresence();
+
+      // Build system prompt and (re-)initialize provider session
+      const parts: string[] = [];
+      const guardEnabled = getAppSetting("guard_rails_enabled", "true") === "true";
+      const securityPrefix = getSecuritySystemPrompt(guardEnabled);
+      if (securityPrefix) parts.push(securityPrefix);
+      const selfIdentity = getBotSelfIdentityPrompt();
+      if (selfIdentity) parts.push(selfIdentity);
+      if (dbSession.personality) {
+        const personalityPrefix = getPersonalityPrefix(dbSession.personality);
+        if (personalityPrefix) parts.push(personalityPrefix);
+      }
+      const systemPrompt = parts.length > 0 ? parts.join("\n\n") : undefined;
+
+      const sessionProvider = ctx.getSessionProvider(sessionId, dbSession.provider_type);
+      sessionProvider.createSession(sessionId, {
+        skipPermissions: dbSession.skip_permissions,
+        model: dbSession.model,
+        ...(systemPrompt ? { systemPrompt } : {}),
+      });
+
       ctx.ensureSessionListener(sessionId);
 
-      const sp = ctx.getSessionProvider(sessionId);
       const currentContent = ctx.sessionStreamingContent.get(sessionId);
-      if (currentContent && sp.isRunning(sessionId)) {
+      if (currentContent && sessionProvider.isRunning(sessionId)) {
         socket.emit("claude:output", {
           sessionId,
           parsed: { type: "streaming", content: currentContent },
@@ -322,8 +352,8 @@ export function registerSessionHandlers(ctx: HandlerContext) {
       }
       socket.emit("claude:session_ready", {
         sessionId,
-        running: sp.isRunning(sessionId),
-        status: sp.isRunning(sessionId) ? "running" : "idle",
+        running: sessionProvider.isRunning(sessionId),
+        status: sessionProvider.isRunning(sessionId) ? "running" : "idle",
       });
     },
   );
