@@ -15,6 +15,7 @@ import { ConfirmButtons } from "./confirm-buttons";
 import { DiffView } from "./diff-view";
 import { PermissionCard } from "./permission-card";
 import { ToolCallBlock } from "./tool-call-block";
+import { UserQuestionCard } from "./user-question-card";
 
 interface Message {
   id: string;
@@ -31,6 +32,7 @@ interface MessageItemProps {
   onConfirm?: (sessionId: string, value: boolean) => void;
   onAllowTool?: (sessionId: string, toolName: string, scope: "session" | "once") => void;
   onAlwaysAllow?: (sessionId: string, toolName: string, command: string) => void;
+  onAnswerQuestion?: (sessionId: string, answer: string) => void;
   onEdit?: (messageId: string, newContent: string) => void;
   onDelete?: (messageId: string) => void;
   onRetry?: () => void;
@@ -228,6 +230,7 @@ export function MessageItem({
   onConfirm,
   onAllowTool,
   onAlwaysAllow,
+  onAnswerQuestion,
   onEdit,
   onDelete,
   onRetry,
@@ -309,6 +312,19 @@ export function MessageItem({
           <div>
             <span className="font-semibold">Security:</span> {p.message}
           </div>
+        </div>
+      );
+    }
+
+    if (p.type === "user_question" && p.questions && p.questions.length > 0) {
+      return (
+        <div className="py-1">
+          <UserQuestionCard
+            questions={p.questions}
+            sessionId={sessionId}
+            onAnswer={onAnswerQuestion!}
+            disabled={!isInteractive}
+          />
         </div>
       );
     }

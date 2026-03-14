@@ -11,8 +11,15 @@ export interface TokenUsage {
   cost_usd?: number;
 }
 
+export interface UserQuestion {
+  question: string;
+  header?: string;
+  options: { label: string; description?: string }[];
+  multiSelect?: boolean;
+}
+
 export interface ParsedOutput {
-  type: "text" | "streaming" | "options" | "confirm" | "diff" | "progress" | "done" | "error" | "permission_request" | "security_warn" | "usage" | "tool_call" | "tool_result";
+  type: "text" | "streaming" | "options" | "confirm" | "diff" | "progress" | "done" | "error" | "permission_request" | "security_warn" | "usage" | "tool_call" | "tool_result" | "user_question";
   content?: string;
   choices?: string[];       // for 'options'
   prompt?: string;          // for 'confirm'
@@ -30,6 +37,7 @@ export interface ParsedOutput {
   toolStatus?: "running" | "done" | "error"; // for 'tool_call' | 'tool_result'
   toolResult?: string;      // for 'tool_result'
   exitCode?: number;        // for 'tool_result'
+  questions?: UserQuestion[]; // for 'user_question'
 }
 
 export interface ClaudeCodeProvider {

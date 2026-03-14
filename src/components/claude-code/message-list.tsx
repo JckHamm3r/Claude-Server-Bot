@@ -31,6 +31,7 @@ interface MessageListProps {
   onConfirm: (sessionId: string, value: boolean) => void;
   onAllowTool?: (sessionId: string, toolName: string, scope: "session" | "once") => void;
   onAlwaysAllow?: (sessionId: string, toolName: string, command: string) => void;
+  onAnswerQuestion?: (sessionId: string, answer: string) => void;
   onEditMessage?: (messageId: string, newContent: string) => void;
   onDeleteMessage?: (messageId: string) => void;
   onRetry?: () => void;
@@ -168,6 +169,7 @@ export function MessageList({
   onConfirm,
   onAllowTool,
   onAlwaysAllow,
+  onAnswerQuestion,
   onEditMessage,
   onDeleteMessage,
   onRetry,
@@ -311,6 +313,7 @@ export function MessageList({
                   onConfirm={onConfirm}
                   onAllowTool={onAllowTool}
                   onAlwaysAllow={onAlwaysAllow}
+                  onAnswerQuestion={onAnswerQuestion}
                   onEdit={onEditMessage}
                   onDelete={onDeleteMessage}
                   onRetry={msg.parsed?.type === "error" && msg.parsed.retryable ? onRetry : undefined}

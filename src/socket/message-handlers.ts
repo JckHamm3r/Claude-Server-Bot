@@ -213,6 +213,18 @@ export function registerMessageHandlers(ctx: HandlerContext) {
   );
 
   socket.on(
+    "claude:answer_question",
+    ({ sessionId, answer }: { sessionId: string; answer: string }) => {
+      if (!canAccessSession(sessionId, email)) {
+        socket.emit("claude:error", { sessionId, message: "Access denied" });
+        return;
+      }
+      const sp = ctx.getSessionProvider(sessionId);
+      sp.sendMessage(sessionId, answer);
+    },
+  );
+
+  socket.on(
     "claude:allow_tool",
     ({ sessionId, toolName, scope }: { sessionId: string; toolName: string; scope?: "session" | "once" }) => {
       if (!canAccessSession(sessionId, email)) {

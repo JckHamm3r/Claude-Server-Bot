@@ -343,6 +343,23 @@ function handleEvent(state: SessionState, event: Record<string, unknown>): void 
         state.permissionRetry = false;
         const callId = block.id ?? `tool_${++state.toolCallCounter}`;
 
+        // Intercept AskUserQuestion: emit as interactive user_question
+        if (block.name === "AskUserQuestion") {
+          const input = block.input as { questions?: { question: string; header?: string; options: { label: string; description?: string }[]; multiSelect?: boolean }[] } | undefined;
+          if (input?.questions && Array.isArray(input.questions)) {
+            state.emitter.emit("output", {
+              type: "user_question",
+              questions: input.questions.map((q: { question: string; header?: string; options: { label: string; description?: string }[]; multiSelect?: boolean }) => ({
+                question: q.question,
+                header: q.header,
+                options: (q.options ?? []).map((o: { label: string; description?: string }) => ({ label: o.label, description: o.description })),
+                multiSelect: q.multiSelect ?? false,
+              })),
+            } as ParsedOutput);
+            return;
+          }
+        }
+
         // Emit tool_call event for rich rendering
         state.emitter.emit("output", {
           type: "tool_call",

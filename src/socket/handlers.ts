@@ -392,7 +392,7 @@ export function registerHandlers(io: Server) {
       }
 
       // Status transitions for interactive events
-      if (parsed.type === "permission_request") {
+      if (parsed.type === "permission_request" || parsed.type === "user_question") {
         setSessionStatus(sessionId, "needs_attention");
       }
       if (parsed.type === "error" && parsed.retryable) {

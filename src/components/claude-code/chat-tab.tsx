@@ -400,7 +400,7 @@ export function ChatTab() {
         if (parsed.type === "done") {
           streamingMsgIdRef.current = null;
           setPendingInteraction((prev) => {
-            if (prev?.type === "permission_request") return prev;
+            if (prev?.type === "permission_request" || prev?.type === "user_question") return prev;
             return null;
           });
           setCurrentActivity(null);
@@ -501,7 +501,7 @@ export function ChatTab() {
         }
 
         // Track interactive messages
-        if (parsed.type === "options" || parsed.type === "confirm" || parsed.type === "permission_request") {
+        if (parsed.type === "options" || parsed.type === "confirm" || parsed.type === "permission_request" || parsed.type === "user_question") {
           const interactionId = crypto.randomUUID();
           setPendingInteraction({ type: parsed.type, messageId: interactionId });
           setMessages((prev) => [
@@ -991,6 +991,22 @@ export function ChatTab() {
     [emit],
   );
 
+  const handleAnswerQuestion = useCallback(
+    (sessionId: string, answer: string) => {
+      emit("claude:answer_question", { sessionId, answer });
+      setPendingInteraction(null);
+      const msg: ChatMessage = {
+        id: crypto.randomUUID(),
+        sender_type: "admin",
+        content: answer,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, msg]);
+      setIsRunning(true);
+    },
+    [emit],
+  );
+
   const handleAlwaysAllow = useCallback(
     (sessionId: string, _toolName: string, command: string) => {
       // Whitelist this command pattern permanently (admin only — server enforces)
@@ -1119,6 +1135,7 @@ export function ChatTab() {
             onConfirm={handleConfirm}
             onAllowTool={handleAllowTool}
             onAlwaysAllow={handleAlwaysAllow}
+            onAnswerQuestion={handleAnswerQuestion}
             onEditMessage={handleEditMessage}
             onDeleteMessage={handleDeleteMessage}
             isRunning={isRunning}
