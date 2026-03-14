@@ -232,7 +232,7 @@ migrate_env
 
 # Install dependencies
 echo "  Installing dependencies..."
-pnpm install --frozen-lockfile --reporter=silent 2>/dev/null
+pnpm install --frozen-lockfile --reporter=silent 2>/dev/null || pnpm install --reporter=silent 2>/dev/null
 info "Dependencies updated"
 
 # Build

@@ -128,9 +128,14 @@ mascot() {
   echo ""
   case "$pose" in
     greeting)
-      echo -e "  ${CYAN}${BOLD}  .  *  .${NC}"
-      echo -e "  ${CYAN}${BOLD} /o _ o\\${NC}  ${MAGENTA}~{ greetings, earthling }~${NC}"
-      echo -e "  ${CYAN}${BOLD}  ( ~ )${NC}"
+      printf "       ${CYAN}${BOLD}o   o${NC}\n"
+      printf "       ${CYAN}${BOLD} \\ / ${NC}\n"
+      printf "      ${CYAN}${BOLD}.-\"\"\"-.${NC}\n"
+      printf "     ${CYAN}${BOLD}/ o   o \\\\${NC}   ${MAGENTA}~{ greetings, earthling }~${NC}\n"
+      printf "     ${CYAN}${BOLD}|   ${GREEN}^${CYAN}${BOLD}   |${NC}\n"
+      printf "     ${CYAN}${BOLD}|  '-'  |${NC}\n"
+      printf "      ${CYAN}${BOLD}\\\\_____/${NC}\n"
+      printf "      ${CYAN}${BOLD} |   |${NC}\n"
       case $((RANDOM % 3)) in
         0) echo -e "  ${CYAN}I come in peace. Mostly. Let's install some stuff.${NC}" ;;
         1) echo -e "  ${CYAN}Take me to your server. Actually, I'll just set one up.${NC}" ;;
@@ -138,19 +143,29 @@ mascot() {
       esac
       ;;
     working)
-      echo -e "  ${YELLOW}${BOLD}  . ~~~ .${NC}"
-      echo -e "  ${YELLOW}${BOLD} /- _ -\\${NC}  ${DIM}*beaming data*${NC}"
-      echo -e "  ${YELLOW}${BOLD}  ( _ )${NC}"
+      printf "       ${YELLOW}${BOLD}~   ~${NC}\n"
+      printf "       ${YELLOW}${BOLD} \\ / ${NC}\n"
+      printf "      ${YELLOW}${BOLD}.-\"\"\"-.${NC}\n"
+      printf "     ${YELLOW}${BOLD}/ -   - \\\\${NC}   ${DIM}*beaming data*${NC}\n"
+      printf "     ${YELLOW}${BOLD}|   ${YELLOW}o${YELLOW}${BOLD}   |${NC}\n"
+      printf "     ${YELLOW}${BOLD}|  '~'  |${NC}\n"
+      printf "      ${YELLOW}${BOLD}\\\\_____/${NC}\n"
+      printf "      ${YELLOW}${BOLD} |   |${NC}\n"
       case $((RANDOM % 3)) in
-        0) echo -e "  ${YELLOW}Engaging hyperdrive... I mean, npm install.${NC}" ;;
+        0) echo -e "  ${YELLOW}Engaging hyperdrive... I mean, pnpm install.${NC}" ;;
         1) echo -e "  ${YELLOW}Shhh. Alien genius at work. No probing questions.${NC}" ;;
         2) echo -e "  ${YELLOW}On my planet this would take 0.003 seconds. Patience.${NC}" ;;
       esac
       ;;
     celebrating)
-      echo -e "  ${GREEN}${BOLD}  * *** *${NC}"
-      echo -e "  ${GREEN}${BOLD} \\o ^ o/${NC}  ${GREEN}~{ MISSION COMPLETE }~${NC}"
-      echo -e "  ${GREEN}${BOLD}  ( v )${NC}"
+      printf "       ${GREEN}${BOLD}*   *${NC}\n"
+      printf "       ${GREEN}${BOLD} \\ / ${NC}\n"
+      printf "      ${GREEN}${BOLD}.-\"\"\"-.${NC}\n"
+      printf "    ${GREEN}${BOLD}\\\\/ ^   ^ \\\\/${NC}   ${GREEN}~{ MISSION COMPLETE }~${NC}\n"
+      printf "     ${GREEN}${BOLD}|   ${GREEN}v${GREEN}${BOLD}   |${NC}\n"
+      printf "     ${GREEN}${BOLD}|  'v'  |${NC}\n"
+      printf "      ${GREEN}${BOLD}\\\\_____/${NC}\n"
+      printf "      ${GREEN}${BOLD} |   |${NC}\n"
       case $((RANDOM % 3)) in
         0) echo -e "  ${GREEN}WOOOO! *does zero-gravity victory dance*${NC}" ;;
         1) echo -e "  ${GREEN}Another successful deployment across the galaxy!${NC}" ;;
@@ -158,9 +173,14 @@ mascot() {
       esac
       ;;
     error)
-      echo -e "  ${RED}${BOLD}  ! !!! !${NC}"
-      echo -e "  ${RED}${BOLD} /x _ x\\${NC}  ${RED}~{ MAYDAY MAYDAY }~${NC}"
-      echo -e "  ${RED}${BOLD}  ( n )${NC}"
+      printf "       ${RED}${BOLD}!   !${NC}\n"
+      printf "       ${RED}${BOLD} \\ / ${NC}\n"
+      printf "      ${RED}${BOLD}.-\"\"\"-.${NC}\n"
+      printf "     ${RED}${BOLD}/ x   x \\\\${NC}   ${RED}~{ MAYDAY MAYDAY }~${NC}\n"
+      printf "     ${RED}${BOLD}|   ${RED}o${RED}${BOLD}   |${NC}\n"
+      printf "     ${RED}${BOLD}|  '~'  |${NC}\n"
+      printf "      ${RED}${BOLD}\\\\_____/${NC}\n"
+      printf "      ${RED}${BOLD} |   |${NC}\n"
       case $((RANDOM % 3)) in
         0) echo -e "  ${RED}Houston, we have a problem. And I'm not even from Houston.${NC}" ;;
         1) echo -e "  ${RED}*antenna sparking* This was NOT in the mission briefing!${NC}" ;;
@@ -168,9 +188,14 @@ mascot() {
       esac
       ;;
     goodbye)
-      echo -e "  ${DIM}${BOLD}  .  *  .${NC}"
-      echo -e "  ${DIM}${BOLD} /o _ o\\${NC}  ${DIM}~{ transmission ending }~${NC}"
-      echo -e "  ${DIM}${BOLD}  ( ~ )${NC}"
+      printf "       ${DIM}${BOLD}.   .${NC}\n"
+      printf "       ${DIM}${BOLD} \\ / ${NC}\n"
+      printf "      ${DIM}${BOLD}.-\"\"\"-.${NC}\n"
+      printf "     ${DIM}${BOLD}/ o   o \\\\${NC}   ${DIM}~{ transmission ending }~${NC}\n"
+      printf "     ${DIM}${BOLD}|   ${DIM}^${DIM}${BOLD}   |${NC}\n"
+      printf "     ${DIM}${BOLD}|  '.'  |${NC}\n"
+      printf "      ${DIM}${BOLD}\\\\_____/${NC}\n"
+      printf "      ${DIM}${BOLD} |   |${NC}\n"
       case $((RANDOM % 3)) in
         0) echo -e "  ${DIM}Beaming back to the mothership. Don't forget your password.${NC}" ;;
         1) echo -e "  ${DIM}See you, space cowboy. I'll be watching from orbit.${NC}" ;;
@@ -178,7 +203,10 @@ mascot() {
       esac
       ;;
     *)
-      echo -e "  ${BOLD} /?_?\\${NC}"
+      printf "      ${BOLD}.-\"\"\"-.${NC}\n"
+      printf "     ${BOLD}/ ?   ? \\\\${NC}\n"
+      printf "     ${BOLD}|   o   |${NC}\n"
+      printf "      ${BOLD}\\\\_____/${NC}\n"
       echo -e "  ${DIM}*confused alien noises*${NC}"
       ;;
   esac
@@ -196,7 +224,7 @@ QUIPS=(
   "Compiling compliments..."
   "Feeding the hamsters that power the server..."
   "Bribing the compiler..."
-  "Negotiating with npm..."
+  "Negotiating with pnpm..."
   "Performing calculations... just kidding, it's JavaScript..."
   "Consulting the ancient scrolls of Stack Overflow..."
   "Summoning the mass of node_modules..."
@@ -1292,7 +1320,7 @@ upgrade_in_place() {
   [ -d "$backup_dir/data" ] && cp -r "$backup_dir/data" "$target_dir/data"
   rm -rf "$backup_dir"
   [ -f "$target_dir/.env.example" ] && migrate_env "$target_dir/.env" "$target_dir/.env.example"
-  pnpm install --frozen-lockfile --reporter=silent 2>&1
+  pnpm install --frozen-lockfile --reporter=silent 2>&1 || pnpm install --reporter=silent 2>&1
   local sqlite3_dir
   sqlite3_dir="$(find node_modules/.pnpm -path '*/better-sqlite3/binding.gyp' -print 2>/dev/null | head -1 | xargs dirname 2>/dev/null)"
   [ -n "$sqlite3_dir" ] && npx --yes node-gyp rebuild --directory="$sqlite3_dir" > /dev/null 2>&1 || true
@@ -1469,11 +1497,16 @@ run_installation() {
   deps_log="$(mktemp)"
   if ! pnpm install --frozen-lockfile --reporter=silent > "$deps_log" 2>&1; then
     stop_spinner
-    mascot error
-    error "pnpm install failed!"
-    tail -30 "$deps_log"
-    rm -f "$deps_log"
-    exit 1
+    warn "Lockfile mismatch — retrying with resolution..."
+    start_spinner
+    if ! pnpm install --reporter=silent > "$deps_log" 2>&1; then
+      stop_spinner
+      mascot error
+      error "pnpm install failed!"
+      tail -30 "$deps_log"
+      rm -f "$deps_log"
+      exit 1
+    fi
   fi
   rm -f "$deps_log"
   stop_spinner
