@@ -99,6 +99,26 @@ prompt_input() {
   return 0
 }
 
+prompt_dir() {
+  local question="$1"
+  local default="${2:-}"
+  if $UNATTENDED; then
+    REPLY="$default"
+    return 0
+  fi
+  if [ "$CURRENT_SCREEN" -gt 1 ] && [ "$CURRENT_SCREEN" -le "$MAX_COLLECTION_STEP" ]; then
+    hint "Type 'b' to go back"
+  fi
+  hint "Tab completion is available for directory paths"
+  read -e -i "$default" -p "  ${question}: " REPLY
+  if [[ "$REPLY" == "b" || "$REPLY" == "B" ]] && [ "$CURRENT_SCREEN" -gt 1 ] && [ "$CURRENT_SCREEN" -le "$MAX_COLLECTION_STEP" ]; then
+    NEXT_STEP=$((CURRENT_SCREEN - 1))
+    return 1
+  fi
+  REPLY="${REPLY:-$default}"
+  return 0
+}
+
 prompt_yn() {
   local question="$1"
   local default="${2:-n}"
@@ -718,7 +738,7 @@ screen_configure() {
     PROJECT_ROOT="$CLI_PROJECT_ROOT"
   else
     echo ""
-    if ! prompt_input "Project directory (where Claude works)" "$default_project"; then
+    if ! prompt_dir "Project directory (where Claude works)" "$default_project"; then
       NEXT_STEP=1; return
     fi
     PROJECT_ROOT="$REPLY"
