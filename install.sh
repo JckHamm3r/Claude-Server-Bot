@@ -60,6 +60,7 @@ VERBOSE=false
 CONFIG_FILE=""
 CLI_MODE="" CLI_BOT_NAME="" CLI_EMAIL="" CLI_DOMAIN="" CLI_HTTPS=""
 CLI_PROJECT_ROOT="" CLI_PORT="" CLI_INSTALL_DIR="" CLI_PASSWORD=""
+CLI_API_KEY=""
 
 # ─── Step navigation ───────────────────────────────────────────────────────
 CURRENT_SCREEN=1
@@ -554,6 +555,8 @@ parse_args() {
       --install-dir=*)  CLI_INSTALL_DIR="${1#*=}" ;;
       --password)       shift; CLI_PASSWORD="$1" ;;
       --password=*)     CLI_PASSWORD="${1#*=}" ;;
+      --api-key)        shift; CLI_API_KEY="$1" ;;
+      --api-key=*)      CLI_API_KEY="${1#*=}" ;;
       --help|-h)     show_help; exit 0 ;;
       *)             error "Unknown option: $1"; echo "  Run 'bash install.sh --help'"; exit 1 ;;
     esac
@@ -584,6 +587,7 @@ Options:
   --port <port>         Server port (default: 3000)
   --install-dir <dir>   Installation directory
   --password <pass>     Admin password (min 12 chars; auto-generated if omitted)
+  --api-key <key>       Anthropic API key (sk-ant-...) — enables SDK provider
   --verbose             Show full command output
   -h, --help            Show this help
 
@@ -608,6 +612,7 @@ load_config_file() {
       port)          [ -z "$CLI_PORT" ] && CLI_PORT="$value" ;;
       install_dir)   [ -z "$CLI_INSTALL_DIR" ] && CLI_INSTALL_DIR="$value" ;;
       password)      [ -z "$CLI_PASSWORD" ] && CLI_PASSWORD="$value" ;;
+      api_key)       [ -z "$CLI_API_KEY" ] && CLI_API_KEY="$value" ;;
     esac
   done < "$file"
 }
@@ -1114,6 +1119,12 @@ fs.writeFileSync(process.argv[12], JSON.stringify(config));
     exit 1
   fi
   info "Credentials verified"
+
+  # Write API key to .env if provided
+  if [ -n "${CLI_API_KEY:-}" ]; then
+    echo "ANTHROPIC_API_KEY=$CLI_API_KEY" >> "$INSTALL_DIR/.env"
+    info "Anthropic API key added to .env"
+  fi
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1488,57 +1499,75 @@ run_installation() {
     rm -rf "$backup_dir"
   fi
 
-  # Phase 3: Claude CLI
-  progress_bar 20 "Finding Claude CLI..."
+  # Phase 3: Claude CLI (skipped when API key is provided — SDK handles everything)
+  progress_bar 20 "Checking Claude provider..."
   echo ""
   CLAUDE_BIN=""
-  for c in "$HOME/.local/bin/claude" "$HOME/.npm-global/bin/claude" "/usr/local/bin/claude" "$(command -v claude 2>/dev/null || true)"; do
-    [ -n "$c" ] && [ -x "$c" ] && { CLAUDE_BIN="$c"; break; }
-  done
-  if [ -z "$CLAUDE_BIN" ]; then
-    if $UNATTENDED; then
-      sudo npm install -g @anthropic-ai/claude-code
-      CLAUDE_BIN="$(command -v claude 2>/dev/null || echo 'claude')"
-    else
-      warn "Claude CLI not found."
-      local install_cli_result
-      prompt_yn "Install Claude CLI now?" "y" && install_cli_result=0 || install_cli_result=$?
-      if [ "$install_cli_result" -eq 0 ]; then
-        start_spinner
-        sudo npm install -g @anthropic-ai/claude-code
-        stop_spinner
-        CLAUDE_BIN="$(command -v claude 2>/dev/null || echo 'claude')"
-        info "Claude CLI installed"
-      else
-        hint "Install later: sudo npm install -g @anthropic-ai/claude-code"
-        CLAUDE_BIN="claude"
-      fi
-    fi
+  if [ -n "$CLI_API_KEY" ]; then
+    info "Anthropic API key provided — using SDK provider (Claude CLI not required)"
+    CLAUDE_BIN="claude"
   else
-    info "Claude CLI found at $CLAUDE_BIN"
-    "$CLAUDE_BIN" --version &>/dev/null 2>&1 && info "Version: $("$CLAUDE_BIN" --version 2>/dev/null || echo 'unknown')"
-  fi
-
-  # Phase 4: Claude auth
-  progress_bar 28 "Checking Claude CLI auth..."
-  echo ""
-  if [ -n "$CLAUDE_BIN" ] && [ "$CLAUDE_BIN" != "claude" ] && [ -x "$CLAUDE_BIN" ]; then
-    if "$CLAUDE_BIN" --version &>/dev/null 2>&1; then
-      if ! "$CLAUDE_BIN" -p "reply with ok" --output-format json </dev/null &>/dev/null 2>&1; then
-        if ! $UNATTENDED; then
-          warn "Claude CLI not authenticated."
-          echo "  Open a new terminal and run: $CLAUDE_BIN"
-          while true; do
-            read -r -p "  Press Enter when done (or 'skip'): " auth_reply
-            [ "$auth_reply" = "skip" ] && { warn "Skipping — authenticate before using the bot."; break; }
-            "$CLAUDE_BIN" -p "reply with ok" --output-format json </dev/null &>/dev/null 2>&1 && { info "Authenticated!"; break; }
-            warn "Still not authenticated."
-          done
-        else
-          warn "Claude CLI may need authentication."
-        fi
+    for c in "$HOME/.local/bin/claude" "$HOME/.npm-global/bin/claude" "/usr/local/bin/claude" "$(command -v claude 2>/dev/null || true)"; do
+      [ -n "$c" ] && [ -x "$c" ] && { CLAUDE_BIN="$c"; break; }
+    done
+    if [ -z "$CLAUDE_BIN" ]; then
+      if $UNATTENDED; then
+        sudo npm install -g @anthropic-ai/claude-code
+        CLAUDE_BIN="$(command -v claude 2>/dev/null || echo 'claude')"
       else
-        info "Claude CLI authenticated"
+        warn "Claude CLI not found."
+        echo ""
+        echo -e "  ${BOLD}You have two options:${NC}"
+        echo "  1) Enter an Anthropic API key (recommended — no CLI needed)"
+        echo "  2) Install the Claude CLI"
+        echo ""
+        local provider_choice
+        read -r -p "  Enter API key, or press Enter to install CLI: " provider_choice
+        if [ -n "$provider_choice" ] && [[ "$provider_choice" == sk-ant-* ]]; then
+          CLI_API_KEY="$provider_choice"
+          info "API key accepted — using SDK provider"
+          CLAUDE_BIN="claude"
+        else
+          local install_cli_result
+          prompt_yn "Install Claude CLI now?" "y" && install_cli_result=0 || install_cli_result=$?
+          if [ "$install_cli_result" -eq 0 ]; then
+            start_spinner
+            sudo npm install -g @anthropic-ai/claude-code
+            stop_spinner
+            CLAUDE_BIN="$(command -v claude 2>/dev/null || echo 'claude')"
+            info "Claude CLI installed"
+          else
+            hint "Install later: sudo npm install -g @anthropic-ai/claude-code"
+            CLAUDE_BIN="claude"
+          fi
+        fi
+      fi
+    else
+      info "Claude CLI found at $CLAUDE_BIN"
+      "$CLAUDE_BIN" --version &>/dev/null 2>&1 && info "Version: $("$CLAUDE_BIN" --version 2>/dev/null || echo 'unknown')"
+    fi
+
+    # Phase 4: Claude auth (skip if using API key)
+    progress_bar 28 "Checking Claude CLI auth..."
+    echo ""
+    if [ -n "$CLAUDE_BIN" ] && [ "$CLAUDE_BIN" != "claude" ] && [ -x "$CLAUDE_BIN" ]; then
+      if "$CLAUDE_BIN" --version &>/dev/null 2>&1; then
+        if ! "$CLAUDE_BIN" -p "reply with ok" --output-format json </dev/null &>/dev/null 2>&1; then
+          if ! $UNATTENDED; then
+            warn "Claude CLI not authenticated."
+            echo "  Open a new terminal and run: $CLAUDE_BIN"
+            while true; do
+              read -r -p "  Press Enter when done (or 'skip'): " auth_reply
+              [ "$auth_reply" = "skip" ] && { warn "Skipping — authenticate before using the bot."; break; }
+              "$CLAUDE_BIN" -p "reply with ok" --output-format json </dev/null &>/dev/null 2>&1 && { info "Authenticated!"; break; }
+              warn "Still not authenticated."
+            done
+          else
+            warn "Claude CLI may need authentication."
+          fi
+        else
+          info "Claude CLI authenticated"
+        fi
       fi
     fi
   fi
