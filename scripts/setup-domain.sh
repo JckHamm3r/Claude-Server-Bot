@@ -70,14 +70,44 @@ if [ -n "$PATH_PREFIX" ] && [ -n "$SLUG" ]; then
   LOCATION_PATH="/${PATH_PREFIX}/${SLUG}/"
 fi
 
+# Detect whether upstream Node.js server uses TLS (self-signed certs)
+UPSTREAM_SCHEME="http"
+PROXY_SSL_EXTRA=""
+if [ -n "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/.env" ]; then
+  if grep -q '^SSL_CERT_PATH=' "$INSTALL_DIR/.env" && grep -q '^SSL_KEY_PATH=' "$INSTALL_DIR/.env"; then
+    UPSTREAM_SCHEME="https"
+    PROXY_SSL_EXTRA=$'\n        proxy_ssl_verify off;'
+  fi
+fi
+
 # Write nginx config
+# API / socket proxy block MUST come before the static-asset regex block.
+# nginx evaluates regex locations in definition order; if the static-file
+# rule appeared first it would match paths like /api/foo.js and serve a 404.
 cat > "$nginx_conf" <<NGINX
 server {
     listen 80;
     server_name $DOMAIN;
 
+    location ~ ^${LOCATION_PATH}(api|socket\.io|_next)/ {
+        proxy_pass ${UPSTREAM_SCHEME}://127.0.0.1:$PORT;${PROXY_SSL_EXTRA}
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_connect_timeout 10;
+        proxy_send_timeout 86400;
+        proxy_read_timeout 86400;
+        proxy_buffering off;
+        proxy_cache off;
+        client_max_body_size 10m;
+    }
+
     location $LOCATION_PATH {
-        proxy_pass http://127.0.0.1:$PORT;
+        proxy_pass ${UPSTREAM_SCHEME}://127.0.0.1:$PORT;${PROXY_SSL_EXTRA}
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";

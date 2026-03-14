@@ -1147,12 +1147,42 @@ setup_nginx() {
   else
     nginx_conf="/etc/nginx/conf.d/claude-bot.conf"
   fi
+  # Detect whether upstream Node.js server uses TLS (self-signed certs)
+  local upstream_scheme="http" proxy_ssl_extra=""
+  if [ -f "$INSTALL_DIR/.env" ]; then
+    if grep -q '^SSL_CERT_PATH=' "$INSTALL_DIR/.env" && grep -q '^SSL_KEY_PATH=' "$INSTALL_DIR/.env"; then
+      upstream_scheme="https"
+      proxy_ssl_extra=$'\n        proxy_ssl_verify off;'
+    fi
+  fi
+
+  # API / socket proxy block MUST come before any static-asset regex block.
+  # nginx evaluates regex locations in definition order; if a static-file
+  # rule appeared first it would match paths like /api/foo.js and 404.
   sudo tee "$nginx_conf" > /dev/null <<NGINX
 server {
     listen 80;
     server_name $DOMAIN;
+
+    location ~ ^/${BOT_PATH_PREFIX}/${SLUG}/(api|socket\.io|_next)/ {
+        proxy_pass ${upstream_scheme}://127.0.0.1:$PORT;${proxy_ssl_extra}
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_connect_timeout 10;
+        proxy_send_timeout 86400;
+        proxy_read_timeout 86400;
+        proxy_buffering off;
+        proxy_cache off;
+        client_max_body_size 10m;
+    }
+
     location /$BOT_PATH_PREFIX/$SLUG/ {
-        proxy_pass http://127.0.0.1:$PORT;
+        proxy_pass ${upstream_scheme}://127.0.0.1:$PORT;${proxy_ssl_extra}
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
