@@ -46,11 +46,11 @@ function CopyButton({ text, size = "sm" }: { text: string; size?: "sm" | "xs" })
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       }}
-      className="p-1 rounded text-bot-muted hover:text-bot-text hover:bg-bot-elevated transition-colors"
+      className="p-1.5 rounded-lg text-bot-muted hover:text-bot-text hover:bg-bot-elevated/60 transition-all duration-200"
       title={copied ? "Copied!" : "Copy"}
       aria-label={copied ? "Copied" : "Copy"}
     >
-      {copied ? <Check className={iconClass} /> : <Copy className={iconClass} />}
+      {copied ? <Check className={`${iconClass} text-bot-green`} /> : <Copy className={iconClass} />}
     </button>
   );
 }
@@ -101,19 +101,26 @@ const sharedMarkdownComponents: Components = {
     const codeText = String(children).replace(/\n$/, "");
     if (match) {
       return (
-        <div className="relative group/code my-2 rounded-lg overflow-hidden border border-bot-border/40">
-          <div className="flex items-center justify-between px-3 py-1.5 bg-[#2d2d2d] border-b border-[#404040]">
-            <span className="text-[10px] font-mono text-gray-400 uppercase tracking-wide">{match[1]}</span>
+        <div className="relative group/code my-3 rounded-xl overflow-hidden border border-bot-border/30 shadow-elevated">
+          <div className="flex items-center justify-between px-4 py-2 bg-bot-elevated/80 border-b border-bot-border/30">
+            <div className="flex items-center gap-2">
+              <div className="flex gap-1">
+                <span className="h-2.5 w-2.5 rounded-full bg-bot-red/40" />
+                <span className="h-2.5 w-2.5 rounded-full bg-bot-amber/40" />
+                <span className="h-2.5 w-2.5 rounded-full bg-bot-green/40" />
+              </div>
+              <span className="text-[10px] font-mono text-bot-muted uppercase tracking-wider">{match[1]}</span>
+            </div>
             <CopyButton text={codeText} />
           </div>
           <SyntaxHighlighter
             style={vscDarkPlus}
             language={match[1]}
             PreTag="div"
-            className="!rounded-none !rounded-b-lg !mt-0"
-            customStyle={{ fontSize: "0.75rem", lineHeight: "1.25rem", margin: 0 }}
+            className="!rounded-none !rounded-b-xl !mt-0"
+            customStyle={{ fontSize: "0.75rem", lineHeight: "1.35rem", margin: 0, background: "rgb(var(--bot-bg))" }}
             showLineNumbers={codeText.split("\n").length > 5}
-            lineNumberStyle={{ color: "#555", fontSize: "11px", paddingRight: "1em", userSelect: "none" }}
+            lineNumberStyle={{ color: "rgb(var(--bot-muted) / 0.3)", fontSize: "11px", paddingRight: "1em", userSelect: "none" }}
           >
             {codeText}
           </SyntaxHighlighter>
@@ -122,7 +129,7 @@ const sharedMarkdownComponents: Components = {
     }
     return (
       <code
-        className="rounded bg-bot-surface px-1.5 py-0.5 font-mono text-caption text-bot-accent"
+        className="rounded-md bg-bot-bg/60 px-1.5 py-0.5 font-mono text-caption text-bot-accent border border-bot-border/20"
         {...props}
       >
         {children}
@@ -142,7 +149,7 @@ const sharedMarkdownComponents: Components = {
     return <li className="leading-relaxed">{children}</li>;
   },
   h1({ children }) {
-    return <h1 className="text-subtitle font-semibold mb-2 mt-3 first:mt-0">{children}</h1>;
+    return <h1 className="text-subtitle font-bold mb-2 mt-3 first:mt-0">{children}</h1>;
   },
   h2({ children }) {
     return <h2 className="text-body font-semibold mb-1.5 mt-3 first:mt-0">{children}</h2>;
@@ -152,29 +159,29 @@ const sharedMarkdownComponents: Components = {
   },
   blockquote({ children }) {
     return (
-      <blockquote className="border-l-2 border-bot-border pl-3 my-2 text-bot-muted">
+      <blockquote className="border-l-2 border-bot-accent/40 pl-3 my-2 text-bot-muted italic">
         {children}
       </blockquote>
     );
   },
   table({ children }) {
     return (
-      <div className="my-2 overflow-x-auto rounded-lg border border-bot-border">
+      <div className="my-3 overflow-x-auto rounded-xl border border-bot-border/30 shadow-elevated">
         <table className="min-w-full text-caption">{children}</table>
       </div>
     );
   },
   thead({ children }) {
-    return <thead className="bg-bot-surface">{children}</thead>;
+    return <thead className="bg-bot-elevated/60">{children}</thead>;
   },
   tbody({ children }) {
-    return <tbody className="divide-y divide-bot-border/40">{children}</tbody>;
+    return <tbody className="divide-y divide-bot-border/20">{children}</tbody>;
   },
   tr({ children }) {
-    return <tr className="hover:bg-bot-surface/50 transition-colors">{children}</tr>;
+    return <tr className="hover:bg-bot-elevated/30 transition-colors">{children}</tr>;
   },
   th({ children }) {
-    return <th className="px-3 py-2 text-left font-semibold text-bot-text border-b border-bot-border">{children}</th>;
+    return <th className="px-3 py-2 text-left font-semibold text-bot-text border-b border-bot-border/30">{children}</th>;
   },
   td({ children }) {
     return <td className="px-3 py-2 text-bot-text">{children}</td>;
@@ -194,7 +201,7 @@ const sharedMarkdownComponents: Components = {
     );
   },
   hr() {
-    return <hr className="my-3 border-bot-border/40" />;
+    return <hr className="my-3 border-bot-border/20" />;
   },
 };
 
@@ -208,7 +215,7 @@ function TokenBadge({ metadata }: { metadata?: Record<string, unknown> }) {
   const cost = usage.cost_usd ?? 0;
   return (
     <span
-      className="text-[10px] font-mono text-bot-muted opacity-50"
+      className="text-[10px] font-mono text-bot-muted/50"
       title={`Input: ${inp} | Output: ${out}${cost > 0 ? ` | $${cost.toFixed(4)}` : ""}`}
     >
       {inp.toLocaleString()} in / {out.toLocaleString()} out
@@ -241,12 +248,10 @@ export const MessageItem = memo(function MessageItem({
   if (message.parsed) {
     const p = message.parsed;
 
-    // Progress messages are handled by the ActivityStrip — skip rendering here
     if (p.type === "progress") {
       return null;
     }
 
-    // Usage events are handled internally — skip rendering
     if (p.type === "usage") {
       return null;
     }
@@ -254,14 +259,14 @@ export const MessageItem = memo(function MessageItem({
     if (p.type === "done") {
       return (
         <div className="flex items-center gap-3 py-3 my-1">
-          <div className="h-px flex-1 bg-bot-border/40" />
+          <div className="h-px flex-1 bg-gradient-to-r from-transparent via-bot-border/40 to-transparent" />
           <span className="flex items-center gap-1.5 text-[11px] font-mono text-bot-muted">
             <CheckCircle2 className="h-3.5 w-3.5 text-bot-green" />
             <span className="opacity-70">Task complete</span>
-            <span className="opacity-40">·</span>
-            <span className="opacity-40">{new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+            <span className="opacity-30">·</span>
+            <span className="opacity-30">{new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
           </span>
-          <div className="h-px flex-1 bg-bot-border/40" />
+          <div className="h-px flex-1 bg-gradient-to-r from-transparent via-bot-border/40 to-transparent" />
         </div>
       );
     }
@@ -300,7 +305,7 @@ export const MessageItem = memo(function MessageItem({
 
     if (p.type === "security_warn") {
       return (
-        <div className="rounded-xl border border-bot-red/40 bg-bot-red/10 px-4 py-3 text-body text-bot-red my-1 flex items-start gap-2">
+        <div className="rounded-xl border border-bot-red/30 bg-bot-red/5 px-4 py-3 text-body text-bot-red my-1 flex items-start gap-2 shadow-elevated">
           <span className="shrink-0 text-lg">🛡</span>
           <div>
             <span className="font-semibold">Security:</span> {p.message}
@@ -349,7 +354,7 @@ export const MessageItem = memo(function MessageItem({
 
     if (p.type === "error") {
       return (
-        <div className="rounded-xl border border-bot-red/40 bg-bot-red/10 px-4 py-3 text-body text-bot-red my-1">
+        <div className="rounded-xl border border-bot-red/30 bg-bot-red/5 px-4 py-3 text-body text-bot-red my-1 shadow-elevated">
           <div className="flex items-center justify-between gap-3">
             <span>
               {p.message}
@@ -357,7 +362,7 @@ export const MessageItem = memo(function MessageItem({
             {p.retryable && onRetry && !isRunning && (
               <button
                 onClick={onRetry}
-                className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-bot-red/30 bg-bot-red/10 px-3 py-1.5 text-caption font-medium text-bot-red hover:bg-bot-red/20 transition-colors"
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-xl border border-bot-red/30 bg-bot-red/10 px-3 py-1.5 text-caption font-medium text-bot-red hover:bg-bot-red/20 transition-all duration-200"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 Retry
@@ -375,7 +380,6 @@ export const MessageItem = memo(function MessageItem({
   const canEdit = isUser && onEdit && !isRunning;
   const canDelete = onDelete && !isRunning;
 
-  // Render attachment badges for messages with attachments
   const attachmentIds = (message.metadata?.attachments as string[] | undefined) ?? [];
   const imageAttachments = (message.metadata?.imageAttachments as { id: string; name: string; mime_type: string }[] | undefined) ?? [];
 
@@ -387,7 +391,7 @@ export const MessageItem = memo(function MessageItem({
             <textarea
               value={editContent}
               onChange={(e) => setEditContent(e.target.value)}
-              className="w-full rounded-2xl rounded-tr-sm bg-bot-accent/20 px-4 py-2.5 text-body text-bot-text outline-none border border-bot-accent/40 resize-none"
+              className="w-full rounded-2xl rounded-tr-sm bg-bot-accent/10 px-4 py-3 text-body text-bot-text outline-none border border-bot-accent/30 focus:border-bot-accent focus:shadow-glow-sm resize-none transition-all duration-200"
               rows={3}
               autoFocus
               onKeyDown={(e) => {
@@ -400,12 +404,12 @@ export const MessageItem = memo(function MessageItem({
                 if (e.key === "Escape") setIsEditing(false);
               }}
             />
-            <div className="flex justify-end gap-2 mt-1">
+            <div className="flex justify-end gap-2 mt-1.5">
               <button
                 onClick={() => setIsEditing(false)}
-                className="rounded-md px-2 py-1 text-caption text-bot-muted hover:bg-bot-elevated transition-colors"
+                className="rounded-lg px-3 py-1.5 text-caption text-bot-muted hover:bg-bot-elevated/60 transition-all duration-200"
               >
-                <X className="h-3.5 w-3.5" />
+                Cancel
               </button>
               <button
                 onClick={() => {
@@ -414,25 +418,23 @@ export const MessageItem = memo(function MessageItem({
                     setIsEditing(false);
                   }
                 }}
-                className="rounded-md bg-bot-accent px-3 py-1 text-caption font-medium text-white hover:bg-bot-accent/80 transition-colors"
+                className="rounded-lg gradient-accent px-3 py-1.5 text-caption font-medium text-white shadow-glow-sm hover:shadow-glow-md transition-all duration-200"
               >
                 Save & Resend
               </button>
             </div>
           </div>
-          <div className="mt-1 h-7 w-7 shrink-0 rounded-full bg-bot-elevated flex items-center justify-center">
-            <span className="text-caption font-semibold text-bot-muted">U</span>
+          <div className="mt-1 h-8 w-8 shrink-0 rounded-full bg-bot-accent/20 flex items-center justify-center border border-bot-accent/30">
+            <span className="text-caption font-semibold text-bot-accent">U</span>
           </div>
         </div>
       );
     }
 
     return (
-      <div
-        className="flex justify-end gap-2.5 py-1 group"
-      >
+      <div className="flex justify-end gap-2.5 py-1 group">
         {!isRunning && (
-          <div className="flex items-center gap-0.5 self-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+          <div className="flex items-center gap-0.5 self-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-all duration-200 translate-x-2 group-hover:translate-x-0">
             <CopyButton text={content} size="xs" />
             {canEdit && (
               <button
@@ -440,7 +442,7 @@ export const MessageItem = memo(function MessageItem({
                   setEditContent(content);
                   setIsEditing(true);
                 }}
-                className="rounded p-1 text-bot-muted hover:text-bot-text hover:bg-bot-elevated transition-colors"
+                className="rounded-lg p-1.5 text-bot-muted hover:text-bot-text hover:bg-bot-elevated/60 transition-all duration-200"
                 title="Edit message"
                 aria-label="Edit message"
               >
@@ -450,7 +452,7 @@ export const MessageItem = memo(function MessageItem({
             {canDelete && (
               <button
                 onClick={() => onDelete?.(message.id)}
-                className="rounded p-1 text-bot-muted hover:text-bot-red hover:bg-bot-red/10 transition-colors"
+                className="rounded-lg p-1.5 text-bot-muted hover:text-bot-red hover:bg-bot-red/10 transition-all duration-200"
                 title="Delete message"
                 aria-label="Delete message"
               >
@@ -460,7 +462,7 @@ export const MessageItem = memo(function MessageItem({
           </div>
         )}
         <div className="max-w-[75%]">
-          <div className="rounded-2xl rounded-tr-sm bg-bot-accent/20 px-4 py-2.5 text-body text-bot-text">
+          <div className="rounded-2xl rounded-tr-sm bg-bot-accent/10 border border-bot-accent/15 px-4 py-3 text-body text-bot-text shadow-elevated">
             {imageAttachments.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-2">
                 {imageAttachments.map((img) => (
@@ -469,7 +471,7 @@ export const MessageItem = memo(function MessageItem({
                     href={apiUrl(`/api/claude-code/upload/${img.id}`)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="block rounded-lg overflow-hidden border border-bot-border hover:border-bot-accent transition-colors"
+                    className="block rounded-xl overflow-hidden border border-bot-border/30 hover:border-bot-accent/40 hover:shadow-glow-sm transition-all duration-200"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
@@ -489,7 +491,7 @@ export const MessageItem = memo(function MessageItem({
                     href={apiUrl(`/api/claude-code/upload/${id}`)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 rounded bg-bot-accent/10 px-1.5 py-0.5 text-[10px] font-mono text-bot-accent hover:bg-bot-accent/20 transition-colors"
+                    className="inline-flex items-center gap-1 rounded-lg bg-bot-accent/10 px-2 py-1 text-[10px] font-mono text-bot-accent hover:bg-bot-accent/20 transition-all duration-200"
                   >
                     <FileText className="h-2.5 w-2.5" />
                     attachment
@@ -503,57 +505,53 @@ export const MessageItem = memo(function MessageItem({
               </ReactMarkdown>
             </div>
           </div>
-          <div className="mt-0.5 text-right opacity-0 group-hover:opacity-100 transition-opacity">
-            <span className="text-[10px] text-bot-muted">
+          <div className="mt-0.5 text-right opacity-0 group-hover:opacity-100 transition-all duration-200">
+            <span className="text-[10px] text-bot-muted/60">
               {formatTimestamp(message.timestamp)}
             </span>
           </div>
         </div>
-        <div className="mt-1 h-7 w-7 shrink-0 rounded-full bg-bot-elevated flex items-center justify-center">
-          <span className="text-caption font-semibold text-bot-muted">U</span>
+        <div className="mt-1 h-8 w-8 shrink-0 rounded-full bg-bot-accent/20 flex items-center justify-center border border-bot-accent/30">
+          <span className="text-caption font-semibold text-bot-accent">U</span>
         </div>
       </div>
     );
   }
 
-  // Claude message
   return (
-    <div
-      className="flex gap-2.5 py-1 group"
-    >
-      <div className="mt-1 h-7 w-7 shrink-0 rounded-full overflow-hidden">
-        <Image unoptimized src={getAvatarPath((isLatest && isRunning) ? (avatarState ?? "waiting") : "waiting")} alt="Claude" width={28} height={28} className="object-cover" />
+    <div className="flex gap-2.5 py-1 group">
+      <div className="mt-1 h-8 w-8 shrink-0 rounded-full overflow-hidden ring-1 ring-bot-border/30">
+        <Image unoptimized src={getAvatarPath((isLatest && isRunning) ? (avatarState ?? "waiting") : "waiting")} alt="Claude" width={32} height={32} className="object-cover" />
       </div>
       <div className="min-w-0 flex-1 max-w-[90%]">
-        <div className="rounded-2xl rounded-bl-sm bg-bot-elevated px-4 py-2.5 text-body text-bot-text">
+        <div className="rounded-2xl rounded-bl-sm glass px-4 py-3 text-body text-bot-text shadow-elevated">
           <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={sharedMarkdownComponents}>
             {displayContent}
           </ReactMarkdown>
           {message.parsed?.type === "text" && (
-            <div className="mt-1 flex items-center justify-between">
+            <div className="mt-2 flex items-center justify-between pt-1.5 border-t border-bot-border/15">
               <TokenBadge metadata={message.metadata} />
-              <span className="text-[10px] text-bot-muted opacity-40">
+              <span className="text-[10px] text-bot-muted/40">
                 {new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
               </span>
             </div>
           )}
         </div>
-        {/* Hover timestamp for streaming/non-final messages */}
         {message.parsed?.type !== "text" && (
-          <div className="mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-            <span className="text-[10px] text-bot-muted">
+          <div className="mt-0.5 opacity-0 group-hover:opacity-100 transition-all duration-200">
+            <span className="text-[10px] text-bot-muted/60">
               {formatTimestamp(message.timestamp)}
             </span>
           </div>
         )}
       </div>
       {!isRunning && (
-        <div className="flex flex-col items-center gap-0.5 self-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+        <div className="flex flex-col items-center gap-0.5 self-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-all duration-200 -translate-x-2 group-hover:translate-x-0">
           <CopyButton text={content} size="xs" />
           {canDelete && (
             <button
               onClick={() => onDelete?.(message.id)}
-              className="rounded p-1 text-bot-muted hover:text-bot-red hover:bg-bot-red/10 transition-colors"
+              className="rounded-lg p-1.5 text-bot-muted hover:text-bot-red hover:bg-bot-red/10 transition-all duration-200"
               title="Delete message"
               aria-label="Delete message"
             >

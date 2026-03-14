@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { X, AlertTriangle } from "lucide-react";
+import { X, AlertTriangle, ChevronRight } from "lucide-react";
 import { ModelSelector } from "./model-selector";
 import { DEFAULT_MODEL } from "@/lib/models";
 import { getSocket } from "@/lib/socket";
 import { cn } from "@/lib/utils";
+import { motion, AnimatePresence } from "framer-motion";
 
 interface PersonalityOption {
   value: string;
@@ -99,22 +100,29 @@ export function NewSessionDialog({ onClose, onCreate }: NewSessionDialogProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-md rounded-lg border border-bot-border bg-bot-surface p-6 shadow-xl">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-subtitle font-semibold text-bot-text">New Session</h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 10 }}
+        transition={{ duration: 0.2, ease: "easeOut" }}
+        className="w-full max-w-md glass-heavy rounded-2xl p-6 shadow-float"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-5 flex items-center justify-between">
+          <h2 className="text-subtitle font-bold text-bot-text">New Session</h2>
           <button
             onClick={onClose}
-            className="rounded-md p-1 text-bot-muted hover:bg-bot-elevated transition-colors"
+            className="rounded-lg p-1.5 text-bot-muted hover:bg-bot-elevated/50 hover:text-bot-text transition-all duration-200"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-5">
           {templates.length > 0 && (
             <div>
-              <label className="mb-1.5 block text-caption font-medium text-bot-muted">
+              <label className="mb-2 block text-caption font-medium text-bot-muted">
                 Template
               </label>
               <div className="flex flex-wrap gap-2">
@@ -127,10 +135,10 @@ export function NewSessionDialog({ onClose, onCreate }: NewSessionDialogProps) {
                     setProviderType("subprocess");
                   }}
                   className={cn(
-                    "rounded-lg border px-3 py-2 text-caption font-medium transition-colors",
+                    "rounded-xl border px-3.5 py-2 text-caption font-medium transition-all duration-200",
                     !selectedTemplate
-                      ? "border-bot-accent bg-bot-accent/10 text-bot-accent"
-                      : "border-bot-border bg-bot-elevated text-bot-muted hover:border-bot-accent/50",
+                      ? "border-bot-accent/50 bg-bot-accent/10 text-bot-accent shadow-glow-sm"
+                      : "border-bot-border/40 bg-bot-elevated/40 text-bot-muted hover:border-bot-accent/30",
                   )}
                 >
                   Blank
@@ -141,10 +149,10 @@ export function NewSessionDialog({ onClose, onCreate }: NewSessionDialogProps) {
                     type="button"
                     onClick={() => handleSelectTemplate(t)}
                     className={cn(
-                      "rounded-lg border px-3 py-2 text-caption font-medium transition-colors",
+                      "rounded-xl border px-3.5 py-2 text-caption font-medium transition-all duration-200",
                       selectedTemplate === t.id
-                        ? "border-bot-accent bg-bot-accent/10 text-bot-accent"
-                        : "border-bot-border bg-bot-elevated text-bot-muted hover:border-bot-accent/50",
+                        ? "border-bot-accent/50 bg-bot-accent/10 text-bot-accent shadow-glow-sm"
+                        : "border-bot-border/40 bg-bot-elevated/40 text-bot-muted hover:border-bot-accent/30",
                     )}
                     title={t.description ?? undefined}
                   >
@@ -157,7 +165,7 @@ export function NewSessionDialog({ onClose, onCreate }: NewSessionDialogProps) {
           )}
 
           <div>
-            <label className="mb-1.5 block text-caption font-medium text-bot-muted">
+            <label className="mb-2 block text-caption font-medium text-bot-muted">
               Session name (optional)
             </label>
             <input
@@ -165,19 +173,19 @@ export function NewSessionDialog({ onClose, onCreate }: NewSessionDialogProps) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Fix fleet data bug"
-              className="w-full rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text placeholder-bot-muted outline-none focus:border-bot-accent transition-colors"
+              className="w-full rounded-xl border border-bot-border/40 bg-bot-elevated/40 px-4 py-2.5 text-body text-bot-text placeholder:text-bot-muted/50 outline-none focus:border-bot-accent/50 focus:shadow-glow-sm transition-all duration-200"
             />
           </div>
 
           <div>
-            <label className="mb-1.5 block text-caption font-medium text-bot-muted">
+            <label className="mb-2 block text-caption font-medium text-bot-muted">
               Model
             </label>
             <ModelSelector value={model} onChange={setModel} />
           </div>
 
           <div>
-            <label className="mb-1.5 block text-caption font-medium text-bot-muted">
+            <label className="mb-2 block text-caption font-medium text-bot-muted">
               Provider
             </label>
             <div className="flex gap-2">
@@ -185,10 +193,10 @@ export function NewSessionDialog({ onClose, onCreate }: NewSessionDialogProps) {
                 type="button"
                 onClick={() => setProviderType("subprocess")}
                 className={cn(
-                  "rounded-md border px-3 py-1.5 text-caption font-medium transition-colors",
+                  "rounded-xl border px-3.5 py-2 text-caption font-medium transition-all duration-200",
                   providerType === "subprocess"
-                    ? "border-bot-accent bg-bot-accent/10 text-bot-accent"
-                    : "border-bot-border bg-bot-elevated text-bot-muted hover:border-bot-accent/50",
+                    ? "border-bot-accent/50 bg-bot-accent/10 text-bot-accent shadow-glow-sm"
+                    : "border-bot-border/40 bg-bot-elevated/40 text-bot-muted hover:border-bot-accent/30",
                 )}
               >
                 CLI
@@ -198,10 +206,10 @@ export function NewSessionDialog({ onClose, onCreate }: NewSessionDialogProps) {
                 onClick={() => sdkAvailable && setProviderType("sdk")}
                 disabled={!sdkAvailable}
                 className={cn(
-                  "rounded-md border px-3 py-1.5 text-caption font-medium transition-colors",
+                  "rounded-xl border px-3.5 py-2 text-caption font-medium transition-all duration-200",
                   providerType === "sdk"
-                    ? "border-bot-accent bg-bot-accent/10 text-bot-accent"
-                    : "border-bot-border bg-bot-elevated text-bot-muted hover:border-bot-accent/50",
+                    ? "border-bot-accent/50 bg-bot-accent/10 text-bot-accent shadow-glow-sm"
+                    : "border-bot-border/40 bg-bot-elevated/40 text-bot-muted hover:border-bot-accent/30",
                   !sdkAvailable && "opacity-40 cursor-not-allowed",
                 )}
                 title={!sdkAvailable ? "Add API key in Settings to enable SDK" : "Use Anthropic SDK directly"}
@@ -216,44 +224,54 @@ export function NewSessionDialog({ onClose, onCreate }: NewSessionDialogProps) {
             <button
               type="button"
               onClick={() => setShowPersonality((p) => !p)}
-              className="mb-1.5 flex items-center gap-1.5 text-caption font-medium text-bot-muted hover:text-bot-text transition-colors"
+              className="mb-2 flex items-center gap-1.5 text-caption font-medium text-bot-muted hover:text-bot-text transition-all duration-200"
             >
-              <span className={cn("transition-transform text-[10px]", showPersonality ? "rotate-90" : "")}>&#9654;</span>
+              <ChevronRight className={cn("h-3 w-3 transition-transform duration-200", showPersonality && "rotate-90")} />
               Personality
-              <span className="rounded bg-bot-elevated px-1.5 py-px text-[10px] font-normal text-bot-accent">
+              <span className="rounded-lg bg-bot-accent/10 px-2 py-0.5 text-[10px] font-semibold text-bot-accent">
                 {PERSONALITY_OPTIONS.find((o) => o.value === personality)?.label ?? "Professional"}
               </span>
             </button>
-            {showPersonality && (
-              <div className="space-y-2">
-                <div className="grid grid-cols-2 gap-1.5">
-                  {PERSONALITY_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => setPersonality(opt.value)}
-                      className={cn(
-                        "flex flex-col items-start rounded-md border px-3 py-2 text-left transition-colors",
-                        personality === opt.value
-                          ? "border-bot-accent bg-bot-accent/10 text-bot-accent"
-                          : "border-bot-border bg-bot-elevated text-bot-text hover:bg-bot-surface",
-                      )}
-                    >
-                      <span className="font-medium text-caption">{opt.label}</span>
-                      <span className="text-[10px] text-bot-muted">{opt.description}</span>
-                    </button>
-                  ))}
-                </div>
-                {personality === "custom" && (
-                  <textarea
-                    className="w-full rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-caption text-bot-text outline-none focus:border-bot-accent resize-y min-h-[80px]"
-                    value={customPrompt}
-                    onChange={(e) => setCustomPrompt(e.target.value)}
-                    placeholder="Enter a custom system prompt prefix..."
-                  />
-                )}
-              </div>
-            )}
+            <AnimatePresence>
+              {showPersonality && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="overflow-hidden"
+                >
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      {PERSONALITY_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setPersonality(opt.value)}
+                          className={cn(
+                            "flex flex-col items-start rounded-xl border px-3 py-2.5 text-left transition-all duration-200",
+                            personality === opt.value
+                              ? "border-bot-accent/50 bg-bot-accent/10 text-bot-accent shadow-glow-sm"
+                              : "border-bot-border/30 bg-bot-elevated/30 text-bot-text hover:bg-bot-elevated/50 hover:border-bot-accent/20",
+                          )}
+                        >
+                          <span className="font-medium text-caption">{opt.label}</span>
+                          <span className="text-[10px] text-bot-muted/70">{opt.description}</span>
+                        </button>
+                      ))}
+                    </div>
+                    {personality === "custom" && (
+                      <textarea
+                        className="w-full rounded-xl border border-bot-border/40 bg-bot-elevated/40 px-4 py-2.5 text-caption text-bot-text outline-none focus:border-bot-accent/50 focus:shadow-glow-sm resize-y min-h-[80px] transition-all duration-200"
+                        value={customPrompt}
+                        onChange={(e) => setCustomPrompt(e.target.value)}
+                        placeholder="Enter a custom system prompt prefix..."
+                      />
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           <div>
@@ -268,34 +286,44 @@ export function NewSessionDialog({ onClose, onCreate }: NewSessionDialogProps) {
                 Skip permissions (--dangerously-skip-permissions)
               </span>
             </label>
-            {skipPermissions && (
-              <div className="mt-2 flex items-start gap-2 rounded-md border border-bot-red/40 bg-bot-red/10 px-3 py-2 text-caption text-bot-red">
-                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <span>
-                  Claude will be able to execute any command, read/write any file, and take
-                  irreversible actions without confirmation. Use only for trusted tasks.
-                </span>
-              </div>
-            )}
+            <AnimatePresence>
+              {skipPermissions && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="overflow-hidden"
+                >
+                  <div className="mt-2 flex items-start gap-2 rounded-xl border border-bot-red/30 bg-bot-red/5 px-4 py-3 text-caption text-bot-red">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>
+                      Claude will be able to execute any command, read/write any file, and take
+                      irreversible actions without confirmation. Use only for trusted tasks.
+                    </span>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="flex justify-end gap-3 pt-1">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md border border-bot-border px-4 py-2 text-body text-bot-muted hover:bg-bot-elevated transition-colors"
+              className="rounded-xl border border-bot-border/40 px-4 py-2.5 text-body text-bot-muted hover:bg-bot-elevated/50 hover:text-bot-text transition-all duration-200"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="rounded-md bg-bot-accent px-4 py-2 text-body font-medium text-white hover:bg-bot-accent/80 transition-colors"
+              className="rounded-xl gradient-accent px-5 py-2.5 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] transition-all duration-200"
             >
               Create
             </button>
           </div>
         </form>
-      </div>
+      </motion.div>
     </div>
   );
 }

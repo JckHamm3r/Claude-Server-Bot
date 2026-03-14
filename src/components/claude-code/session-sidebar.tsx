@@ -35,7 +35,6 @@ export function SessionSidebar({
   const inputRef = useRef<HTMLInputElement>(null);
   const tagInputRef = useRef<HTMLInputElement>(null);
 
-  // Collect all unique tags across all sessions
   const allTags = Array.from(
     new Set(sessions.flatMap((s) => s.tags ?? [])),
   ).sort();
@@ -97,31 +96,34 @@ export function SessionSidebar({
   }
 
   return (
-    <div className="flex h-full w-64 shrink-0 flex-col border-r border-bot-border bg-bot-surface">
-      <div className="border-b border-bot-border p-3">
+    <div className="flex h-full w-64 shrink-0 flex-col border-r border-bot-border/40 bg-bot-surface/80 backdrop-blur-sm">
+      <div className="p-3">
         <button
           onClick={onNew}
-          className="flex w-full items-center justify-center gap-2 rounded-md bg-bot-accent px-3 py-2 text-body font-medium text-white hover:bg-bot-accent/80 transition-colors"
+          className="flex w-full items-center justify-center gap-2 rounded-xl gradient-accent px-3 py-2.5 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] transition-all duration-200"
         >
           <Plus className="h-4 w-4" />
           New Session
         </button>
       </div>
 
-      <div className="border-b border-bot-border px-3 py-2 space-y-2">
-        {/* Search input */}
-        <div className="flex items-center gap-2 rounded-md border border-bot-border bg-bot-elevated px-2.5 py-1.5">
+      <div className="border-b border-bot-border/40 px-3 pb-2.5 space-y-2">
+        <div className="flex items-center gap-2 rounded-lg border border-bot-border/50 bg-bot-elevated/40 px-2.5 py-2 focus-within:border-bot-accent/50 focus-within:shadow-glow-sm transition-all duration-200">
           <Search className="h-3.5 w-3.5 shrink-0 text-bot-muted" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search sessions…"
-            className="w-full bg-transparent text-caption text-bot-text placeholder-bot-muted outline-none"
+            placeholder="Search sessions..."
+            className="w-full bg-transparent text-caption text-bot-text placeholder:text-bot-muted/60 outline-none"
           />
+          {search && (
+            <button onClick={() => setSearch("")} className="text-bot-muted hover:text-bot-text transition-colors">
+              <X className="h-3 w-3" />
+            </button>
+          )}
         </div>
 
-        {/* Tag filter chips */}
         {allTags.length > 0 && (
           <div className="flex flex-wrap gap-1">
             {allTags.map((tag) => (
@@ -129,10 +131,10 @@ export function SessionSidebar({
                 key={tag}
                 onClick={() => toggleTagFilter(tag)}
                 className={cn(
-                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors",
+                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-all duration-200",
                   activeTagFilters.includes(tag)
-                    ? "bg-bot-accent text-white"
-                    : "bg-bot-elevated text-bot-muted hover:text-bot-text border border-bot-border",
+                    ? "gradient-accent text-white shadow-glow-sm"
+                    : "bg-bot-elevated/60 text-bot-muted hover:text-bot-text border border-bot-border/50 hover:border-bot-accent/40",
                 )}
               >
                 <Tag className="h-2.5 w-2.5" />
@@ -155,25 +157,28 @@ export function SessionSidebar({
 
       <div className="flex-1 overflow-y-auto py-1">
         {loading && (
-          <div className="space-y-1 px-2 py-1">
+          <div className="space-y-2 px-3 py-2">
             {[...Array(5)].map((_, i) => (
-              <div key={i} className="h-10 rounded-lg bg-bot-elevated animate-pulse" />
+              <div key={i} className="h-12 rounded-lg shimmer-bg" />
             ))}
           </div>
         )}
         {!loading && filtered.length === 0 ? (
-          <p className="px-4 py-3 text-caption text-bot-muted">
-            {search || activeTagFilters.length > 0 ? "No matches" : "No sessions yet"}
-          </p>
+          <div className="flex flex-col items-center justify-center px-4 py-8 text-center">
+            <MessageSquare className="h-8 w-8 text-bot-muted/30 mb-2" />
+            <p className="text-caption text-bot-muted">
+              {search || activeTagFilters.length > 0 ? "No matches found" : "No sessions yet"}
+            </p>
+          </div>
         ) : !loading ? (
           filtered.map((session) => (
             <div
               key={session.id}
               className={cn(
-                "group relative flex items-start gap-2.5 px-3 py-2.5 transition-colors cursor-pointer",
+                "group relative flex items-start gap-2.5 mx-1.5 mb-0.5 rounded-lg px-2.5 py-2.5 transition-all duration-200 cursor-pointer",
                 session.id === activeSessionId
-                  ? "bg-bot-accent/10 text-bot-accent border-l-2 border-bot-accent"
-                  : "text-bot-muted hover:bg-bot-elevated hover:text-bot-text",
+                  ? "bg-bot-accent/10 text-bot-text border-l-2 border-bot-accent shadow-glow-sm"
+                  : "text-bot-muted hover:bg-bot-elevated/50 hover:text-bot-text",
               )}
               onClick={() => editingId !== session.id && onSelect(session)}
             >
@@ -181,7 +186,10 @@ export function SessionSidebar({
                 {session.status === "running" ? (
                   <Loader2 className="h-4 w-4 animate-spin text-bot-accent" />
                 ) : session.status === "needs_attention" ? (
-                  <AlertCircle className="h-4 w-4 text-bot-amber animate-pulse" />
+                  <div className="relative">
+                    <AlertCircle className="h-4 w-4 text-bot-amber" />
+                    <div className="absolute -inset-1 rounded-full bg-bot-amber/20 animate-ping" />
+                  </div>
                 ) : (
                   <MessageSquare className="h-4 w-4" />
                 )}
@@ -205,7 +213,7 @@ export function SessionSidebar({
                       e.stopPropagation();
                     }}
                     onClick={(e) => e.stopPropagation()}
-                    className="w-full rounded border border-bot-accent bg-bot-elevated px-1 py-0.5 text-body text-bot-text outline-none"
+                    className="w-full rounded-lg border border-bot-accent bg-bot-elevated/60 px-2 py-1 text-body text-bot-text outline-none shadow-glow-sm"
                     autoFocus
                   />
                 ) : (
@@ -218,7 +226,7 @@ export function SessionSidebar({
                   </p>
                 )}
 
-                <p className="truncate text-caption text-bot-muted">
+                <p className="truncate text-caption text-bot-muted/70">
                   {new Date(session.updated_at).toLocaleDateString()}
                   {session.personality && (
                     <span className="ml-1.5 inline-flex items-center rounded-full bg-bot-accent/10 px-1.5 py-px text-[10px] font-medium text-bot-accent">
@@ -227,13 +235,12 @@ export function SessionSidebar({
                   )}
                 </p>
 
-                {/* Tag pills */}
                 {(session.tags ?? []).length > 0 && (
                   <div className="mt-1 flex flex-wrap gap-1">
                     {(session.tags ?? []).map((tag) => (
                       <span
                         key={tag}
-                        className="inline-flex items-center gap-0.5 rounded-full bg-bot-elevated px-1.5 py-0.5 text-[10px] text-bot-muted border border-bot-border"
+                        className="inline-flex items-center gap-0.5 rounded-full bg-bot-elevated/60 px-1.5 py-0.5 text-[10px] text-bot-muted border border-bot-border/40"
                       >
                         {tag}
                         <button
@@ -247,7 +254,6 @@ export function SessionSidebar({
                   </div>
                 )}
 
-                {/* Inline tag editor */}
                 {tagEditingId === session.id && (
                   <input
                     ref={tagInputRef}
@@ -260,28 +266,26 @@ export function SessionSidebar({
                       e.stopPropagation();
                     }}
                     onClick={(e) => e.stopPropagation()}
-                    placeholder="Add tag…"
-                    className="mt-1 w-full rounded border border-bot-accent bg-bot-elevated px-1.5 py-0.5 text-caption text-bot-text outline-none"
+                    placeholder="Add tag..."
+                    className="mt-1 w-full rounded-lg border border-bot-accent bg-bot-elevated/60 px-2 py-1 text-caption text-bot-text outline-none"
                   />
                 )}
               </div>
 
-              <div className="flex shrink-0 items-center gap-0.5">
-                {/* Add tag button */}
+              <div className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                 <button
                   onClick={(e) => openTagEditor(session, e)}
-                  className="hidden group-hover:flex items-center justify-center rounded p-0.5 text-bot-muted hover:text-bot-accent transition-colors"
+                  className="flex items-center justify-center rounded-md p-1 text-bot-muted hover:text-bot-accent hover:bg-bot-accent/10 transition-colors"
                   title="Add tag"
                 >
                   <Tag className="h-3.5 w-3.5" />
                 </button>
-                {/* Delete button */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     onDelete(session);
                   }}
-                  className="hidden group-hover:flex items-center justify-center rounded p-0.5 text-bot-muted hover:text-bot-red transition-colors"
+                  className="flex items-center justify-center rounded-md p-1 text-bot-muted hover:text-bot-red hover:bg-bot-red/10 transition-colors"
                   title="Delete session"
                 >
                   <Trash2 className="h-3.5 w-3.5" />

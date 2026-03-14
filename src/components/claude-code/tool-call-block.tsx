@@ -17,7 +17,6 @@ function isMcpTool(name: string): boolean {
 }
 
 function formatMcpToolName(name: string): string {
-  // mcp__server__tool → server > tool
   const parts = name.replace(/^mcp__/, "").split("__");
   return parts.join(" > ");
 }
@@ -83,10 +82,9 @@ function ToolDetail({ parsed }: { parsed: ParsedOutput }) {
     );
   }
 
-  // Generic fallback
   if (result) {
     return (
-      <div className="p-3 bg-bot-bg rounded-lg">
+      <div className="p-3 bg-bot-bg/40 rounded-lg">
         <pre className="text-caption font-mono text-bot-text whitespace-pre-wrap break-words max-h-60 overflow-y-auto">
           {result}
         </pre>
@@ -96,7 +94,7 @@ function ToolDetail({ parsed }: { parsed: ParsedOutput }) {
 
   if (input) {
     return (
-      <div className="p-3 bg-bot-bg rounded-lg">
+      <div className="p-3 bg-bot-bg/40 rounded-lg">
         <pre className="text-caption font-mono text-bot-muted whitespace-pre-wrap break-words">
           {JSON.stringify(input, null, 2)}
         </pre>
@@ -123,25 +121,25 @@ export const ToolCallBlock = memo(function ToolCallBlock({ parsed }: ToolCallBlo
   const hasDetail = parsed.toolResult || parsed.toolInput;
 
   return (
-    <div className="my-1 rounded-lg border border-bot-border/60 bg-bot-elevated overflow-hidden">
+    <div className="my-1 rounded-xl border border-bot-border/20 bg-bot-elevated/30 backdrop-blur-sm overflow-hidden transition-all duration-200 hover:border-bot-border/40">
       <button
         onClick={() => hasDetail && setExpanded(!expanded)}
-        className="flex items-center gap-2 w-full px-3 py-2 text-left hover:bg-bot-surface/50 transition-colors"
+        className="flex items-center gap-2 w-full px-3.5 py-2.5 text-left hover:bg-bot-surface/30 transition-all duration-200"
       >
         {hasDetail ? (
           expanded ? <ChevronDown className="h-3 w-3 text-bot-muted shrink-0" /> : <ChevronRight className="h-3 w-3 text-bot-muted shrink-0" />
         ) : (
           <span className="w-3" />
         )}
-        <span className="text-bot-muted">{getToolIcon(rawToolName)}</span>
+        <span className="text-bot-accent/60">{getToolIcon(rawToolName)}</span>
         <span className="text-caption font-mono font-medium text-bot-text">{toolName}</span>
         {parsed.toolInput && typeof parsed.toolInput === "object" && !!(parsed.toolInput as Record<string, unknown>).command ? (
-          <span className="text-[11px] font-mono text-bot-muted truncate max-w-[300px]">
+          <span className="text-[11px] font-mono text-bot-muted/60 truncate max-w-[300px]">
             $ {String((parsed.toolInput as Record<string, unknown>).command).slice(0, 60)}
           </span>
         ) : null}
         {parsed.toolInput && typeof parsed.toolInput === "object" && !!(parsed.toolInput as Record<string, unknown>).file_path && !(parsed.toolInput as Record<string, unknown>).command ? (
-          <span className="text-[11px] font-mono text-bot-muted truncate max-w-[300px]">
+          <span className="text-[11px] font-mono text-bot-muted/60 truncate max-w-[300px]">
             {String((parsed.toolInput as Record<string, unknown>).file_path)}
           </span>
         ) : null}
@@ -150,7 +148,7 @@ export const ToolCallBlock = memo(function ToolCallBlock({ parsed }: ToolCallBlo
         </span>
       </button>
       {expanded && hasDetail ? (
-        <div className="border-t border-bot-border/40 px-3 py-2">
+        <div className="border-t border-bot-border/15 px-3.5 py-2.5">
           <ToolDetail parsed={parsed} />
         </div>
       ) : null}

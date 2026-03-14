@@ -4,6 +4,8 @@ import { useState, useEffect, Suspense } from "react";
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import { apiUrl } from "@/lib/utils";
+import { motion } from "framer-motion";
+import { Loader2 } from "lucide-react";
 
 interface BotIdentity {
   name: string;
@@ -19,6 +21,7 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [shake, setShake] = useState(false);
   const [botIdentity, setBotIdentity] = useState<BotIdentity>({
     name: "Claude Server Bot",
     tagline: "Sign in to continue",
@@ -55,75 +58,116 @@ function LoginForm() {
         setError("Invalid email or password");
       }
       setLoading(false);
+      setShake(true);
+      setTimeout(() => setShake(false), 500);
     } else {
-      // Hard navigation ensures SessionProvider starts fresh with the
-      // new cookie, avoiding a stale "unauthenticated" state that
-      // prevents the socket from connecting until a manual refresh.
       window.location.href = callbackUrl;
     }
   };
 
   return (
-    <div className="w-full max-w-sm">
-      <div className="flex flex-col items-center mb-8">
-        <div className="h-14 w-14 rounded-full overflow-hidden mb-4 border border-bot-border">
-          {botIdentity.avatar ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={botIdentity.avatar} alt={botIdentity.name} className="h-full w-full object-cover" />
-          ) : (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={apiUrl("/avatars/waiting.png")} alt="Claude" className="h-full w-full object-cover" />
-          )}
+    <motion.div
+      initial={{ opacity: 0, y: 20, scale: 0.97 }}
+      animate={{
+        opacity: 1,
+        y: 0,
+        scale: 1,
+        x: shake ? [0, -6, 6, -4, 4, -2, 2, 0] : 0,
+      }}
+      transition={{
+        opacity: { duration: 0.5 },
+        y: { duration: 0.5, ease: "easeOut" },
+        scale: { duration: 0.5, ease: "easeOut" },
+        x: { duration: 0.4, ease: "easeInOut" },
+      }}
+      className="w-full max-w-sm"
+    >
+      <div className="glass-heavy rounded-2xl p-8 shadow-glass">
+        <div className="flex flex-col items-center mb-8">
+          <div className="relative mb-5">
+            <div className="absolute -inset-1.5 rounded-full gradient-accent opacity-50 blur-md animate-pulse" />
+            <div className="relative h-20 w-20 rounded-full overflow-hidden border-2 border-bot-accent/30">
+              {botIdentity.avatar ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={botIdentity.avatar} alt={botIdentity.name} className="h-full w-full object-cover" />
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={apiUrl("/avatars/waiting.png")} alt="Claude" className="h-full w-full object-cover" />
+              )}
+            </div>
+          </div>
+          <h1 className="text-title font-bold text-bot-text tracking-tight">{botIdentity.name}</h1>
+          <p className="text-body text-bot-muted mt-1">{botIdentity.tagline}</p>
         </div>
-        <h1 className="text-title font-semibold text-bot-text">{botIdentity.name}</h1>
-        <p className="text-caption text-bot-muted mt-1">{botIdentity.tagline}</p>
+
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div>
+            <label className="block text-caption font-medium text-bot-muted mb-2">Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              autoFocus
+              className="w-full rounded-xl border border-bot-border bg-bot-elevated/60 px-4 py-3 text-body text-bot-text placeholder:text-bot-muted/60 outline-none focus:border-bot-accent focus:shadow-glow-sm transition-all duration-200"
+              placeholder="admin@example.com"
+            />
+          </div>
+
+          <div>
+            <label className="block text-caption font-medium text-bot-muted mb-2">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              className="w-full rounded-xl border border-bot-border bg-bot-elevated/60 px-4 py-3 text-body text-bot-text placeholder:text-bot-muted/60 outline-none focus:border-bot-accent focus:shadow-glow-sm transition-all duration-200"
+              placeholder="••••••••"
+            />
+          </div>
+
+          {error && (
+            <motion.p
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="text-caption text-bot-red flex items-center gap-1.5"
+            >
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-bot-red" />
+              {error}
+            </motion.p>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading || !email || !password}
+            className="w-full rounded-xl gradient-accent px-4 py-3 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+          >
+            {loading ? (
+              <span className="flex items-center justify-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Signing in...
+              </span>
+            ) : (
+              "Sign in"
+            )}
+          </button>
+        </form>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block text-caption font-medium text-bot-muted mb-1.5">Email</label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            autoFocus
-            className="w-full rounded-lg border border-bot-border bg-bot-elevated px-3 py-2.5 text-body text-bot-text placeholder-bot-muted outline-none focus:border-bot-accent transition-colors"
-            placeholder="admin@example.com"
-          />
-        </div>
-
-        <div>
-          <label className="block text-caption font-medium text-bot-muted mb-1.5">Password</label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            className="w-full rounded-lg border border-bot-border bg-bot-elevated px-3 py-2.5 text-body text-bot-text placeholder-bot-muted outline-none focus:border-bot-accent transition-colors"
-            placeholder="••••••••"
-          />
-        </div>
-
-        {error && (
-          <p className="text-caption text-bot-red">{error}</p>
-        )}
-
-        <button
-          type="submit"
-          disabled={loading || !email || !password}
-          className="w-full rounded-lg bg-bot-accent px-4 py-2.5 text-body font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          {loading ? "Signing in…" : "Sign in"}
-        </button>
-      </form>
-    </div>
+      <p className="text-center text-caption text-bot-muted/40 mt-6">
+        Secured connection
+      </p>
+    </motion.div>
   );
 }
 
 export default function LoginPage() {
   return (
-    <main className="min-h-screen flex items-center justify-center bg-bot-bg px-4">
+    <main className="min-h-screen flex items-center justify-center gradient-mesh-bg px-4 relative overflow-hidden">
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full bg-bot-accent/5 blur-3xl" />
+        <div className="absolute bottom-1/4 right-1/4 w-80 h-80 rounded-full bg-bot-accent-2/5 blur-3xl" />
+      </div>
       <Suspense>
         <LoginForm />
       </Suspense>

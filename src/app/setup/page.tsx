@@ -3,8 +3,9 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { CheckCircle2, XCircle, Loader2, Terminal } from "lucide-react";
+import { CheckCircle2, XCircle, Loader2, Terminal, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { motion, AnimatePresence } from "framer-motion";
 
 type Step = 1 | 2 | 3 | 4;
 
@@ -26,25 +27,28 @@ function getBasePath() {
   return slug ? `/${prefix}/${slug}` : "";
 }
 
+const stepVariants = {
+  enter: { opacity: 0, x: 20 },
+  center: { opacity: 1, x: 0 },
+  exit: { opacity: 0, x: -20 },
+};
+
 export default function SetupPage() {
   const router = useRouter();
   const bp = getBasePath();
   const [step, setStep] = useState<Step>(1);
 
-  // Step 1: project
   const [projectRoot, setProjectRoot] = useState("");
   const [projectInput, setProjectInput] = useState("");
   const [projectStatus, setProjectStatus] = useState<ProjectStatus | null>(null);
   const [savingProject, setSavingProject] = useState(false);
   const [projectError, setProjectError] = useState("");
 
-  // Step 3: Claude test
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
 
   const [error, setError] = useState<string | null>(null);
 
-  // Load initial project status
   useEffect(() => {
     fetch(`${bp}/api/bot-identity`)
       .then((r) => r.ok ? r.json() : null)
@@ -132,7 +136,6 @@ export default function SetupPage() {
     window.location.href = bp || "/";
   }
 
-  // Determine if step 2 (init) should be shown
   const showInitStep = step === 2 && projectStatus && !projectStatus.hasClaudeMd;
 
   const steps = [
@@ -142,10 +145,8 @@ export default function SetupPage() {
     { n: 4, label: "Done" },
   ];
 
-  // Compute effective steps (skip step 2 if CLAUDE.md exists)
   const skipInit = projectStatus?.hasClaudeMd ?? false;
 
-  // Auto-advance past step 2 if it shouldn't be shown (only after projectStatus has loaded)
   useEffect(() => {
     if (step === 2 && projectStatus !== null && (skipInit || !projectStatus.hasClaudeMd)) {
       setStep(3);
@@ -163,250 +164,300 @@ export default function SetupPage() {
     }
   }
 
+  const progressPercent = ((step - 1) / 3) * 100;
+
   return (
-    <main className="min-h-screen bg-bot-bg flex flex-col items-center justify-center px-4 py-12">
-      <div className="w-full max-w-lg">
+    <main className="min-h-screen gradient-mesh-bg flex flex-col items-center justify-center px-4 py-12 relative overflow-hidden">
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute top-1/3 left-1/5 w-80 h-80 rounded-full bg-bot-accent/5 blur-3xl" />
+        <div className="absolute bottom-1/3 right-1/4 w-64 h-64 rounded-full bg-bot-accent-2/5 blur-3xl" />
+      </div>
+
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6 }}
+        className="w-full max-w-lg relative z-10"
+      >
         {/* Header */}
         <div className="flex flex-col items-center mb-8">
-          <div className="h-14 w-14 rounded-full overflow-hidden mb-4">
-            <Image unoptimized src="/avatars/waiting.png" alt="Claude" width={56} height={56} className="object-cover" />
+          <div className="relative mb-5">
+            <div className="absolute -inset-1.5 rounded-full gradient-accent opacity-40 blur-md" />
+            <div className="relative h-16 w-16 rounded-full overflow-hidden border-2 border-bot-accent/30">
+              <Image unoptimized src="/avatars/waiting.png" alt="Claude" width={64} height={64} className="object-cover" />
+            </div>
           </div>
-          <h1 className="text-title font-semibold text-bot-text">Setup Wizard</h1>
-          <p className="text-caption text-bot-muted mt-1">Let&apos;s get Claude Server Bot ready</p>
+          <h1 className="text-title font-bold text-bot-text tracking-tight">Setup Wizard</h1>
+          <p className="text-body text-bot-muted mt-1">Let&apos;s get Claude Server Bot ready</p>
         </div>
 
-        {/* Step indicators */}
-        <div className="flex items-center justify-center gap-2 mb-8">
-          {steps.map(({ n, label }) => {
-            const effectiveN = skipInit && n > 1 ? n - 1 : n;
-            const effectiveStep = skipInit && step > 1 ? step - 1 : step;
-            const isDone = effectiveN < effectiveStep;
-            const isActive = n === step;
-            return (
-              <div key={n} className="flex items-center gap-2">
-                <div className={cn(
-                  "flex h-7 w-7 items-center justify-center rounded-full text-caption font-semibold",
-                  isDone ? "bg-bot-accent text-white" : isActive ? "bg-bot-accent/20 text-bot-accent border border-bot-accent" : "bg-bot-elevated text-bot-muted",
-                )}>
-                  {isDone ? "✓" : n}
+        {/* Progress bar */}
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-3">
+            {steps.map(({ n, label }) => {
+              const isDone = n < step;
+              const isActive = n === step;
+              return (
+                <div key={n} className="flex flex-col items-center gap-1.5">
+                  <motion.div
+                    animate={{
+                      scale: isActive ? 1 : 1,
+                      backgroundColor: isDone
+                        ? "rgb(var(--bot-accent))"
+                        : isActive
+                          ? "rgb(var(--bot-accent) / 0.2)"
+                          : "rgb(var(--bot-elevated))",
+                    }}
+                    className={cn(
+                      "flex h-8 w-8 items-center justify-center rounded-full text-caption font-semibold transition-all duration-300",
+                      isDone ? "text-white shadow-glow-sm" : isActive ? "text-bot-accent border border-bot-accent" : "text-bot-muted",
+                    )}
+                  >
+                    {isDone ? <CheckCircle2 className="h-4 w-4" /> : n}
+                  </motion.div>
+                  <span className={cn("text-[11px] hidden sm:block font-medium", isActive ? "text-bot-text" : "text-bot-muted/60")}>{label}</span>
                 </div>
-                <span className={cn("text-caption hidden sm:block", isActive ? "text-bot-text" : "text-bot-muted")}>{label}</span>
-                {n < 4 && <div className="w-8 h-px bg-bot-border" />}
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
+          <div className="h-1 rounded-full bg-bot-elevated overflow-hidden">
+            <motion.div
+              className="h-full rounded-full gradient-accent"
+              initial={{ width: "0%" }}
+              animate={{ width: `${progressPercent}%` }}
+              transition={{ duration: 0.5, ease: "easeOut" }}
+            />
+          </div>
         </div>
 
         {/* Card */}
-        <div className="rounded-2xl border border-bot-border bg-bot-surface p-8">
-          {/* STEP 1: Project */}
-          {step === 1 && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-subtitle font-semibold text-bot-text mb-1">Project Directory</h2>
-                <p className="text-caption text-bot-muted">This is the directory Claude will work in.</p>
-              </div>
+        <div className="glass-heavy rounded-2xl p-8 shadow-glass">
+          <AnimatePresence mode="wait">
+            {/* STEP 1: Project */}
+            {step === 1 && (
+              <motion.div key="step1" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-6">
+                <div>
+                  <h2 className="text-subtitle font-semibold text-bot-text mb-1">Project Directory</h2>
+                  <p className="text-body text-bot-muted">This is the directory Claude will work in.</p>
+                </div>
 
-              <div className="rounded-lg border border-bot-border bg-bot-elevated p-4">
-                <p className="text-caption text-bot-muted mb-1">Current directory</p>
-                <p className="font-mono text-body text-bot-text">{projectRoot || "Not set"}</p>
-                {projectStatus && (
-                  <div className="mt-3 flex gap-6 text-caption">
-                    <span className={projectStatus.hasClaudeMd ? "text-bot-green" : "text-bot-muted"}>
-                      {projectStatus.hasClaudeMd ? "✓" : "✗"} CLAUDE.md
-                    </span>
-                    <span className={projectStatus.hasClaudeDir ? "text-bot-green" : "text-bot-muted"}>
-                      {projectStatus.hasClaudeDir ? "✓" : "✗"} .claude/
-                    </span>
+                <div className="rounded-xl border border-bot-border/60 bg-bot-elevated/40 p-4">
+                  <p className="text-caption text-bot-muted mb-1">Current directory</p>
+                  <p className="font-mono text-body text-bot-text">{projectRoot || "Not set"}</p>
+                  {projectStatus && (
+                    <div className="mt-3 flex gap-6 text-caption">
+                      <span className={projectStatus.hasClaudeMd ? "text-bot-green" : "text-bot-muted"}>
+                        {projectStatus.hasClaudeMd ? <CheckCircle2 className="h-3 w-3 inline mr-1" /> : "—"} CLAUDE.md
+                      </span>
+                      <span className={projectStatus.hasClaudeDir ? "text-bot-green" : "text-bot-muted"}>
+                        {projectStatus.hasClaudeDir ? <CheckCircle2 className="h-3 w-3 inline mr-1" /> : "—"} .claude/
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <form onSubmit={handleSaveProject} className="space-y-3">
+                  <label className="text-caption font-medium text-bot-muted">Change directory (optional)</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={projectInput}
+                      onChange={(e) => setProjectInput(e.target.value)}
+                      placeholder="/home/user/my-project"
+                      className="flex-1 rounded-xl border border-bot-border bg-bot-elevated/60 px-4 py-2.5 font-mono text-body text-bot-text placeholder:text-bot-muted/60 outline-none focus:border-bot-accent focus:shadow-glow-sm transition-all duration-200"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!projectInput.trim() || savingProject}
+                      className="rounded-xl border border-bot-border px-4 py-2.5 text-body text-bot-muted hover:text-bot-text hover:bg-bot-elevated disabled:opacity-50 transition-all duration-200"
+                    >
+                      {savingProject ? <Loader2 className="h-4 w-4 animate-spin" /> : "Set"}
+                    </button>
                   </div>
-                )}
-              </div>
+                  {projectError && <p className="text-caption text-bot-red">{projectError}</p>}
+                </form>
 
-              <form onSubmit={handleSaveProject} className="space-y-3">
-                <label className="text-caption font-medium text-bot-muted">Change directory (optional)</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={projectInput}
-                    onChange={(e) => setProjectInput(e.target.value)}
-                    placeholder="/home/user/my-project"
-                    className="flex-1 rounded-lg border border-bot-border bg-bot-elevated px-3 py-2 font-mono text-body text-bot-text placeholder-bot-muted outline-none focus:border-bot-accent"
-                  />
+                <button
+                  onClick={() => advanceStep(1)}
+                  disabled={!projectRoot}
+                  className="w-full rounded-xl gradient-accent px-4 py-3 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+                >
+                  Continue
+                </button>
+              </motion.div>
+            )}
+
+            {/* STEP 2: Initialize */}
+            {step === 2 && showInitStep && (
+              <motion.div key="step2" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-6">
+                <div>
+                  <h2 className="text-subtitle font-semibold text-bot-text mb-1">Initialize Project</h2>
+                  <p className="text-body text-bot-muted">
+                    No <code className="font-mono text-bot-amber px-1.5 py-0.5 rounded bg-bot-amber/10">CLAUDE.md</code> found.
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-bot-amber/30 bg-bot-amber/10 p-4">
+                  <p className="text-body text-bot-amber font-medium mb-1">CLAUDE.md not found</p>
+                  <p className="text-caption text-bot-muted">
+                    Run <code className="font-mono text-bot-text px-1.5 py-0.5 rounded bg-bot-elevated">/init</code> in the chat to let Claude analyze your project and create one automatically.
+                  </p>
+                </div>
+
+                <p className="text-caption text-bot-muted">
+                  You can skip this and do it later from the Chat tab.
+                </p>
+
+                <div className="flex gap-3">
                   <button
-                    type="submit"
-                    disabled={!projectInput.trim() || savingProject}
-                    className="rounded-lg border border-bot-border px-3 py-2 text-body text-bot-muted hover:text-bot-text hover:bg-bot-elevated disabled:opacity-50 transition-colors"
+                    onClick={() => advanceStep(2)}
+                    className="rounded-xl border border-bot-border px-4 py-2.5 text-body text-bot-muted hover:text-bot-text hover:bg-bot-elevated transition-all duration-200"
                   >
-                    {savingProject ? "…" : "Set"}
+                    Skip
+                  </button>
+                  <button
+                    onClick={() => advanceStep(2)}
+                    className="flex-1 rounded-xl gradient-accent px-4 py-3 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] transition-all duration-200"
+                  >
+                    Continue to Test
                   </button>
                 </div>
-                {projectError && <p className="text-caption text-bot-red">{projectError}</p>}
-              </form>
+              </motion.div>
+            )}
 
-              <button
-                onClick={() => advanceStep(1)}
-                disabled={!projectRoot}
-                className="w-full rounded-lg bg-bot-accent px-4 py-2.5 text-body font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors"
-              >
-                Next →
-              </button>
-            </div>
-          )}
+            {/* STEP 3: Test Claude */}
+            {step === 3 && (
+              <motion.div key="step3" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-6">
+                <div>
+                  <h2 className="text-subtitle font-semibold text-bot-text mb-1">Test Claude</h2>
+                  <p className="text-body text-bot-muted">
+                    Verify that Claude is authenticated and responding.
+                  </p>
+                </div>
 
-          {/* STEP 2: Initialize (only shown if no CLAUDE.md) */}
-          {step === 2 && showInitStep && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-subtitle font-semibold text-bot-text mb-1">Initialize Project</h2>
-                <p className="text-caption text-bot-muted">
-                  No <code className="font-mono text-bot-amber">CLAUDE.md</code> found. This file helps Claude understand your project.
-                </p>
-              </div>
+                <div className="flex flex-col items-center gap-4 py-4">
+                  {!testResult && !testing && (
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={handleTestClaude}
+                      className="flex items-center gap-2 rounded-xl gradient-accent px-8 py-3.5 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md transition-all duration-200"
+                    >
+                      <Terminal className="h-4 w-4" />
+                      Run Test
+                    </motion.button>
+                  )}
 
-              <div className="rounded-lg border border-bot-amber/30 bg-bot-amber/10 p-4">
-                <p className="text-body text-bot-amber font-medium mb-1">CLAUDE.md not found</p>
-                <p className="text-caption text-bot-muted">
-                  Run <code className="font-mono text-bot-text">/init</code> in the chat to let Claude analyze your project and create one automatically.
-                </p>
-              </div>
-
-              <p className="text-caption text-bot-muted">
-                You can skip this and do it later from the Chat tab using the <code className="font-mono text-bot-text">/init</code> command.
-              </p>
-
-              <div className="flex gap-3">
-                <button
-                  onClick={() => advanceStep(2)}
-                  className="text-bot-muted text-body hover:text-bot-text transition-colors"
-                >
-                  Skip →
-                </button>
-                <button
-                  onClick={() => advanceStep(2)}
-                  className="flex-1 rounded-lg bg-bot-accent px-4 py-2.5 text-body font-medium text-white hover:bg-bot-accent/80 transition-colors"
-                >
-                  Continue to Test →
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* STEP 3: Test Claude */}
-          {step === 3 && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-subtitle font-semibold text-bot-text mb-1">Test Claude</h2>
-                <p className="text-caption text-bot-muted">
-                  Verify that Claude is authenticated and responding.
-                </p>
-              </div>
-
-              <div className="flex flex-col items-center gap-4 py-4">
-                {!testResult && !testing && (
-                  <button
-                    onClick={handleTestClaude}
-                    className="flex items-center gap-2 rounded-lg bg-bot-accent px-6 py-3 text-body font-medium text-white hover:bg-bot-accent/80 transition-colors"
-                  >
-                    <Terminal className="h-4 w-4" />
-                    Run Test
-                  </button>
-                )}
-
-                {testing && (
-                  <div className="flex items-center gap-3 text-body text-bot-muted">
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                    Testing Claude…
-                  </div>
-                )}
-
-                {testResult && (
-                  <div className={cn(
-                    "w-full rounded-lg p-4 flex items-start gap-3",
-                    testResult.ok ? "bg-bot-green/10 border border-bot-green/30" : "bg-bot-red/10 border border-bot-red/30",
-                  )}>
-                    {testResult.ok ? (
-                      <CheckCircle2 className="h-5 w-5 text-bot-green shrink-0 mt-0.5" />
-                    ) : (
-                      <XCircle className="h-5 w-5 text-bot-red shrink-0 mt-0.5" />
-                    )}
-                    <div>
-                      {testResult.ok ? (
-                        <>
-                          <p className="text-body font-medium text-bot-green">Claude responded in {testResult.latency}ms</p>
-                          <p className="text-caption text-bot-muted mt-0.5">Authentication successful</p>
-                        </>
-                      ) : (
-                        <>
-                          <p className="text-body font-medium text-bot-red">Claude is not authenticated</p>
-                          {testResult.error && (
-                            <p className="text-caption text-bot-muted mt-0.5">{testResult.error}</p>
-                          )}
-                          <div className="mt-3 rounded bg-bot-elevated px-3 py-2 text-caption font-mono text-bot-text">
-                            SSH into your server and run: <span className="text-bot-amber">claude</span>
-                          </div>
-                          <p className="text-caption text-bot-muted mt-2">Complete the browser login, then retry.</p>
-                        </>
-                      )}
+                  {testing && (
+                    <div className="flex items-center gap-3 text-body text-bot-muted">
+                      <Loader2 className="h-5 w-5 animate-spin text-bot-accent" />
+                      Testing Claude...
                     </div>
+                  )}
+
+                  {testResult && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className={cn(
+                        "w-full rounded-xl p-5 flex items-start gap-3",
+                        testResult.ok ? "bg-bot-green/10 border border-bot-green/30" : "bg-bot-red/10 border border-bot-red/30",
+                      )}
+                    >
+                      {testResult.ok ? (
+                        <CheckCircle2 className="h-5 w-5 text-bot-green shrink-0 mt-0.5" />
+                      ) : (
+                        <XCircle className="h-5 w-5 text-bot-red shrink-0 mt-0.5" />
+                      )}
+                      <div>
+                        {testResult.ok ? (
+                          <>
+                            <p className="text-body font-medium text-bot-green">Claude responded in {testResult.latency}ms</p>
+                            <p className="text-caption text-bot-muted mt-0.5">Authentication successful</p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-body font-medium text-bot-red">Claude is not authenticated</p>
+                            {testResult.error && (
+                              <p className="text-caption text-bot-muted mt-0.5">{testResult.error}</p>
+                            )}
+                            <div className="mt-3 rounded-lg bg-bot-elevated/60 px-3 py-2 text-caption font-mono text-bot-text">
+                              SSH into your server and run: <span className="text-bot-amber">claude</span>
+                            </div>
+                            <p className="text-caption text-bot-muted mt-2">Complete the browser login, then retry.</p>
+                          </>
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {testResult && (
+                    <button
+                      onClick={handleTestClaude}
+                      className="text-caption text-bot-muted hover:text-bot-accent transition-colors"
+                    >
+                      Retry test
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  onClick={() => advanceStep(3)}
+                  disabled={!testResult?.ok}
+                  className="w-full rounded-xl gradient-accent px-4 py-3 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+                >
+                  Continue
+                </button>
+              </motion.div>
+            )}
+
+            {/* STEP 4: Done */}
+            {step === 4 && (
+              <motion.div key="step4" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-6 text-center">
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ type: "spring", stiffness: 200, damping: 15, delay: 0.1 }}
+                  className="flex flex-col items-center gap-3"
+                >
+                  <div className="relative">
+                    <div className="absolute -inset-3 rounded-full bg-bot-green/20 blur-xl" />
+                    <Sparkles className="relative h-16 w-16 text-bot-green" />
                   </div>
+                  <h2 className="text-subtitle font-bold text-bot-text">You&apos;re all set!</h2>
+                </motion.div>
+
+                <div className="rounded-xl border border-bot-border/60 bg-bot-elevated/40 p-5 text-left space-y-2">
+                  <p className="text-caption text-bot-muted">Project directory</p>
+                  <p className="font-mono text-body text-bot-text">{projectRoot}</p>
+                  {projectStatus && (
+                    <div className="flex gap-6 text-caption pt-1">
+                      <span className={projectStatus.hasClaudeMd ? "text-bot-green" : "text-bot-muted"}>
+                        {projectStatus.hasClaudeMd ? "✓" : "—"} CLAUDE.md
+                      </span>
+                      <span className={projectStatus.hasClaudeDir ? "text-bot-green" : "text-bot-muted"}>
+                        {projectStatus.hasClaudeDir ? "✓" : "—"} .claude/
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {error && (
+                  <p className="text-caption text-bot-red">{error}</p>
                 )}
-
-                {testResult && (
-                  <button
-                    onClick={handleTestClaude}
-                    className="text-caption text-bot-muted hover:text-bot-text transition-colors"
-                  >
-                    Retry
-                  </button>
-                )}
-              </div>
-
-              <button
-                onClick={() => advanceStep(3)}
-                disabled={!testResult?.ok}
-                className="w-full rounded-lg bg-bot-accent px-4 py-2.5 text-body font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                Next →
-              </button>
-            </div>
-          )}
-
-          {/* STEP 4: Done */}
-          {step === 4 && (
-            <div className="space-y-6 text-center">
-              <div className="flex flex-col items-center gap-3">
-                <CheckCircle2 className="h-16 w-16 text-bot-green" />
-                <h2 className="text-subtitle font-semibold text-bot-text">You&apos;re all set!</h2>
-              </div>
-
-              <div className="rounded-lg border border-bot-border bg-bot-elevated p-4 text-left space-y-2">
-                <p className="text-caption text-bot-muted">Project directory</p>
-                <p className="font-mono text-body text-bot-text">{projectRoot}</p>
-                {projectStatus && (
-                  <div className="flex gap-6 text-caption pt-1">
-                    <span className={projectStatus.hasClaudeMd ? "text-bot-green" : "text-bot-muted"}>
-                      {projectStatus.hasClaudeMd ? "✓" : "✗"} CLAUDE.md
-                    </span>
-                    <span className={projectStatus.hasClaudeDir ? "text-bot-green" : "text-bot-muted"}>
-                      {projectStatus.hasClaudeDir ? "✓" : "✗"} .claude/
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {error && (
-                <p className="text-caption text-bot-red">{error}</p>
-              )}
-              <button
-                onClick={handleComplete}
-                className="w-full rounded-lg bg-bot-accent px-4 py-3 text-body font-semibold text-white hover:bg-bot-accent/80 transition-colors"
-              >
-                Start chatting with Claude →
-              </button>
-            </div>
-          )}
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={handleComplete}
+                  className="w-full rounded-xl gradient-accent px-4 py-3.5 text-body font-bold text-white shadow-glow-md hover:shadow-glow-lg hover:brightness-110 transition-all duration-200"
+                >
+                  Start chatting with Claude
+                </motion.button>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
-      </div>
+      </motion.div>
     </main>
   );
 }

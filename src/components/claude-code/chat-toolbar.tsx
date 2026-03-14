@@ -41,26 +41,26 @@ function ExportDropdown({ sessionId }: { sessionId: string }) {
     <div className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated transition-colors"
+        className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated/50 transition-all duration-200"
         title="Export session"
       >
         <Download className="h-3.5 w-3.5" />
-        Export
+        <span className="hidden xl:inline">Export</span>
         <ChevronDown className="h-3 w-3" />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-lg border border-bot-border bg-bot-elevated shadow-lg overflow-hidden">
+          <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-xl glass-heavy shadow-float overflow-hidden animate-scaleIn">
             <button
               onClick={() => handleExport("markdown")}
-              className="flex w-full items-center gap-2 px-3 py-2 text-caption text-bot-text hover:bg-bot-surface transition-colors"
+              className="flex w-full items-center gap-2 px-4 py-2.5 text-caption text-bot-text hover:bg-bot-elevated/40 transition-all duration-150"
             >
               Export as Markdown
             </button>
             <button
               onClick={() => handleExport("json")}
-              className="flex w-full items-center gap-2 px-3 py-2 text-caption text-bot-text hover:bg-bot-surface transition-colors"
+              className="flex w-full items-center gap-2 px-4 py-2.5 text-caption text-bot-text hover:bg-bot-elevated/40 transition-all duration-150"
             >
               Export as JSON
             </button>
@@ -95,11 +95,11 @@ function CopyAllButton({ messages }: { messages: ChatMessage[] }) {
     <button
       onClick={handleCopy}
       disabled={messages.length === 0}
-      className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+      className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated/50 disabled:cursor-not-allowed disabled:opacity-40 transition-all duration-200"
       title="Copy entire conversation to clipboard"
     >
       {copied ? <Check className="h-3.5 w-3.5 text-bot-green" /> : <ClipboardCopy className="h-3.5 w-3.5" />}
-      {copied ? "Copied" : "Copy All"}
+      <span className="hidden xl:inline">{copied ? "Copied" : "Copy All"}</span>
     </button>
   );
 }
@@ -121,11 +121,11 @@ export function ChatToolbar({
   messages = [],
 }: ChatToolbarProps) {
   return (
-    <div className="flex items-center gap-2 border-b border-bot-border bg-bot-surface px-4 py-2">
+    <div className="flex items-center gap-1 border-b border-bot-border/30 bg-bot-surface/60 backdrop-blur-md px-3 py-1.5">
       <button
         onClick={onInterrupt}
         disabled={!isRunning}
-        className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-caption font-medium text-bot-red hover:bg-bot-red/10 disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+        className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-caption font-medium text-bot-red hover:bg-bot-red/10 disabled:cursor-not-allowed disabled:opacity-40 transition-all duration-200"
         title="Interrupt (Ctrl+C)"
       >
         <Square className="h-3.5 w-3.5" />
@@ -141,15 +141,17 @@ export function ChatToolbar({
         />
       )}
 
-      <div className="ml-auto flex items-center gap-2">
+      <div className="mx-2 h-4 w-px bg-bot-border/30" />
+
+      <div className="ml-auto flex items-center gap-1">
         {sessionUsage && sessionUsage.total_input_tokens > 0 && (() => {
           const cost = sessionUsage.total_cost_usd;
           const sessionLimit = budgetLimits?.session_usd ?? 0;
           const pct = sessionLimit > 0 ? cost / sessionLimit : 0;
-          const costColor = pct >= 1 ? "text-bot-red" : pct >= 0.8 ? "text-bot-amber" : pct >= 0.5 ? "text-bot-amber/70" : "text-bot-muted";
+          const costColor = pct >= 1 ? "text-bot-red" : pct >= 0.8 ? "text-bot-amber" : pct >= 0.5 ? "text-bot-amber/70" : "text-bot-muted/60";
           const tooltip = `Input: ${sessionUsage.total_input_tokens} | Output: ${sessionUsage.total_output_tokens} | Cost: $${cost.toFixed(4)}${sessionLimit > 0 ? ` (limit: $${sessionLimit.toFixed(2)})` : ""}`;
           return (
-            <span className={cn("text-[11px] font-mono", costColor)} title={tooltip}>
+            <span className={cn("text-[11px] font-mono mr-2", costColor)} title={tooltip}>
               {formatTokenCount(sessionUsage.total_input_tokens + sessionUsage.total_output_tokens)} tokens
               {cost > 0 && (
                 <span className="ml-1">${cost.toFixed(3)}</span>
@@ -164,7 +166,7 @@ export function ChatToolbar({
         {onSearch && (
           <button
             onClick={onSearch}
-            className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated transition-colors"
+            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated/50 transition-all duration-200"
             title="Search in session (Ctrl+F)"
           >
             <Search className="h-3.5 w-3.5" />
@@ -174,11 +176,11 @@ export function ChatToolbar({
         {onGlobalSearch && (
           <button
             onClick={onGlobalSearch}
-            className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated transition-colors"
+            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated/50 transition-all duration-200"
             title="Search all sessions (Ctrl+Shift+F)"
           >
             <Search className="h-3.5 w-3.5" />
-            All
+            <span className="hidden xl:inline">All</span>
           </button>
         )}
 
@@ -186,24 +188,26 @@ export function ChatToolbar({
 
         {sessionId && <ExportDropdown sessionId={sessionId} />}
 
+        <div className="mx-1 h-4 w-px bg-bot-border/30" />
+
         <button
           onClick={() => onAutoAcceptChange(!autoAccept)}
           className={cn(
-            "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-caption font-medium transition-colors",
+            "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-caption font-medium transition-all duration-200",
             autoAccept
-              ? "bg-bot-accent/15 text-bot-accent"
-              : "text-bot-muted hover:bg-bot-elevated",
+              ? "bg-bot-accent/10 text-bot-accent shadow-glow-sm"
+              : "text-bot-muted hover:bg-bot-elevated/50",
           )}
-          title="Auto-Accept Edits — automatically confirm file edit prompts"
+          title="Auto-Accept Edits"
         >
           <Zap className="h-3.5 w-3.5" />
-          Auto-Accept
+          <span className="hidden xl:inline">Auto-Accept</span>
           <span
             className={cn(
-              "ml-1 rounded px-1.5 py-0.5 text-caption",
+              "rounded-md px-1.5 py-0.5 text-[10px] font-semibold",
               autoAccept
                 ? "bg-bot-accent/20 text-bot-accent"
-                : "bg-bot-elevated text-bot-muted",
+                : "bg-bot-elevated/60 text-bot-muted",
             )}
           >
             {autoAccept ? "ON" : "OFF"}
@@ -213,19 +217,19 @@ export function ChatToolbar({
         <button
           onClick={onRetryLast}
           disabled={isRunning}
-          className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+          className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated/50 disabled:cursor-not-allowed disabled:opacity-40 transition-all duration-200"
           title="Retry last message"
         >
           <RotateCcw className="h-3.5 w-3.5" />
-          Retry
+          <span className="hidden xl:inline">Retry</span>
         </button>
         <button
           onClick={onClearContext}
-          className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated transition-colors"
-          title="Clear context (start new session)"
+          className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated/50 transition-all duration-200"
+          title="Clear context"
         >
           <Trash2 className="h-3.5 w-3.5" />
-          Clear
+          <span className="hidden xl:inline">Clear</span>
         </button>
       </div>
     </div>

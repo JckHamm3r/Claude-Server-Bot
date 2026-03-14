@@ -18,8 +18,6 @@ interface ChatInputProps {
   sessionId?: string;
 }
 
-// ── Slash command palette ────────────────────────────────────────────────────
-
 const SLASH_COMMANDS = [
   { cmd: "/compact", args: "[focus]", desc: "Compact conversation history to save context" },
   { cmd: "/clear",   args: "",        desc: "Clear conversation context completely" },
@@ -35,8 +33,6 @@ const SLASH_COMMANDS = [
 export interface ChatInputHandle {
   focus: () => void;
 }
-
-// ── Main component ───────────────────────────────────────────────────────────
 
 export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
   onSend,
@@ -57,30 +53,20 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     focus: () => textareaRef.current?.focus(),
   }), []);
 
-  // ── Attachment state ───────────────────────────────────────────────────
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
-
-  // ── Slash palette state ──────────────────────────────────────────────────
   const [slashOpen, setSlashOpen] = useState(false);
   const [slashFilter, setSlashFilter] = useState("");
   const [slashIndex, setSlashIndex] = useState(0);
-
-  // ── @ file picker state ──────────────────────────────────────────────────
   const [atOpen, setAtOpen] = useState(false);
   const [atQuery, setAtQuery] = useState("");
   const [atFiles, setAtFiles] = useState<string[]>([]);
   const [atIndex, setAtIndex] = useState(0);
   const atDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Derived ──────────────────────────────────────────────────────────────
-
   const slashMatches = SLASH_COMMANDS.filter((c) =>
     c.cmd.startsWith(slashFilter) || c.cmd.slice(1).startsWith(slashFilter.slice(1)),
   );
 
-  // ── Effects ──────────────────────────────────────────────────────────────
-
-  // Fetch file suggestions when @ query changes
   useEffect(() => {
     if (!atOpen) return;
     if (atDebounceRef.current) clearTimeout(atDebounceRef.current);
@@ -100,7 +86,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     };
   }, [atOpen, atQuery]);
 
-  // Cleanup preview URLs on unmount
   useEffect(() => {
     return () => {
       attachments.forEach((a) => {
@@ -109,8 +94,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // ── Helpers ──────────────────────────────────────────────────────────────
 
   const stopTyping = useCallback(() => {
     if (isTypingRef.current) {
@@ -140,7 +123,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   }
 
   function applyAtFile(file: string) {
-    // Replace the @<partial> at the end of the textarea value
     const atPos = value.lastIndexOf("@");
     const newVal = value.slice(0, atPos) + `@${file}`;
     setValue(newVal);
@@ -219,13 +201,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     return uploadIds;
   }, [attachments, sessionId]);
 
-  // ── Event handlers ────────────────────────────────────────────────────────
-
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const v = e.target.value;
     setValue(v);
 
-    // Typing indicator
     if (v && !isTypingRef.current) {
       isTypingRef.current = true;
       onTypingStart?.();
@@ -237,9 +216,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       typingTimerRef.current = setTimeout(stopTyping, TYPING_STOP_DELAY_MS);
     }
 
-    // Slash palette: open if value starts with /
     if (v.match(/^\//)) {
-      setSlashFilter(v.split(" ")[0]); // only the first token
+      setSlashFilter(v.split(" ")[0]);
       setSlashIndex(0);
       setSlashOpen(true);
       setAtOpen(false);
@@ -247,7 +225,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       setSlashOpen(false);
     }
 
-    // @ picker: open if last @ is followed by non-space content (or just @)
     const atMatch = v.match(/@([^\s]*)$/);
     if (atMatch) {
       setAtQuery(atMatch[1]);
@@ -260,7 +237,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // Handle slash palette navigation
     if (slashOpen && slashMatches.length > 0) {
       if (e.key === "ArrowUp") {
         e.preventDefault();
@@ -284,7 +260,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       }
     }
 
-    // Handle @ picker navigation
     if (atOpen && atFiles.length > 0) {
       if (e.key === "ArrowUp") {
         e.preventDefault();
@@ -320,15 +295,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     stopTyping();
     closePalettes();
 
-    // Upload attachments first
     const uploadIds = await uploadAttachments();
-    // Clear any errored attachments
     const hasErrors = attachments.some((a) => a.error);
     if (hasErrors && uploadIds.length === 0 && !trimmed) return;
 
     onSend(trimmed || "(attached files)", uploadIds.length > 0 ? uploadIds : undefined);
     setValue("");
-    // Cleanup previews
     attachments.forEach((a) => {
       if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
     });
@@ -368,15 +340,14 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
   const willQueue = isRunning && !disabled;
   const placeholder = disabled
-    ? "Connecting…"
+    ? "Connecting..."
     : willQueue
-    ? "Type to queue next message…"
-    : "Message Claude Code… (/ for commands, @ for files)";
+    ? "Type to queue next message..."
+    : "Message Claude Code... (/ for commands, @ for files)";
 
   return (
-    <div className="border-t border-bot-border bg-bot-surface py-3">
+    <div className="border-t border-bot-border/30 bg-bot-surface/80 backdrop-blur-md py-3">
       <div className="mx-auto max-w-3xl px-4">
-        {/* Queued indicator */}
         {pendingCount > 0 && (
           <div className="mb-2 flex items-center gap-1.5 text-[11px] text-bot-muted">
             <Clock className="h-3 w-3 text-bot-amber" />
@@ -387,9 +358,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           </div>
         )}
 
-        {/* Slash command palette */}
         {slashOpen && slashMatches.length > 0 && (
-          <div className="mb-2 overflow-hidden rounded-xl border border-bot-border bg-bot-elevated shadow-lg" role="listbox" aria-label="Slash commands" id="slash-palette">
+          <div className="mb-2 overflow-hidden rounded-xl glass-heavy shadow-float animate-scaleIn" role="listbox" aria-label="Slash commands" id="slash-palette">
             {slashMatches.map((c, i) => (
               <button
                 key={c.cmd}
@@ -397,34 +367,33 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 aria-selected={i === slashIndex}
                 id={`slash-option-${i}`}
                 onMouseDown={(e) => {
-                  e.preventDefault(); // prevent textarea blur
+                  e.preventDefault();
                   applySlashCommand(c);
                 }}
-                className={`flex w-full items-baseline gap-3 px-3 py-2 text-left transition-colors ${
+                className={`flex w-full items-baseline gap-3 px-4 py-2.5 text-left transition-all duration-150 ${
                   i === slashIndex
                     ? "bg-bot-accent/10 text-bot-accent"
-                    : "text-bot-text hover:bg-bot-surface"
+                    : "text-bot-text hover:bg-bot-elevated/40"
                 }`}
               >
                 <span className="font-mono text-body font-semibold">{c.cmd}</span>
                 {c.args && (
-                  <span className="font-mono text-caption text-bot-muted">{c.args}</span>
+                  <span className="font-mono text-caption text-bot-muted/60">{c.args}</span>
                 )}
-                <span className="ml-auto text-caption text-bot-muted">{c.desc}</span>
+                <span className="ml-auto text-caption text-bot-muted/60">{c.desc}</span>
               </button>
             ))}
-            <div className="border-t border-bot-border px-3 py-1.5 text-[10px] text-bot-muted">
+            <div className="border-t border-bot-border/30 px-4 py-2 text-[10px] text-bot-muted/50">
               ↑↓ navigate · Enter/Tab select · Esc dismiss
             </div>
           </div>
         )}
 
-        {/* @ file picker */}
         {atOpen && (
-          <div className="mb-2 overflow-hidden rounded-xl border border-bot-border bg-bot-elevated shadow-lg" role="listbox" aria-label="File suggestions" id="file-palette">
+          <div className="mb-2 overflow-hidden rounded-xl glass-heavy shadow-float animate-scaleIn" role="listbox" aria-label="File suggestions" id="file-palette">
             {atFiles.length === 0 ? (
-              <div className="px-3 py-2 text-caption text-bot-muted">
-                {atQuery ? "No matches" : "Loading…"}
+              <div className="px-4 py-3 text-caption text-bot-muted/60">
+                {atQuery ? "No matches" : "Loading..."}
               </div>
             ) : (
               <div className="max-h-48 overflow-y-auto">
@@ -438,10 +407,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                       e.preventDefault();
                       applyAtFile(f);
                     }}
-                    className={`flex w-full items-center gap-2 px-3 py-2 text-left transition-colors ${
+                    className={`flex w-full items-center gap-2 px-4 py-2.5 text-left transition-all duration-150 ${
                       i === atIndex
                         ? "bg-bot-accent/10 text-bot-accent"
-                        : "text-bot-text hover:bg-bot-surface"
+                        : "text-bot-text hover:bg-bot-elevated/40"
                     }`}
                   >
                     <span className="font-mono text-caption">{f}</span>
@@ -449,13 +418,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 ))}
               </div>
             )}
-            <div className="border-t border-bot-border px-3 py-1.5 text-[10px] text-bot-muted">
+            <div className="border-t border-bot-border/30 px-4 py-2 text-[10px] text-bot-muted/50">
               ↑↓ navigate · Enter/Tab select · Esc dismiss
             </div>
           </div>
         )}
 
-        {/* Attachment previews */}
         <AttachmentPreview attachments={attachments} onRemove={removeAttachment} />
 
         <div
@@ -463,7 +431,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           onDragOver={handleDragOver}
           onDrop={handleDrop}
         >
-          {/* Hidden file input */}
           <input
             ref={fileInputRef}
             type="file"
@@ -475,11 +442,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             }}
           />
 
-          {/* Attach button */}
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={disabled}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-bot-muted hover:text-bot-text hover:bg-bot-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-bot-muted hover:text-bot-text hover:bg-bot-elevated/50 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
             title="Attach file"
             aria-label="Attach file"
           >
@@ -501,20 +467,20 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             aria-expanded={slashOpen || atOpen}
             aria-controls={slashOpen ? "slash-palette" : atOpen ? "file-palette" : undefined}
             aria-activedescendant={slashOpen ? `slash-option-${slashIndex}` : atOpen ? `file-option-${atIndex}` : undefined}
-            className={`flex-1 resize-none rounded-xl border px-4 py-2.5 text-body text-bot-text placeholder-bot-muted/60 outline-none transition-colors ${
+            className={`flex-1 resize-none rounded-xl border px-4 py-3 text-body text-bot-text placeholder:text-bot-muted/50 outline-none transition-all duration-200 ${
               willQueue
-                ? "border-bot-amber/40 bg-bot-elevated focus:border-bot-amber/70"
-                : "border-bot-border bg-bot-elevated focus:border-bot-accent"
+                ? "border-bot-amber/30 bg-bot-elevated/40 focus:border-bot-amber/60 focus:shadow-[0_0_12px_2px_rgb(var(--bot-amber)/0.15)]"
+                : "border-bot-border/40 bg-bot-elevated/40 focus:border-bot-accent/60 focus:shadow-glow-sm"
             } disabled:opacity-50`}
             style={{ maxHeight: 180 }}
           />
           <button
             onClick={submit}
             disabled={disabled || (!value.trim() && attachments.length === 0)}
-            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-40 active:scale-90 ${
               willQueue
-                ? "bg-bot-amber text-white hover:bg-bot-amber/80"
-                : "bg-bot-accent text-white hover:bg-bot-accent/80"
+                ? "bg-bot-amber text-white hover:brightness-110 shadow-[0_0_12px_2px_rgb(var(--bot-amber)/0.2)]"
+                : "gradient-accent text-white hover:brightness-110 shadow-glow-sm hover:shadow-glow-md"
             }`}
             title={willQueue ? "Queue message" : "Send"}
             aria-label={willQueue ? "Queue message" : "Send message"}

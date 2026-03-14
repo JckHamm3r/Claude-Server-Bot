@@ -24,6 +24,7 @@ interface ToastItem {
   duration: number;
   visible: boolean;
   exiting: boolean;
+  createdAt: number;
 }
 
 interface ToastContextValue {
@@ -35,11 +36,11 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 const MAX_VISIBLE = 3;
 const DEFAULT_DURATION = 5000;
 
-const typeStyles: Record<ToastType, string> = {
-  info: "text-bot-accent",
-  success: "text-bot-green",
-  warning: "text-bot-amber",
-  error: "text-bot-red",
+const typeConfig: Record<ToastType, { border: string; icon: string; color: string }> = {
+  info: { border: "border-l-bot-accent", icon: "ℹ", color: "text-bot-accent" },
+  success: { border: "border-l-bot-green", icon: "✓", color: "text-bot-green" },
+  warning: { border: "border-l-bot-amber", icon: "⚠", color: "text-bot-amber" },
+  error: { border: "border-l-bot-red", icon: "✕", color: "text-bot-red" },
 };
 
 function ToastItemComponent({
@@ -50,7 +51,9 @@ function ToastItemComponent({
   onDismiss: (id: string) => void;
 }) {
   const [entered, setEntered] = useState(false);
+  const [progress, setProgress] = useState(100);
   const handleClick = useCallback(() => onDismiss(item.id), [item.id, onDismiss]);
+  const config = typeConfig[item.type];
 
   useEffect(() => {
     const id = requestAnimationFrame(() => {
@@ -59,23 +62,52 @@ function ToastItemComponent({
     return () => cancelAnimationFrame(id);
   }, []);
 
+  useEffect(() => {
+    if (item.duration <= 0) return;
+    const start = item.createdAt;
+    const end = start + item.duration;
+    const tick = () => {
+      const now = Date.now();
+      const remaining = Math.max(0, (end - now) / item.duration) * 100;
+      setProgress(remaining);
+      if (remaining > 0 && !item.exiting) {
+        requestAnimationFrame(tick);
+      }
+    };
+    const raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [item.duration, item.createdAt, item.exiting]);
+
   return (
     <div
       role="alert"
       onClick={handleClick}
       className={`
-        flex cursor-pointer items-center gap-2 rounded-xl border border-bot-border bg-bot-elevated px-4 py-3 text-body text-bot-text shadow-lg
+        relative cursor-pointer overflow-hidden rounded-xl border border-bot-border/30 border-l-[3px] ${config.border}
+        glass-heavy shadow-float
         transition-all duration-300 ease-out
         ${item.exiting ? "translate-x-full opacity-0" : !entered ? "translate-x-full opacity-0" : "translate-x-0 opacity-100"}
       `}
     >
-      <span className={`shrink-0 font-semibold ${typeStyles[item.type]}`}>
-        {item.type === "info" && "ℹ"}
-        {item.type === "success" && "✓"}
-        {item.type === "warning" && "⚠"}
-        {item.type === "error" && "✕"}
-      </span>
-      <span className="flex-1">{item.message}</span>
+      <div className="flex items-center gap-3 px-4 py-3">
+        <span className={`shrink-0 font-bold text-body ${config.color}`}>
+          {config.icon}
+        </span>
+        <span className="flex-1 text-body text-bot-text">{item.message}</span>
+      </div>
+      {item.duration > 0 && (
+        <div className="absolute bottom-0 left-0 h-0.5 bg-bot-border/20 w-full">
+          <div
+            className={`h-full transition-none ${
+              item.type === "error" ? "bg-bot-red/40"
+              : item.type === "success" ? "bg-bot-green/40"
+              : item.type === "warning" ? "bg-bot-amber/40"
+              : "bg-bot-accent/40"
+            }`}
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -109,6 +141,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         duration,
         visible: true,
         exiting: false,
+        createdAt: Date.now(),
       };
 
       setToasts((prev) => [...prev, item].slice(-MAX_VISIBLE));
@@ -126,11 +159,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={value}>
       {children}
       <div
-        className="pointer-events-none fixed right-4 top-4 z-[9999] flex flex-col gap-2"
+        className="pointer-events-none fixed right-4 top-4 z-[9999] flex flex-col gap-2.5 w-80"
         style={{ pointerEvents: "none" }}
       >
         <div
-          className="flex flex-col gap-2"
+          className="flex flex-col gap-2.5"
           style={{ pointerEvents: "auto" }}
         >
           {toasts.map((item) => (

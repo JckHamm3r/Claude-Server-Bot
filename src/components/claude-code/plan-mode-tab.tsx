@@ -431,14 +431,14 @@ export function PlanModeTab() {
   return (
     <div className="flex h-full overflow-hidden">
       {/* Left panel: plan history */}
-      <div className="flex w-56 shrink-0 flex-col border-r border-bot-border bg-bot-surface">
-        <div className="flex items-center justify-between px-3 py-3 border-b border-bot-border">
-          <span className="text-caption font-semibold text-bot-muted uppercase tracking-wide">
+      <div className="flex w-56 shrink-0 flex-col border-r border-bot-border/30 bg-bot-surface/60 backdrop-blur-sm">
+        <div className="flex items-center justify-between px-3 py-3 border-b border-bot-border/30">
+          <span className="text-caption font-semibold text-bot-muted uppercase tracking-wider">
             Plans
           </span>
           <button
             onClick={() => setActivePlanId(null)}
-            className="rounded p-1 text-bot-muted hover:text-bot-text transition-colors"
+            className="rounded-lg p-1.5 text-bot-muted hover:text-bot-accent hover:bg-bot-accent/10 transition-all duration-200"
             title="New plan"
           >
             <Plus className="h-3.5 w-3.5" />
@@ -447,16 +447,17 @@ export function PlanModeTab() {
 
         <div className="flex-1 overflow-y-auto py-1">
           {planList.length === 0 ? (
-            <p className="px-3 py-4 text-caption text-bot-muted text-center">
-              No plans yet
-            </p>
+            <div className="flex flex-col items-center py-8 px-3">
+              <ClipboardList className="h-8 w-8 text-bot-muted/20 mb-2" />
+              <p className="text-caption text-bot-muted text-center">No plans yet</p>
+            </div>
           ) : (
             planList.map((plan) => (
               <button
                 key={plan.id}
                 onClick={() => setActivePlanId(plan.id)}
                 className={cn(
-                  "w-full px-3 py-2 text-left transition-colors hover:bg-bot-elevated",
+                  "w-full px-3 py-2.5 mx-1 rounded-lg text-left transition-all duration-200 hover:bg-bot-elevated/40",
                   activePlanId === plan.id && "bg-bot-elevated",
                 )}
               >
@@ -475,18 +476,18 @@ export function PlanModeTab() {
       {/* Right panel */}
       <div className="flex flex-1 flex-col overflow-hidden bg-bot-bg">
         {!connected && (
-          <div className="px-4 py-2 text-caption text-bot-amber border-b border-bot-border bg-bot-amber/5">
-            Connecting to server…
+          <div className="px-4 py-2.5 text-caption text-bot-amber border-b border-bot-border/30 bg-bot-amber/5 backdrop-blur-sm">
+            Connecting to server...
           </div>
         )}
 
         {planError && (
-          <div className="flex items-start gap-2 px-4 py-2.5 border-b border-bot-red/20 bg-bot-red/10">
+          <div className="flex items-start gap-2 px-4 py-2.5 border-b border-bot-red/20 bg-bot-red/5">
             <AlertCircle className="h-4 w-4 text-bot-red shrink-0 mt-0.5" />
             <p className="flex-1 text-caption text-bot-red">{planError}</p>
             <button
               onClick={handleDismissError}
-              className="rounded p-0.5 text-bot-red hover:text-bot-red/70 transition-colors"
+              className="rounded-lg p-1 text-bot-red hover:text-bot-red/70 transition-all duration-200"
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -495,10 +496,13 @@ export function PlanModeTab() {
 
         <div className="flex-1 overflow-y-auto p-4">
           {!activePlan ? (
-            <div className="flex flex-col items-center justify-center min-h-full gap-6 py-12">
-              <div className="flex flex-col items-center gap-2 text-bot-muted">
-                <ClipboardList className="h-10 w-10 opacity-40" />
-                <p className="text-subtitle font-medium text-bot-text">
+            <div className="flex flex-col items-center justify-center min-h-full gap-6 py-12 animate-fadeUp">
+              <div className="flex flex-col items-center gap-3 text-bot-muted">
+                <div className="relative">
+                  <div className="absolute -inset-4 rounded-full bg-bot-accent/5 blur-xl" />
+                  <ClipboardList className="relative h-12 w-12 text-bot-muted/30" />
+                </div>
+                <p className="text-title font-bold text-bot-text">
                   Plan Mode
                 </p>
                 <p className="text-body text-bot-muted text-center max-w-sm">
@@ -521,13 +525,13 @@ export function PlanModeTab() {
                   disabled={generating}
                   rows={4}
                   placeholder="e.g. Add a dark mode toggle to the sidebar and persist the preference in localStorage"
-                  className="w-full rounded-lg border border-bot-border bg-bot-surface px-4 py-3 text-body text-bot-text placeholder:text-bot-muted focus:border-bot-accent focus:outline-none resize-none disabled:opacity-60"
+                  className="w-full rounded-xl border border-bot-border/40 bg-bot-surface/60 backdrop-blur-sm px-4 py-3 text-body text-bot-text placeholder:text-bot-muted/50 focus:border-bot-accent/50 focus:shadow-glow-sm focus:outline-none resize-none disabled:opacity-60 transition-all duration-200"
                 />
 
                 <button
                   onClick={handleGeneratePlan}
                   disabled={!goal.trim() || generating || !connected}
-                  className="self-end flex items-center gap-2 rounded-lg bg-bot-accent px-5 py-2.5 text-body font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="self-end flex items-center gap-2 rounded-xl gradient-accent px-6 py-2.5 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
                 >
                   {generating ? (
                     <>
@@ -625,7 +629,7 @@ export function PlanModeTab() {
               )}
 
               {activePlan.status === "reviewing" && !executing && (
-                <div className="flex items-center gap-2 rounded-lg border border-bot-border bg-bot-surface px-3 py-2">
+                <div className="flex items-center gap-2 rounded-xl border border-bot-border/30 bg-bot-surface/60 backdrop-blur-sm px-4 py-2.5 focus-within:border-bot-accent/40 focus-within:shadow-glow-sm transition-all duration-200">
                   <input
                     type="text"
                     value={refineInput}
@@ -637,17 +641,17 @@ export function PlanModeTab() {
                       }
                     }}
                     disabled={generating}
-                    placeholder="Refine this plan… e.g. 'Add a testing step' or 'Combine steps 2 and 3'"
-                    className="flex-1 bg-transparent text-body text-bot-text placeholder:text-bot-muted focus:outline-none disabled:opacity-60"
+                    placeholder="Refine this plan... e.g. 'Add a testing step' or 'Combine steps 2 and 3'"
+                    className="flex-1 bg-transparent text-body text-bot-text placeholder:text-bot-muted/50 focus:outline-none disabled:opacity-60"
                   />
                   <button
                     onClick={handleRefinePlan}
                     disabled={!refineInput.trim() || generating}
-                    className="rounded-md p-1.5 text-bot-muted hover:text-bot-accent disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    className="rounded-lg p-2 text-bot-muted hover:text-bot-accent hover:bg-bot-accent/10 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200"
                     title="Refine plan"
                   >
                     {generating ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <Loader2 className="h-4 w-4 animate-spin text-bot-accent" />
                     ) : (
                       <Send className="h-4 w-4" />
                     )}

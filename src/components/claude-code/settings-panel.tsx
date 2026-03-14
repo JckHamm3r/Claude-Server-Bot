@@ -411,16 +411,16 @@ export function SettingsPanel() {
   return (
     <div className="flex h-full overflow-hidden">
       {/* Sidebar */}
-      <div className="w-44 shrink-0 border-r border-bot-border bg-bot-surface flex flex-col py-2 overflow-y-auto space-y-1">
+      <div className="w-48 shrink-0 border-r border-bot-border/30 bg-bot-surface/60 backdrop-blur-sm flex flex-col py-2 overflow-y-auto space-y-0.5 px-1.5">
         {sections.map((s) => (
           <button
             key={s.key}
             onClick={() => setActiveSection(s.key)}
             className={cn(
-              "w-full text-left px-4 py-2.5 text-body transition-colors",
+              "w-full text-left px-3.5 py-2.5 rounded-lg text-body transition-all duration-200",
               activeSection === s.key
-                ? "bg-bot-accent/10 text-bot-accent font-medium"
-                : "text-bot-muted hover:text-bot-text hover:bg-bot-elevated",
+                ? "bg-bot-accent/10 text-bot-accent font-medium shadow-glow-sm"
+                : "text-bot-muted hover:text-bot-text hover:bg-bot-elevated/40",
             )}
           >
             {s.label}
@@ -434,7 +434,7 @@ export function SettingsPanel() {
         {/* ── General ── */}
         {activeSection === "general" && (
           <div className="mx-auto max-w-2xl">
-            <h2 className="mb-6 text-subtitle font-semibold text-bot-text">General</h2>
+            <h2 className="mb-6 text-subtitle font-bold text-bot-text">General</h2>
             <div className="space-y-6">
               <SettingRow title="Session Auto-Naming" description="Automatically name new sessions based on the first message sent.">
                 <Toggle checked={settings.auto_naming_enabled} onChange={(v) => update({ auto_naming_enabled: v })} />
@@ -447,7 +447,7 @@ export function SettingsPanel() {
               >
                 <Toggle checked={settings.full_trust_mode} onChange={(v) => update({ full_trust_mode: v })} danger />
               </SettingRow>
-              <div className="rounded-lg border border-bot-border bg-bot-surface p-4">
+              <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5">
                 <div className="mb-3">
                   <p className="text-body font-medium text-bot-text">Custom Default Context</p>
                   <p className="mt-0.5 text-caption text-bot-muted">Prepended to every new session as additional context for Claude.</p>
@@ -458,7 +458,7 @@ export function SettingsPanel() {
                   onBlur={(e) => update({ custom_default_context: e.target.value || null })}
                   rows={5}
                   placeholder="e.g. Focus on the authentication module. Always prefer TypeScript…"
-                  className="w-full rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text placeholder-bot-muted outline-none focus:border-bot-accent resize-none"
+                  className="w-full rounded-xl border border-bot-border/40 bg-bot-elevated/40 px-4 py-2.5 text-body text-bot-text placeholder:text-bot-muted/50 outline-none focus:border-bot-accent/50 focus:shadow-glow-sm transition-all duration-200 resize-none"
                 />
               </div>
             </div>
@@ -472,10 +472,10 @@ export function SettingsPanel() {
         {/* ── Bot Identity ── */}
         {activeSection === "bot_identity" && (
           <div className="mx-auto max-w-2xl">
-            <h2 className="mb-6 text-subtitle font-semibold text-bot-text">Bot Identity</h2>
+            <h2 className="mb-6 text-subtitle font-bold text-bot-text">Bot Identity</h2>
             <form onSubmit={handleSaveIdentity} className="space-y-5">
               {/* Avatar */}
-              <div className="rounded-lg border border-bot-border bg-bot-surface p-4">
+              <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5">
                 <p className="text-body font-medium text-bot-text mb-3">Avatar</p>
                 <div className="flex items-center gap-4">
                   <div className="h-16 w-16 rounded-full overflow-hidden border border-bot-border bg-bot-elevated shrink-0">
@@ -509,7 +509,7 @@ export function SettingsPanel() {
                 </div>
               </div>
               {/* Name */}
-              <div className="rounded-lg border border-bot-border bg-bot-surface p-4">
+              <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5">
                 <label className="block text-body font-medium text-bot-text mb-2">Bot Name</label>
                 <input
                   value={botName}
@@ -518,7 +518,7 @@ export function SettingsPanel() {
                 />
               </div>
               {/* Tagline */}
-              <div className="rounded-lg border border-bot-border bg-bot-surface p-4">
+              <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5">
                 <label className="block text-body font-medium text-bot-text mb-2">Tagline</label>
                 <input
                   value={botTagline}
@@ -527,7 +527,7 @@ export function SettingsPanel() {
                 />
               </div>
               {/* Preview */}
-              <div className="rounded-lg border border-bot-border bg-bot-surface p-4">
+              <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5">
                 <p className="text-caption text-bot-muted mb-3">Login page preview</p>
                 <div className="flex flex-col items-center gap-2 py-4 bg-bot-bg rounded-lg">
                   <div className="h-14 w-14 rounded-full overflow-hidden border border-bot-border">
@@ -556,10 +556,10 @@ export function SettingsPanel() {
         {/* ── Rate Limits ── */}
         {activeSection === "rate_limits" && (
           <div className="mx-auto max-w-2xl">
-            <h2 className="mb-6 text-subtitle font-semibold text-bot-text">Rate Limits</h2>
+            <h2 className="mb-6 text-subtitle font-bold text-bot-text">Rate Limits</h2>
             <p className="text-body text-bot-muted mb-6">Per-user limits applied to chat sessions.</p>
             <form onSubmit={handleSaveRates} className="space-y-4">
-              <div className="rounded-lg border border-bot-border bg-bot-surface p-4">
+              <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5">
                 <label className="block text-body font-medium text-bot-text mb-1">Commands per session</label>
                 <p className="text-caption text-bot-muted mb-2">Max number of messages a user can send in one session.</p>
                 <input
@@ -567,7 +567,7 @@ export function SettingsPanel() {
                   className="w-32 rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent"
                 />
               </div>
-              <div className="rounded-lg border border-bot-border bg-bot-surface p-4">
+              <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5">
                 <label className="block text-body font-medium text-bot-text mb-1">Session runtime (minutes)</label>
                 <p className="text-caption text-bot-muted mb-2">Max duration of a session before it is terminated.</p>
                 <input
@@ -575,7 +575,7 @@ export function SettingsPanel() {
                   className="w-32 rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent"
                 />
               </div>
-              <div className="rounded-lg border border-bot-border bg-bot-surface p-4">
+              <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5">
                 <label className="block text-body font-medium text-bot-text mb-1">Concurrent sessions</label>
                 <p className="text-caption text-bot-muted mb-2">Max number of active sessions per user at one time.</p>
                 <input
@@ -596,7 +596,7 @@ export function SettingsPanel() {
         {/* ── Users ── */}
         {activeSection === "users" && (
           <div className="mx-auto max-w-2xl">
-            <h2 className="mb-6 text-subtitle font-semibold text-bot-text">Users</h2>
+            <h2 className="mb-6 text-subtitle font-bold text-bot-text">Users</h2>
             {newUserPassword && (
               <div className="mb-6 rounded-lg border border-bot-green/40 bg-bot-green/10 p-4">
                 <p className="text-body font-medium text-bot-green mb-2">User created: {newUserPassword.email}</p>
@@ -641,8 +641,8 @@ export function SettingsPanel() {
         {/* ── Project ── */}
         {activeSection === "project" && (
           <div className="mx-auto max-w-2xl">
-            <h2 className="mb-6 text-subtitle font-semibold text-bot-text">Project</h2>
-            <div className="rounded-lg border border-bot-border bg-bot-surface p-4 mb-6">
+            <h2 className="mb-6 text-subtitle font-bold text-bot-text">Project</h2>
+            <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5 mb-6">
               <p className="text-caption text-bot-muted mb-1">Current project directory</p>
               <p className="text-body font-mono text-bot-text">{projectRoot || "Not set"}</p>
               {projectStatus && (
@@ -669,7 +669,7 @@ export function SettingsPanel() {
         {/* ── Activity Log ── */}
         {activeSection === "activity_log" && (
           <div className="mx-auto max-w-3xl">
-            <h2 className="mb-6 text-subtitle font-semibold text-bot-text">Activity Log</h2>
+            <h2 className="mb-6 text-subtitle font-bold text-bot-text">Activity Log</h2>
             <div className="rounded-lg border border-bot-border overflow-hidden">
               {activityEntries.length === 0 && !loadingActivity ? (
                 <p className="px-4 py-6 text-center text-body text-bot-muted">No activity recorded yet</p>
@@ -717,7 +717,7 @@ export function SettingsPanel() {
         {/* ── Backup & Restore ── */}
         {activeSection === "backup" && (
           <div className="mx-auto max-w-2xl">
-            <h2 className="mb-6 text-subtitle font-semibold text-bot-text">Backup & Restore</h2>
+            <h2 className="mb-6 text-subtitle font-bold text-bot-text">Backup & Restore</h2>
             <div className="space-y-6">
               <div className="rounded-lg border border-bot-border bg-bot-surface p-6">
                 <div className="flex items-start gap-4">
@@ -763,7 +763,7 @@ export function SettingsPanel() {
         {/* ── System ── */}
         {activeSection === "system" && (
           <div className="mx-auto max-w-2xl space-y-6">
-            <h2 className="mb-2 text-subtitle font-semibold text-bot-text">System</h2>
+            <h2 className="mb-2 text-subtitle font-bold text-bot-text">System</h2>
 
             {/* Health checks */}
             <div className="rounded-lg border border-bot-border bg-bot-surface p-5">
@@ -867,7 +867,7 @@ export function SettingsPanel() {
         {/* ── Updates ── */}
         {activeSection === "updates" && (
           <div className="mx-auto max-w-2xl">
-            <h2 className="mb-6 text-subtitle font-semibold text-bot-text">Updates</h2>
+            <h2 className="mb-6 text-subtitle font-bold text-bot-text">Updates</h2>
             <SettingRow title="Auto-Update Claude CLI" description="Automatically update Claude CLI every Sunday at 3:00 AM (fixed schedule).">
               <Toggle checked={autoUpdate === "true"} onChange={handleAutoUpdateToggle} />
             </SettingRow>
@@ -930,7 +930,7 @@ function BudgetSection() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-subtitle font-semibold text-bot-text">Budget Limits</h2>
+      <h2 className="text-subtitle font-bold text-bot-text">Budget Limits</h2>
       <p className="text-caption text-bot-muted">Set spending limits for Claude usage. Set to 0 to disable.</p>
 
       <div className="space-y-4">
@@ -1023,7 +1023,7 @@ function ApiKeySection() {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-subtitle font-semibold text-bot-text">Anthropic API Key</h3>
+      <h3 className="text-subtitle font-bold text-bot-text">Anthropic API Key</h3>
       <p className="text-caption text-bot-muted">
         Configure an API key to enable the SDK provider. This allows sessions to use the Anthropic API directly
         instead of the Claude CLI subprocess.
@@ -1067,7 +1067,7 @@ function ApiKeySection() {
               value={inputKey}
               onChange={(e) => setInputKey(e.target.value)}
               placeholder="sk-ant-..."
-              className="w-full rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text placeholder-bot-muted outline-none focus:border-bot-accent transition-colors font-mono"
+              className="w-full rounded-xl border border-bot-border/40 bg-bot-elevated/40 px-4 py-2.5 text-body text-bot-text placeholder:text-bot-muted/50 outline-none focus:border-bot-accent/50 focus:shadow-glow-sm transition-all duration-200 transition-colors font-mono"
             />
             <div className="flex gap-2">
               <button
@@ -1129,11 +1129,11 @@ function SettingRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-bot-border bg-bot-surface p-4">
+    <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5">
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1">
-          <p className="text-body font-medium text-bot-text">{title}</p>
-          <p className="mt-0.5 text-caption text-bot-muted">{description}</p>
+          <p className="text-body font-semibold text-bot-text">{title}</p>
+          <p className="mt-0.5 text-caption text-bot-muted/70">{description}</p>
           {warning && warningText && <p className="mt-2 text-caption text-bot-red">{warningText}</p>}
         </div>
         <div className="shrink-0">{children}</div>
@@ -1157,11 +1157,15 @@ function Toggle({
       aria-checked={checked}
       onClick={() => onChange(!checked)}
       className={cn(
-        "relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none",
-        checked ? (danger ? "bg-bot-red" : "bg-bot-accent") : "bg-bot-elevated border border-bot-border",
+        "relative inline-flex h-6 w-11 items-center rounded-full transition-all duration-300 focus:outline-none",
+        checked
+          ? danger
+            ? "bg-bot-red shadow-[0_0_10px_2px_rgb(var(--bot-red)/0.25)]"
+            : "bg-bot-accent shadow-glow-sm"
+          : "bg-bot-elevated border border-bot-border/40",
       )}
     >
-      <span className={cn("inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform", checked ? "translate-x-6" : "translate-x-1")} />
+      <span className={cn("inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-all duration-300", checked ? "translate-x-6" : "translate-x-1")} />
     </button>
   );
 }

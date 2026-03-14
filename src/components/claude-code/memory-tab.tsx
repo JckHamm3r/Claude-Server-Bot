@@ -98,26 +98,24 @@ export function MemoryTab() {
 
   const saveBtnClass =
     saveState === "error"
-      ? "px-3 py-1 rounded text-caption font-medium bg-bot-red text-white"
+      ? "px-4 py-1.5 rounded-lg text-caption font-semibold bg-bot-red text-white"
       : saveState === "saved"
-        ? "px-3 py-1 rounded text-caption font-medium bg-bot-green text-white"
-        : "px-3 py-1 rounded text-caption font-medium bg-bot-accent text-white hover:opacity-90 disabled:opacity-50";
+        ? "px-4 py-1.5 rounded-lg text-caption font-semibold bg-bot-green text-white shadow-[0_0_12px_2px_rgb(var(--bot-green)/0.2)]"
+        : "px-4 py-1.5 rounded-lg text-caption font-semibold gradient-accent text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] disabled:opacity-50 transition-all duration-200";
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Warning banner */}
-      <div className="flex items-center gap-2 px-4 py-2 bg-bot-amber/10 border-b border-bot-border shrink-0">
+      <div className="flex items-center gap-2 px-4 py-2.5 bg-bot-amber/5 border-b border-bot-border/30 shrink-0">
         <span className="text-bot-amber font-bold text-body">⚠</span>
-        <span className="text-caption text-bot-amber">
+        <span className="text-caption text-bot-amber/80">
           These files guide Claude&apos;s behavior. Edit carefully.
         </span>
       </div>
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        {/* Left sidebar */}
-        <aside className="w-60 shrink-0 flex flex-col border-r border-bot-border bg-bot-surface overflow-y-auto">
-          <div className="px-3 py-2 border-b border-bot-border">
-            <span className="text-caption text-bot-muted uppercase tracking-wide font-medium">
+        <aside className="w-60 shrink-0 flex flex-col border-r border-bot-border/30 bg-bot-surface/60 backdrop-blur-sm overflow-y-auto">
+          <div className="px-3 py-2.5 border-b border-bot-border/30">
+            <span className="text-caption text-bot-muted uppercase tracking-wider font-semibold">
               Files
             </span>
           </div>
@@ -129,10 +127,10 @@ export function MemoryTab() {
                   <button
                     onClick={() => setActiveFile(file)}
                     className={[
-                      "w-full text-left px-3 py-2 text-caption transition-colors",
+                      "w-full text-left px-3 py-2.5 mx-1 rounded-lg text-caption transition-all duration-200",
                       isActive
-                        ? "bg-bot-accent/10 text-bot-accent font-medium"
-                        : "text-bot-text hover:bg-bot-elevated",
+                        ? "bg-bot-accent/10 text-bot-accent font-medium shadow-glow-sm"
+                        : "text-bot-text hover:bg-bot-elevated/40",
                     ].join(" ")}
                   >
                     {friendlyName(file)}
@@ -141,18 +139,16 @@ export function MemoryTab() {
               );
             })}
             {files.length === 0 && (
-              <li className="px-3 py-2 text-caption text-bot-muted italic">
+              <li className="px-3 py-4 text-caption text-bot-muted italic text-center">
                 No files found.
               </li>
             )}
           </ul>
         </aside>
 
-        {/* Editor area */}
         <div className="flex flex-col flex-1 min-w-0 bg-bot-bg overflow-hidden">
-          {/* Editor header */}
-          <div className="flex items-center justify-between px-4 py-2 border-b border-bot-border bg-bot-surface shrink-0">
-            <span className="text-body text-bot-text font-medium truncate">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm shrink-0">
+            <span className="text-body text-bot-text font-semibold truncate">
               {activeFile ? friendlyName(activeFile) : "No file selected"}
             </span>
             <button
@@ -164,22 +160,24 @@ export function MemoryTab() {
             </button>
           </div>
 
-          {/* Error banner */}
           {loadError && (
-            <div className="px-4 py-2 bg-bot-red/10 border-b border-bot-border text-bot-red text-caption shrink-0">
+            <div className="px-4 py-2 bg-bot-red/5 border-b border-bot-border/30 text-bot-red text-caption shrink-0">
               {loadError}
             </div>
           )}
 
-          {/* Textarea */}
           <div className="flex-1 min-h-0 overflow-hidden relative">
             {loadingFile && (
-              <div className="absolute inset-0 flex items-center justify-center bg-bot-bg/60 z-10">
-                <span className="text-caption text-bot-muted">Loading…</span>
+              <div className="absolute inset-0 flex items-center justify-center bg-bot-bg/80 backdrop-blur-sm z-10">
+                <div className="flex items-center gap-2 text-caption text-bot-muted">
+                  <span className="h-2 w-2 rounded-full bg-bot-accent animate-bounce [animation-delay:0ms]" />
+                  <span className="h-2 w-2 rounded-full bg-bot-accent/70 animate-bounce [animation-delay:150ms]" />
+                  <span className="h-2 w-2 rounded-full bg-bot-accent/40 animate-bounce [animation-delay:300ms]" />
+                </div>
               </div>
             )}
             <textarea
-              className="w-full h-full resize-none bg-bot-bg text-bot-text font-mono text-caption p-4 outline-none border-none leading-relaxed"
+              className="w-full h-full resize-none bg-transparent text-bot-text font-mono text-caption p-4 outline-none border-none leading-relaxed"
               value={content}
               onChange={(e) => {
                 setContent(e.target.value);
