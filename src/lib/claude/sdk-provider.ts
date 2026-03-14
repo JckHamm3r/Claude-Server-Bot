@@ -7,9 +7,9 @@ interface SDKSessionState {
   model?: string;
   systemPrompt?: string;
   skipPermissions: boolean;
-  messageHistory: { role: "user" | "assistant"; content: string }[];
   abortController?: AbortController;
   lastActivity: number;
+  firstMessage: boolean;
 }
 
 const sessions = new Map<string, SDKSessionState>();
@@ -20,8 +20,8 @@ function getOrCreate(sessionId: string): SDKSessionState {
       emitter: new EventEmitter(),
       running: false,
       skipPermissions: false,
-      messageHistory: [],
       lastActivity: Date.now(),
+      firstMessage: true,
     });
   }
   const state = sessions.get(sessionId)!;
@@ -53,8 +53,6 @@ function getApiKey(): string {
   } catch { /* fallback to env */ }
   return process.env.ANTHROPIC_API_KEY ?? "";
 }
-
-const MAX_HISTORY = 100;
 
 async function runSDK(state: SDKSessionState, message: string): Promise<void> {
   if (state.running) return;
@@ -93,16 +91,12 @@ async function runSDK(state: SDKSessionState, message: string): Promise<void> {
   const abortController = new AbortController();
   state.abortController = abortController;
 
-  // Build the full message with system prompt for first message
+  // Prepend system prompt on first message only
   let fullMessage = message;
-  if (state.systemPrompt && state.messageHistory.length === 0) {
+  if (state.systemPrompt && state.firstMessage) {
     fullMessage = state.systemPrompt + "\n\n" + message;
   }
-
-  state.messageHistory.push({ role: "user", content: fullMessage });
-  if (state.messageHistory.length > MAX_HISTORY) {
-    state.messageHistory = state.messageHistory.slice(-MAX_HISTORY);
-  }
+  state.firstMessage = false;
 
   const timeoutMs = 600_000; // 10 minutes
   const timeoutId = setTimeout(() => {
@@ -144,10 +138,6 @@ async function runSDK(state: SDKSessionState, message: string): Promise<void> {
     }
 
     if (responseText) {
-      state.messageHistory.push({ role: "assistant", content: responseText });
-      if (state.messageHistory.length > MAX_HISTORY) {
-        state.messageHistory = state.messageHistory.slice(-MAX_HISTORY);
-      }
       state.emitter.emit("output", {
         type: "text",
         content: responseText,

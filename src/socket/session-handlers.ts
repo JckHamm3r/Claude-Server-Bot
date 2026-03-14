@@ -295,6 +295,39 @@ export function registerSessionHandlers(ctx: HandlerContext) {
     },
   );
 
+  // ── Lightweight session rejoin (reconnection) ─────────────────────
+  // Re-joins the socket room and re-attaches the output listener without
+  // destroying the existing provider session (preserves claudeSessionId,
+  // conversation context, and avoids re-sending the system prompt).
+  socket.on(
+    "claude:rejoin_session",
+    ({ sessionId }: { sessionId: string }) => {
+      if (!canAccessSession(sessionId, email)) {
+        socket.emit("claude:error", { sessionId, message: "Access denied" });
+        return;
+      }
+      socket.join(`session:${sessionId}`);
+      ctx.connectedUsers.set(socket.id, { email, activeSession: sessionId });
+      ctx.broadcastPresence();
+      ctx.ensureSessionListener(sessionId);
+
+      const sp = ctx.getSessionProvider(sessionId);
+      const currentContent = ctx.sessionStreamingContent.get(sessionId);
+      if (currentContent && sp.isRunning(sessionId)) {
+        socket.emit("claude:output", {
+          sessionId,
+          parsed: { type: "streaming", content: currentContent },
+          submittedBy: ctx.sessionCommandSubmitter.get(sessionId),
+        });
+      }
+      socket.emit("claude:session_ready", {
+        sessionId,
+        running: sp.isRunning(sessionId),
+        status: sp.isRunning(sessionId) ? "running" : "idle",
+      });
+    },
+  );
+
   // ── Session state sync (reconnection) ─────────────────────────────
   socket.on(
     "claude:get_session_state",

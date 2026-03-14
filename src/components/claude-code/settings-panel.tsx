@@ -154,10 +154,10 @@ export function SettingsPanel() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSection]);
 
-  // Poll resources every 5s when on system tab
+  // Poll resources every 30s when on system tab
   useEffect(() => {
     if (activeSection !== "system") return;
-    const t = setInterval(loadResources, 5000);
+    const t = setInterval(loadResources, 30_000);
     return () => clearInterval(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSection]);

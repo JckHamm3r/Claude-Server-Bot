@@ -375,6 +375,8 @@ Be specific. Each step should be atomic and independently executable. Return onl
       const planSession = getSession(plan.session_id);
       const skipPerms = planSession?.skip_permissions ?? false;
 
+      const completedResults: { summary: string; result: string }[] = [];
+
       let stepIdx = 0;
       while (stepIdx < approvedSteps.length) {
         const step = approvedSteps[stepIdx];
@@ -384,7 +386,19 @@ Be specific. Each step should be atomic and independently executable. Return onl
         const stepSessionId = `plan-step-${step.id}-${Date.now()}`;
         provider.createSession(stepSessionId, { skipPermissions: skipPerms });
 
-        const stepPrompt = `Execute this step: ${sanitizePromptInput(step.summary)}\n\nDetails: ${sanitizePromptInput(step.details ?? "")}`;
+        // Build context-aware prompt with plan goal and prior step results
+        const contextParts: string[] = [];
+        contextParts.push(`Overall plan goal: ${sanitizePromptInput(plan.goal)}`);
+        contextParts.push(`This is step ${stepIdx + 1} of ${approvedSteps.length}.`);
+        if (completedResults.length > 0) {
+          contextParts.push("Previously completed steps:");
+          for (const prev of completedResults) {
+            contextParts.push(`- ${prev.summary}: ${prev.result.slice(0, 500)}`);
+          }
+        }
+        contextParts.push(`\nExecute this step: ${sanitizePromptInput(step.summary)}`);
+        if (step.details) contextParts.push(`Details: ${sanitizePromptInput(step.details)}`);
+        const stepPrompt = contextParts.join("\n");
 
         let stepOutput = "";
         let stepError = "";
@@ -444,6 +458,7 @@ Be specific. Each step should be atomic and independently executable. Return onl
         }
 
         updatePlanStep(step.id, { status: "completed", result: stepOutput });
+        completedResults.push({ summary: step.summary, result: stepOutput });
         socket.emit("claude:step_completed", { planId, stepId: step.id, result: stepOutput });
         stepIdx++;
       }

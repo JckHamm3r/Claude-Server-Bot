@@ -286,15 +286,12 @@ export function ChatTab() {
       setConnected(true);
       setReconnecting(false);
       socket.emit("claude:list_sessions");
-      // Rejoin the active session room after reconnect so we receive output events
+      // Rejoin the active session room after reconnect — lightweight rejoin
+      // that preserves the existing Claude provider session (avoids destroying
+      // conversation context / claudeSessionId and re-sending system prompt).
       const session = activeSessionRef.current;
       if (session && initializedSessionsRef.current.has(session.id)) {
-        socket.emit("claude:create_session", {
-          sessionId: session.id,
-          skipPermissions: session.skip_permissions,
-          model: session.model,
-          provider_type: session.provider_type,
-        });
+        socket.emit("claude:rejoin_session", { sessionId: session.id });
         // Re-fetch authoritative messages from server on reconnect
         setLoadingMessages(true);
         socket.emit("claude:get_messages", { sessionId: session.id });

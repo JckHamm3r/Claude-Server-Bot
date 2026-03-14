@@ -13,9 +13,10 @@ import {
   canModifySession,
 } from "../lib/claude-db";
 import { logActivity } from "../lib/activity-log";
-import { getAppSetting } from "../lib/app-settings";
-import { checkBotConfigRequest } from "../lib/security-guard";
+import { getAppSetting, getPersonalityPrefix } from "../lib/app-settings";
+import { checkBotConfigRequest, getSecuritySystemPrompt } from "../lib/security-guard";
 import { dispatchNotification } from "../lib/notifications";
+import { getBotSelfIdentityPrompt } from "../lib/customization";
 
 export function registerMessageHandlers(ctx: HandlerContext) {
   const { socket, io, email } = ctx;
@@ -265,22 +266,47 @@ export function registerMessageHandlers(ctx: HandlerContext) {
         ctx.sessionListeners.delete(sessionId);
         ctx.sessionProviders.delete(sessionId);
 
-        // Re-create
+        // Rebuild system prompt for the new session
+        const parts: string[] = [];
+        const guardEnabled = getAppSetting("guard_rails_enabled", "true") === "true";
+        const securityPrefix = getSecuritySystemPrompt(guardEnabled);
+        if (securityPrefix) parts.push(securityPrefix);
+        const selfIdentity = getBotSelfIdentityPrompt();
+        if (selfIdentity) parts.push(selfIdentity);
+        if (session.personality) {
+          const personalityPrefix = getPersonalityPrefix(session.personality);
+          if (personalityPrefix) parts.push(personalityPrefix);
+        }
+        const systemPrompt = parts.length > 0 ? parts.join("\n\n") : undefined;
+
+        // Re-create with system prompt
         const sessionProvider = ctx.getSessionProvider(sessionId, session.provider_type);
         sessionProvider.createSession(sessionId, {
           skipPermissions: session.skip_permissions,
           model: session.model,
+          ...(systemPrompt ? { systemPrompt } : {}),
         });
         ctx.ensureSessionListener(sessionId);
 
-        // Send refreshed messages
+        // Send refreshed messages to UI
         const messages = getMessages(sessionId);
         io.to(`session:${sessionId}`).emit("claude:messages_updated", { sessionId, messages });
 
-        // Re-send the edited message through the provider
+        // Rebuild conversation context from prior messages so Claude has history
+        const priorMessages = messages.filter((m) => m.id !== messageId);
+        let contextPrefix = "";
+        if (priorMessages.length > 0) {
+          const historyLines = priorMessages.map((m) => {
+            const role = m.sender_type === "admin" ? "User" : "Assistant";
+            return `${role}: ${(m.content ?? "").slice(0, 2000)}`;
+          });
+          contextPrefix = "Previous conversation context:\n" + historyLines.join("\n") + "\n\nNew message:\n";
+        }
+
+        // Re-send the edited message with conversation context
         ctx.sessionCommandSubmitter.set(sessionId, email);
         io.to(`session:${sessionId}`).emit("claude:command_started", { sessionId, submittedBy: email });
-        sessionProvider.sendMessage(sessionId, newContent);
+        sessionProvider.sendMessage(sessionId, contextPrefix + newContent);
       } catch (err) {
         socket.emit("claude:error", { message: String(err) });
       }
