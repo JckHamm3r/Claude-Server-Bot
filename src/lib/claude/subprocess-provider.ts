@@ -272,8 +272,13 @@ function runClaude(
       } as ParsedOutput);
     }
 
-    state.running = false;
     state.lastActivity = Date.now();
+    if (state.waitingForPermission) {
+      // Subprocess exited because of a permission denial — don't emit "done"
+      // because we'll respawn after the user grants permission.
+      return;
+    }
+    state.running = false;
     state.emitter.emit("output", { type: "done" } as ParsedOutput);
   });
 
@@ -465,15 +470,12 @@ export const subprocessProvider: ClaudeCodeProvider = {
     const state = sessions.get(sessionId);
     if (!state) return;
     state.waitingForPermission = false;
+    state.running = false;
 
-    // Kill the active subprocess — proc.on("close") will emit "done" and set running = false
     if (state.activeProc) {
       killProcess(state.activeProc);
-      // Don't clear activeProc here — let close handler do it
-    } else {
-      // No active proc: emit synthetic done to unblock UI
-      state.emitter.emit("output", { type: "done" } as ParsedOutput);
     }
+    state.emitter.emit("output", { type: "done" } as ParsedOutput);
   },
 
   interrupt(sessionId) {

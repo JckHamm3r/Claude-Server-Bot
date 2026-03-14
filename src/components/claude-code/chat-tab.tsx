@@ -330,9 +330,14 @@ export function ChatTab() {
 
         if (parsed.type === "done") {
           streamingMsgIdRef.current = null;
-          setIsRunning(false);
+          // If a permission request is pending, the subprocess exited but will
+          // respawn after the user grants permission — don't reset the UI.
+          setPendingInteraction((prev) => {
+            if (prev?.type === "permission_request") return prev;
+            return null;
+          });
           setCurrentActivity(null);
-          setPendingInteraction(null);
+          setIsRunning(false);
           setMessages((prev) => [
             ...prev,
             {
