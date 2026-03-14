@@ -89,6 +89,9 @@ server {
     listen 80;
     server_name $DOMAIN;
 
+    add_header Content-Security-Policy "frame-ancestors 'self'" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+
     location ~ ^${LOCATION_PATH}(api|socket\.io|_next)/ {
         proxy_pass ${UPSTREAM_SCHEME}://127.0.0.1:$PORT;${PROXY_SSL_EXTRA}
         proxy_http_version 1.1;

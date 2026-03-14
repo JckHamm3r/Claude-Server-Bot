@@ -7,4 +7,15 @@ module.exports = {
   experimental: {
     serverComponentsExternalPackages: ["better-sqlite3"],
   },
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
+        ],
+      },
+    ];
+  },
 };

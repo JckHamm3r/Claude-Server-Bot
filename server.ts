@@ -27,10 +27,14 @@ app.prepare().then(() => {
   // Widget bootstrap — served outside basePath so the URL contains no slug.
   // Auth is checked by /api/w/init (requires session cookie).
   const widgetBasePath = slug ? `/${prefix}/${slug}` : "";
-  const widgetScheme = useHttps ? "https" : "http";
-  const widgetPort = process.env.PORT ?? "3000";
 
-  const WIDGET_LOADER = `(function(){if(window.__claudeWidget)return;window.__claudeWidget=true;var o="${widgetScheme}://"+location.hostname+":${widgetPort}";fetch(o+"/api/w/init",{credentials:"include"}).then(function(r){if(!r.ok)throw 0;return r.json()}).then(function(d){boot(o,d.bp,d.n)}).catch(function(){});function boot(o,bp,name){var b=document.createElement("button");b.title="Chat with "+name;b.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';Object.assign(b.style,{position:"fixed",bottom:"24px",right:"24px",zIndex:"2147483647",width:"56px",height:"56px",borderRadius:"50%",background:"#6366f1",color:"#fff",border:"none",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.3)",display:"flex",alignItems:"center",justifyContent:"center",transition:"transform .15s",fontFamily:"system-ui,sans-serif"});b.onmouseenter=function(){b.style.transform="scale(1.1)"};b.onmouseleave=function(){b.style.transform="scale(1)"};var p=document.createElement("div");Object.assign(p.style,{position:"fixed",bottom:"88px",right:"24px",zIndex:"2147483646",width:"420px",height:"600px",maxHeight:"80vh",maxWidth:"calc(100vw - 48px)",borderRadius:"12px",overflow:"hidden",boxShadow:"0 8px 32px rgba(0,0,0,0.4)",display:"none",border:"1px solid rgba(255,255,255,0.1)"});var f=document.createElement("iframe");f.src=o+bp+"/";f.style.cssText="width:100%;height:100%;border:none;background:#1a1a2e";f.allow="clipboard-write";p.appendChild(f);document.body.appendChild(p);var open=false;b.onclick=function(){open=!open;p.style.display=open?"block":"none";b.innerHTML=open?'<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>':'<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>'};document.body.appendChild(b)}})();`;
+  // Derive allowed origin from NEXTAUTH_URL for CORS restrictions
+  const allowedOrigin = (() => {
+    try { return new URL(process.env.NEXTAUTH_URL ?? "").origin; }
+    catch { return ""; }
+  })();
+
+  const WIDGET_LOADER = `(function(){if(window.__claudeWidget)return;window.__claudeWidget=true;var o=location.origin;fetch(o+"/api/w/init",{credentials:"include"}).then(function(r){if(!r.ok)throw 0;return r.json()}).then(function(d){boot(o,d.bp,d.n)}).catch(function(){});function boot(o,bp,name){var b=document.createElement("button");b.title="Chat with "+name;b.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';Object.assign(b.style,{position:"fixed",bottom:"24px",right:"24px",zIndex:"2147483647",width:"56px",height:"56px",borderRadius:"50%",background:"#6366f1",color:"#fff",border:"none",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.3)",display:"flex",alignItems:"center",justifyContent:"center",transition:"transform .15s",fontFamily:"system-ui,sans-serif"});b.onmouseenter=function(){b.style.transform="scale(1.1)"};b.onmouseleave=function(){b.style.transform="scale(1)"};var p=document.createElement("div");Object.assign(p.style,{position:"fixed",bottom:"88px",right:"24px",zIndex:"2147483646",width:"420px",height:"600px",maxHeight:"80vh",maxWidth:"calc(100vw - 48px)",borderRadius:"12px",overflow:"hidden",boxShadow:"0 8px 32px rgba(0,0,0,0.4)",display:"none",border:"1px solid rgba(255,255,255,0.1)"});var f=document.createElement("iframe");f.src=o+bp+"/widget";f.style.cssText="width:100%;height:100%;border:none;background:#1a1a2e";f.allow="clipboard-write";p.appendChild(f);document.body.appendChild(p);var open=false;b.onclick=function(){open=!open;p.style.display=open?"block":"none";b.innerHTML=open?'<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>':'<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>'};document.body.appendChild(b)}})();`;
 
   // /api/w/init — returns widget config if authenticated (session cookie checked via NextAuth JWT)
   const { getToken } = require("next-auth/jwt") as typeof import("next-auth/jwt");
@@ -63,7 +67,7 @@ app.prepare().then(() => {
         "Content-Type": "application/json",
         "Cache-Control": "private, no-store",
       };
-      if (origin) {
+      if (origin && (origin === allowedOrigin || !allowedOrigin)) {
         corsHeaders["Access-Control-Allow-Origin"] = origin;
         corsHeaders["Access-Control-Allow-Credentials"] = "true";
       }
@@ -127,7 +131,13 @@ app.prepare().then(() => {
 
   const io = new Server(httpServer, {
     path: socketPath,
-    cors: { origin: true, credentials: true },
+    cors: {
+      origin: (incoming: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
+        if (!incoming || !allowedOrigin || incoming === allowedOrigin) cb(null, true);
+        else cb(new Error("Origin not allowed"));
+      },
+      credentials: true,
+    },
     maxHttpBufferSize: 1e6,
     pingTimeout: 30000,
     pingInterval: 25000,
