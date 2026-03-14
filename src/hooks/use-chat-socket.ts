@@ -183,6 +183,25 @@ export function useChatSocket({
   useEffect(() => {
     if (!isRunning) {
       setRunStartTime(null);
+
+      // When isRunning goes false but no pendingInteraction is set,
+      // scan for an unresolved permission_request or user_question and restore it.
+      if (!pendingInteractionRef.current) {
+        setMessages((prev) => {
+          const last = prev.findLast(
+            (m) => m.parsed?.type === "permission_request" || m.parsed?.type === "user_question",
+          );
+          if (last) {
+            const doneAfter = prev.some(
+              (m, i) => i > prev.indexOf(last) && m.parsed?.type === "done",
+            );
+            if (!doneAfter) {
+              setPendingInteraction({ type: last.parsed!.type!, messageId: last.id });
+            }
+          }
+          return prev;
+        });
+      }
     } else if (runStartTime === null) {
       setRunStartTime(Date.now());
     }
@@ -397,8 +416,23 @@ export function useChatSocket({
       "claude:messages",
       ({ sessionId, messages: msgs }: { sessionId: string; messages: ChatMessage[] }) => {
         if (activeSessionRef.current?.id === sessionId) {
-          setMessages(expandToolCallsFromMetadata(msgs));
+          const expanded = expandToolCallsFromMetadata(msgs);
+          setMessages(expanded);
           setLoadingMessages(false);
+
+          // Restore pendingInteraction for an unresolved permission/question after reconnect
+          const lastInteractive = expanded.findLast(
+            (m) => m.parsed?.type === "permission_request" || m.parsed?.type === "user_question",
+          );
+          if (lastInteractive) {
+            const lastInteractiveIdx = expanded.lastIndexOf(lastInteractive);
+            const doneAfter = expanded.some(
+              (m, i) => i > lastInteractiveIdx && m.parsed?.type === "done",
+            );
+            if (!doneAfter) {
+              setPendingInteraction({ type: lastInteractive.parsed!.type!, messageId: lastInteractive.id });
+            }
+          }
         }
       },
     );
@@ -426,11 +460,22 @@ export function useChatSocket({
         if (parsed.type === "done") {
           streamingMsgIdRef.current = null;
           clearEditRecoveryTimer();
+          setCurrentActivity(null);
+
+          const waitingOnUser =
+            pendingInteractionRef.current?.type === "permission_request" ||
+            pendingInteractionRef.current?.type === "user_question";
+
           setPendingInteraction((prev) => {
             if (prev?.type === "permission_request" || prev?.type === "user_question") return prev;
             return null;
           });
-          setCurrentActivity(null);
+
+          if (waitingOnUser) {
+            // Don't mark done or drain queue — user still needs to approve/answer
+            return;
+          }
+
           setIsRunning(false);
           setMessages((prev) => {
             const last = prev[prev.length - 1];
@@ -649,12 +694,19 @@ export function useChatSocket({
 
     socket.on("claude:session_state", ({ sessionId, running }: { sessionId: string; running: boolean }) => {
       if (activeSessionRef.current?.id !== sessionId) return;
-      setIsRunning(running);
       if (running) {
+        setIsRunning(true);
         watchdogChecksRef.current = 0;
       } else {
+        // Don't mark idle while the user has a pending permission/question to act on
+        const waitingOnUser =
+          pendingInteractionRef.current?.type === "permission_request" ||
+          pendingInteractionRef.current?.type === "user_question";
+        if (!waitingOnUser) {
+          setIsRunning(false);
+          drainPending();
+        }
         setCurrentActivity(null);
-        drainPending();
       }
     });
 

@@ -316,7 +316,15 @@ export function MessageList({
                   onRetry={msg.parsed?.type === "error" && msg.parsed.retryable ? onRetry : undefined}
                   isLatest={isLastMsg && msg.id === messages[messages.length - 1]?.id}
                   isRunning={isRunning}
-                  isInteractive={pendingInteraction?.messageId === msg.id}
+                  isInteractive={
+                    pendingInteraction?.messageId === msg.id
+                    || (
+                      !isRunning
+                      && !pendingInteraction
+                      && (msg.parsed?.type === "permission_request" || msg.parsed?.type === "user_question")
+                      && msg.id === messages.findLast(m => m.parsed?.type === msg.parsed?.type)?.id
+                    )
+                  }
                   avatarState={avatarState}
                 />
               </div>
