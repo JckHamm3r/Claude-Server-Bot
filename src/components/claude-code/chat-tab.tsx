@@ -18,6 +18,47 @@ import { GlobalSearchDialog } from "./global-search-dialog";
 
 type PresenceUser = { email: string; activeSession: string | null };
 
+interface StoredToolCall {
+  toolCallId: string;
+  toolName: string;
+  toolInput?: unknown;
+  status: string;
+  result?: string;
+  exitCode?: number;
+}
+
+function expandToolCallsFromMetadata(msgs: ChatMessage[]): ChatMessage[] {
+  const expanded: ChatMessage[] = [];
+  for (const msg of msgs) {
+    const toolCalls = msg.metadata?.toolCalls as StoredToolCall[] | undefined;
+    if (toolCalls && toolCalls.length > 0 && msg.sender_type === "claude") {
+      for (const tc of toolCalls) {
+        expanded.push({
+          id: tc.toolCallId,
+          sender_type: "claude",
+          content: "",
+          parsed: {
+            type: "tool_result",
+            toolName: tc.toolName,
+            toolInput: tc.toolInput,
+            toolCallId: tc.toolCallId,
+            toolStatus: tc.status === "error" ? "error" : "done",
+            toolResult: tc.result,
+            exitCode: tc.exitCode,
+          },
+          timestamp: msg.timestamp,
+        });
+      }
+      if (msg.content?.trim()) {
+        expanded.push({ ...msg, metadata: { ...msg.metadata, toolCalls: undefined } });
+      }
+    } else {
+      expanded.push(msg);
+    }
+  }
+  return expanded;
+}
+
 interface SessionUsage {
   total_input_tokens: number;
   total_output_tokens: number;
@@ -310,7 +351,7 @@ export function ChatTab() {
       "claude:messages",
       ({ sessionId, messages: msgs }: { sessionId: string; messages: ChatMessage[] }) => {
         if (activeSessionRef.current?.id === sessionId) {
-          setMessages(msgs);
+          setMessages(expandToolCallsFromMetadata(msgs));
           setLoadingMessages(false);
         }
       },
