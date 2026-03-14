@@ -15,11 +15,16 @@ import { GlobalSearchDialog } from "./global-search-dialog";
 import { ChatInput } from "./chat-input";
 import { useChatSocket } from "@/hooks/use-chat-socket";
 
-export function ChatTab() {
+interface ChatTabProps {
+  isWidget?: boolean;
+}
+
+export function ChatTab({ isWidget = false }: ChatTabProps) {
   const { status: sessionStatus } = useSession();
   const [sessions, setSessions] = useState<ClaudeSession[]>([]);
   const [activeSession, setActiveSession] = useState<ClaudeSession | null>(null);
   const [showNewDialog, setShowNewDialog] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(isWidget);
   const [autoAccept, setAutoAccept] = useState(false);
   const [loadingSessions, setLoadingSessions] = useState(true);
 
@@ -241,6 +246,8 @@ export function ChatTab() {
         onRename={handleRenameSession}
         onUpdateTags={handleUpdateTags}
         loading={loadingSessions}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
       />
 
       <div className="flex flex-1 flex-col overflow-hidden">

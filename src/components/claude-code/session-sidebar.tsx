@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { AlertCircle, AlertTriangle, Loader2, MessageSquare, Plus, Search, Tag, Trash2, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, Loader2, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, Search, Tag, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ClaudeSession } from "@/lib/claude-db";
 
@@ -14,6 +14,8 @@ interface SessionSidebarProps {
   onRename: (session: ClaudeSession, newName: string) => void;
   onUpdateTags: (session: ClaudeSession, tags: string[]) => void;
   loading?: boolean;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 export function SessionSidebar({
@@ -25,6 +27,8 @@ export function SessionSidebar({
   onRename,
   onUpdateTags,
   loading = false,
+  collapsed = false,
+  onToggleCollapse,
 }: SessionSidebarProps) {
   const [search, setSearch] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -95,16 +99,46 @@ export function SessionSidebar({
     );
   }
 
-  return (
-    <div className="flex h-full w-64 shrink-0 flex-col border-r border-bot-border/40 bg-bot-surface/80 backdrop-blur-sm">
-      <div className="p-3">
+  if (collapsed) {
+    return (
+      <div className="flex h-full w-10 shrink-0 flex-col items-center border-r border-bot-border/40 bg-bot-surface/80 backdrop-blur-sm py-2 gap-2">
+        <button
+          onClick={onToggleCollapse}
+          className="flex items-center justify-center rounded-md p-1.5 text-bot-muted hover:text-bot-text hover:bg-bot-elevated/50 transition-colors"
+          title="Show sessions"
+        >
+          <PanelLeftOpen className="h-4 w-4" />
+        </button>
         <button
           onClick={onNew}
-          className="flex w-full items-center justify-center gap-2 rounded-xl gradient-accent px-3 py-2.5 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] transition-all duration-200"
+          className="flex items-center justify-center rounded-md p-1.5 text-bot-muted hover:text-bot-accent hover:bg-bot-accent/10 transition-colors"
+          title="New Session"
+        >
+          <Plus className="h-4 w-4" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full w-64 shrink-0 flex-col border-r border-bot-border/40 bg-bot-surface/80 backdrop-blur-sm">
+      <div className="flex items-center gap-2 p-3">
+        <button
+          onClick={onNew}
+          className="flex flex-1 items-center justify-center gap-2 rounded-xl gradient-accent px-3 py-2.5 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] transition-all duration-200"
         >
           <Plus className="h-4 w-4" />
           New Session
         </button>
+        {onToggleCollapse && (
+          <button
+            onClick={onToggleCollapse}
+            className="flex items-center justify-center rounded-md p-1.5 text-bot-muted hover:text-bot-text hover:bg-bot-elevated/50 transition-colors"
+            title="Hide sessions"
+          >
+            <PanelLeftClose className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
       <div className="border-b border-bot-border/40 px-3 pb-2.5 space-y-2">
