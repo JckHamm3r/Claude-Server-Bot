@@ -5,7 +5,7 @@ import { ClaudeBubble, useIsRunning } from "@/components/claude-bubble/bubble";
 import { ClaudePanel } from "@/components/claude-bubble/claude-panel";
 
 export default function DashboardPage() {
-  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(true);
   const [projectRoot, setProjectRoot] = useState("");
   const isRunning = useIsRunning();
 
