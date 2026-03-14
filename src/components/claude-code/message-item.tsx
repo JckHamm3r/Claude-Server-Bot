@@ -114,7 +114,8 @@ const sharedMarkdownComponents: Components = {
             style={vscDarkPlus}
             language={match[1]}
             PreTag="div"
-            className="!rounded-none !rounded-b-lg text-caption !mt-0"
+            className="!rounded-none !rounded-b-lg !mt-0"
+            customStyle={{ fontSize: "0.75rem", lineHeight: "1.25rem", margin: 0 }}
             showLineNumbers={codeText.split("\n").length > 5}
             lineNumberStyle={{ color: "#555", fontSize: "11px", paddingRight: "1em", userSelect: "none" }}
           >

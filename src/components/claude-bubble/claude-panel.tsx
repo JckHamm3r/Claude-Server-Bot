@@ -53,9 +53,9 @@ export function ClaudePanel({ onClose }: ClaudePanelProps) {
       {/* Panel */}
       <div
         ref={panelRef}
+        style={visible ? undefined : { transform: "translateY(100%)" }}
         className={cn(
           "relative flex flex-col w-full max-w-5xl h-[90vh] bg-bot-bg border-l border-t border-bot-border rounded-tl-2xl shadow-2xl transition-transform duration-300",
-          visible ? "translate-y-0" : "translate-y-full",
         )}
       >
         {/* Header */}
