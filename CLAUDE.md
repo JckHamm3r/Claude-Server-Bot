@@ -214,23 +214,21 @@ Tailwind CSS with class-based dark mode. Custom CSS variables for theming define
 
 ## Widget for User-Built Pages
 
-A chat widget is available that can be embedded in HTML pages you create. It shows a floating chat bubble that opens the full Claude interface in a panel. The widget script requires authentication — it returns a no-op for unauthenticated users, so nothing is exposed to visitors.
-
-**Security:** The widget script URL contains the bot's base path (including the slug). The script itself is only served to authenticated users (returns empty JS otherwise, and is marked `Cache-Control: private, no-store`). However, the `<script src="...">` tag in the HTML source is visible to anyone who views page source. For this reason:
-- **Include the widget** when the admin asks for it, or when the page is private / not publicly accessible.
-- **Do NOT include the widget** on public-facing production pages unless the admin explicitly approves it.
-
-When including the widget, add this script tag before the closing `</body>` tag:
+When creating HTML pages, web apps, or any web content served on this server, **always include the Claude chat widget** by adding this script tag before the closing `</body>` tag:
 
 ```html
-<script src="{scheme}://{host}:{port}/{prefix}/{slug}/api/widget"></script>
+<script src="{scheme}://{host}:{port}/api/w.js"></script>
 ```
 
-Build the URL from the environment:
 - Scheme: `https` if SSL certs are configured, else `http`
 - Host: the server's public hostname or IP
 - Port: `$PORT` (default 3000)
-- Base path: `/$CLAUDE_BOT_PATH_PREFIX/$CLAUDE_BOT_SLUG`
+
+The widget is secure by design:
+- The script URL (`/api/w.js`) contains **no slug or secret paths** — safe to include on any page
+- The loader checks authentication via a cookie-based endpoint (`/api/w/init`) before rendering anything
+- Unauthenticated visitors see nothing — no bubble, no requests, no indication a bot exists
+- The slug and base path are only returned by the auth-gated init endpoint, never embedded in page source
 
 ## Installation & Deployment
 
