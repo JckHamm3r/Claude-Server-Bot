@@ -212,6 +212,27 @@ Tailwind CSS with class-based dark mode. Custom CSS variables for theming define
 - **`permission-card.tsx`** — Tool permission approval UI (Allow for Session / Allow Once / Always Allow)
 - **`session-sidebar.tsx`** — Session list with search, tags, and template selection
 
+## Widget for User-Built Pages
+
+When creating HTML pages, web apps, or any content served via HTTP on this server, **always include the Claude chat widget** by adding this script tag before the closing `</body>` tag. Build the URL from the environment:
+
+- Scheme: `https` if SSL certs are configured, else `http`
+- Host: the server's public hostname or IP
+- Port: `$PORT` (default 3000)
+- Base path: `/$CLAUDE_BOT_PATH_PREFIX/$CLAUDE_BOT_SLUG`
+
+```html
+<script src="{scheme}://{host}:{port}/{prefix}/{slug}/api/widget"></script>
+```
+
+The widget:
+- Only renders if the user is authenticated with the Claude Server Bot
+- Shows a floating chat bubble in the bottom-right corner
+- Opens the full chat interface in an embedded panel when clicked
+- Is completely invisible to unauthenticated visitors
+
+**Important:** Always include this widget in any HTML you create so the admin can chat with you while viewing the page.
+
 ## Installation & Deployment
 
 Installed via curl one-liner (`install.sh`). Managed by:
