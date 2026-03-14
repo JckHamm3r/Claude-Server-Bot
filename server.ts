@@ -16,8 +16,14 @@ app.prepare().then(() => {
     registerHandlers: (io: Server) => void;
   };
 
+  // Use HTTPS if cert files are configured and exist
+  const certPath = process.env.SSL_CERT_PATH ?? "";
+  const keyPath = process.env.SSL_KEY_PATH ?? "";
+  const useHttps = certPath && keyPath && existsSync(certPath) && existsSync(keyPath);
+  const scheme = useHttps ? "https" : "http";
+
   const handler = (req: import("http").IncomingMessage, res: import("http").ServerResponse) => {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host || "localhost"}`);
+    const url = new URL(req.url ?? "/", `${scheme}://${req.headers.host || "localhost"}`);
     const query: Record<string, string | string[]> = {};
     for (const [key, value] of url.searchParams.entries()) {
       const existing = query[key];
@@ -43,11 +49,6 @@ app.prepare().then(() => {
     };
     handle(req, res, parsedUrl);
   };
-
-  // Use HTTPS if cert files are configured and exist
-  const certPath = process.env.SSL_CERT_PATH ?? "";
-  const keyPath = process.env.SSL_KEY_PATH ?? "";
-  const useHttps = certPath && keyPath && existsSync(certPath) && existsSync(keyPath);
 
   const httpServer = useHttps
     ? createHttpsServer(
