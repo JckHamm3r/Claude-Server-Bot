@@ -2,6 +2,7 @@ import { createServer as createHttpServer } from "http";
 import { createServer as createHttpsServer } from "https";
 import { readFileSync, existsSync } from "fs";
 import next from "next";
+import { parse } from "url";
 import { Server } from "socket.io";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -19,20 +20,12 @@ app.prepare().then(() => {
   const certPath = process.env.SSL_CERT_PATH ?? "";
   const keyPath = process.env.SSL_KEY_PATH ?? "";
   const useHttps = certPath && keyPath && existsSync(certPath) && existsSync(keyPath);
-  const scheme = useHttps ? "https" : "http";
 
   const handler = (req: import("http").IncomingMessage, res: import("http").ServerResponse) => {
-    // Tell Next.js the real protocol so redirects use https:// not http:/
     if (useHttps && !req.headers["x-forwarded-proto"]) {
       req.headers["x-forwarded-proto"] = "https";
     }
-
-    const url = new URL(req.url ?? "/", `${scheme}://${req.headers.host || "localhost"}`);
-    const parsedUrl = {
-      pathname: url.pathname,
-      query: Object.fromEntries(url.searchParams),
-    };
-    handle(req, res, parsedUrl);
+    handle(req, res, parse(req.url ?? "/", true));
   };
 
   const httpServer = useHttps
