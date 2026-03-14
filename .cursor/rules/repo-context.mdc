@@ -12,3 +12,4 @@ alwaysApply: true
 - Preserve and validate credential generation/login behavior when changing setup or env generation logic.
 - Ensure API/UI changes remain compatible with base-path slug deployments.
 - Settings UI: "Customization" is the single place for personality configuration. "Command Sandbox" toggle lives only in the Security > Command Sandbox sub-tab. Avoid re-introducing duplicate settings sections.
+- **Always commit and push fixes.** Users install from `origin/main` via the curl one-liner, so local-only changes do nothing for them. After making a fix, immediately `git add`, `commit`, and `push` — don't leave fixes sitting as uncommitted changes.

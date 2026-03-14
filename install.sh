@@ -1321,9 +1321,6 @@ upgrade_in_place() {
   rm -rf "$backup_dir"
   [ -f "$target_dir/.env.example" ] && migrate_env "$target_dir/.env" "$target_dir/.env.example"
   pnpm install --frozen-lockfile --reporter=silent 2>&1 || pnpm install --reporter=silent 2>&1
-  local sqlite3_dir
-  sqlite3_dir="$(find node_modules/.pnpm -path '*/better-sqlite3/binding.gyp' -print 2>/dev/null | head -1 | xargs dirname 2>/dev/null)"
-  [ -n "$sqlite3_dir" ] && npx --yes node-gyp rebuild --directory="$sqlite3_dir" > /dev/null 2>&1 || true
   if [ -z "${SLUG:-}" ] && [ -f "$target_dir/.env" ]; then
     SLUG=$(grep -E '^CLAUDE_BOT_SLUG=' "$target_dir/.env" 2>/dev/null | cut -d= -f2 || true)
   fi
@@ -1512,22 +1509,7 @@ run_installation() {
   stop_spinner
   info "Dependencies installed"
 
-  # Phase 6: Native modules
-  progress_bar 44 "Compiling native modules..."
-  echo ""
-  start_spinner
-  local sqlite3_dir
-  sqlite3_dir="$(find node_modules/.pnpm -path '*/better-sqlite3/binding.gyp' -print 2>/dev/null | head -1 | xargs dirname 2>/dev/null)"
-  if [ -n "$sqlite3_dir" ]; then
-    local rlog
-    rlog="$(mktemp)"
-    npx --yes node-gyp rebuild --directory="$sqlite3_dir" > "$rlog" 2>&1 || { stop_spinner; warn "Native module rebuild had issues (non-critical)."; }
-    rm -f "$rlog"
-  fi
-  stop_spinner
-  info "Native modules compiled"
-
-  # Phase 7: Generate .env
+  # Phase 6: Generate .env
   progress_bar 52 "Generating configuration..."
   echo ""
   generate_env
