@@ -26,7 +26,6 @@ import { TemplatesSection } from "@/components/claude-code/settings/templates-se
 type SectionKey =
   | "general"
   | "bot_identity"
-  | "personality"
   | "rate_limits"
   | "users"
   | "project"
@@ -71,10 +70,6 @@ export function SettingsPanel() {
   const [savingIdentity, setSavingIdentity] = useState(false);
   const [identityMsg, setIdentityMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
-
-  // Personality
-  const [personality, setPersonality] = useState("professional");
-  const [personalityCustom, setPersonalityCustom] = useState("");
 
   // Rate limits
   const [rateCmds, setRateCmds] = useState("100");
@@ -134,8 +129,6 @@ export function SettingsPanel() {
     fetch(apiUrl("/api/app-settings"))
       .then((r) => r.json())
       .then((d) => {
-        setPersonality(d.personality ?? "professional");
-        setPersonalityCustom(d.personality_custom ?? "");
         setRateCmds(d.rate_limit_commands ?? "100");
         setRateRuntime(d.rate_limit_runtime_min ?? "30");
         setRateConcurrent(d.rate_limit_concurrent ?? "3");
@@ -279,14 +272,6 @@ export function SettingsPanel() {
     reader.readAsDataURL(file);
   }
 
-  async function handleSavePersonality() {
-    await fetch(apiUrl("/api/app-settings"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ personality, personality_custom: personalityCustom }),
-    });
-  }
-
   async function handleSaveRates(e: React.FormEvent) {
     e.preventDefault();
     setSavingRates(true);
@@ -407,7 +392,6 @@ export function SettingsPanel() {
   const allSections: { key: SectionKey; label: string; adminOnly?: boolean }[] = [
     { key: "general", label: "General" },
     { key: "bot_identity", label: "Bot Identity" },
-    { key: "personality", label: "Personality" },
     { key: "rate_limits", label: "Rate Limits", adminOnly: true },
     { key: "users", label: "Users", adminOnly: true },
     { key: "project", label: "Project", adminOnly: true },
@@ -568,63 +552,6 @@ export function SettingsPanel() {
                 {identityMsg && <p className={cn("text-caption", identityMsg.ok ? "text-bot-green" : "text-bot-red")}>{identityMsg.text}</p>}
               </div>
             </form>
-          </div>
-        )}
-
-        {/* ── Personality ── */}
-        {activeSection === "personality" && (
-          <div className="mx-auto max-w-2xl">
-            <h2 className="mb-6 text-subtitle font-semibold text-bot-text">Personality</h2>
-            <p className="text-body text-bot-muted mb-6">Controls the tone Claude uses in responses. Applied as a prefix to the system prompt.</p>
-            <div className="space-y-3 mb-6">
-              {[
-                { key: "professional", label: "Professional", desc: "Formal and business-like tone" },
-                { key: "concise", label: "Concise", desc: "Brief, bullet-point style" },
-                { key: "verbose", label: "Verbose", desc: "Detailed explanations with examples" },
-                { key: "creative", label: "Creative", desc: "Inventive and unconventional" },
-                { key: "strict_engineer", label: "Strict Engineer", desc: "Technical precision, correctness-first" },
-                { key: "custom", label: "Custom", desc: "Use your own prompt prefix" },
-              ].map((p) => (
-                <label
-                  key={p.key}
-                  className={cn(
-                    "flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition-colors",
-                    personality === p.key ? "border-bot-accent bg-bot-accent/5" : "border-bot-border hover:bg-bot-elevated"
-                  )}
-                >
-                  <input
-                    type="radio"
-                    name="personality"
-                    value={p.key}
-                    checked={personality === p.key}
-                    onChange={() => setPersonality(p.key)}
-                    className="mt-0.5"
-                  />
-                  <div>
-                    <p className="text-body font-medium text-bot-text">{p.label}</p>
-                    <p className="text-caption text-bot-muted">{p.desc}</p>
-                  </div>
-                </label>
-              ))}
-            </div>
-            {personality === "custom" && (
-              <div className="mb-6">
-                <label className="block text-caption font-medium text-bot-muted mb-2">Custom prompt prefix</label>
-                <textarea
-                  value={personalityCustom}
-                  onChange={(e) => setPersonalityCustom(e.target.value)}
-                  rows={4}
-                  placeholder="e.g. Always respond in Spanish. Be friendly and encouraging."
-                  className="w-full rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text placeholder-bot-muted outline-none focus:border-bot-accent resize-none"
-                />
-              </div>
-            )}
-            <button
-              onClick={handleSavePersonality}
-              className="rounded-lg bg-bot-accent px-4 py-2 text-body font-medium text-white hover:bg-bot-accent/80 transition-colors"
-            >
-              Save Personality
-            </button>
           </div>
         )}
 

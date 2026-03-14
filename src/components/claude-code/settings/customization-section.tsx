@@ -10,11 +10,13 @@ interface PersonalityOption {
 }
 
 const PERSONALITY_OPTIONS: PersonalityOption[] = [
-  { value: "professional", label: "Professional", description: "Clear, formal, and precise" },
+  { value: "professional", label: "Professional", description: "Clear, formal, and business-like tone" },
   { value: "friendly", label: "Friendly", description: "Warm, approachable, and encouraging" },
   { value: "technical", label: "Technical", description: "Expert-level, detailed, and precise" },
-  { value: "concise", label: "Concise", description: "Brief and to-the-point" },
-  { value: "creative", label: "Creative", description: "Innovative and outside-the-box" },
+  { value: "concise", label: "Concise", description: "Brief, bullet-point style" },
+  { value: "verbose", label: "Verbose", description: "Detailed explanations with examples" },
+  { value: "creative", label: "Creative", description: "Inventive and unconventional" },
+  { value: "strict_engineer", label: "Strict Engineer", description: "Technical precision, correctness-first" },
   { value: "custom", label: "Custom", description: "Write your own system prompt prefix" },
 ];
 

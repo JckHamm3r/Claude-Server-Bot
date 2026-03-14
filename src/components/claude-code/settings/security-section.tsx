@@ -312,13 +312,6 @@ export function SecuritySection() {
                 onChange={(v) => saveGuardSettings({ guard_rails_enabled: v })}
                 disabled={savingGuard}
               />
-              <ToggleRow
-                label="Command Sandbox Enabled"
-                description="Classifies bash commands and flags restricted/dangerous ones with enhanced permission dialogs"
-                checked={secSettings.sandbox_enabled}
-                onChange={(v) => saveGuardSettings({ sandbox_enabled: v })}
-                disabled={savingGuard}
-              />
               {guardMsg && (
                 <p className="text-caption text-bot-green">{guardMsg}</p>
               )}
