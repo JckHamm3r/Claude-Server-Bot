@@ -19,7 +19,7 @@ export function ToolCallGroup({ messages, searchHighlights, activeHighlight }: T
     activeElRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [activeHighlight]);
 
-  const hasRunning = messages.some((m) => m.parsed?.toolStatus === "running" || m.parsed?.type === "tool_call");
+  const hasRunning = messages.some((m) => m.parsed?.toolStatus === "running");
   const hasError = messages.some((m) => m.parsed?.toolStatus === "error");
   const lastMsg = messages[messages.length - 1];
   const hiddenCount = messages.length - 1;

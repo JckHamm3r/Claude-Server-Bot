@@ -53,6 +53,20 @@ function expandToolCallsFromMetadata(msgs: ChatMessage[]): ChatMessage[] {
   return expanded;
 }
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function finalizeRunningTools(msgs: ChatMessage[]): ChatMessage[] {
+  let changed = false;
+  const result = msgs.map((m) => {
+    if (m.parsed?.toolStatus === "running") {
+      changed = true;
+      return { ...m, parsed: { ...m.parsed, toolStatus: "done" as const } };
+    }
+    return m;
+  });
+  return changed ? result : msgs;
+}
+
 // ── Named constants ──────────────────────────────────────────────────────────
 
 const WATCHDOG_POLL_MS = 15_000;
@@ -293,7 +307,7 @@ export function useChatSocket({
         setCurrentActivity(null);
         drainPending();
         setMessages((prev) => [
-          ...prev,
+          ...finalizeRunningTools(prev),
           {
             id: crypto.randomUUID(),
             sender_type: "claude",
@@ -480,10 +494,11 @@ export function useChatSocket({
           setMessages((prev) => {
             const last = prev[prev.length - 1];
             if (last?.parsed?.type === "error" && last.parsed.retryable) {
-              return prev;
+              return finalizeRunningTools(prev);
             }
+            const resolved = finalizeRunningTools(prev);
             return [
-              ...prev,
+              ...resolved,
               {
                 id: crypto.randomUUID(),
                 sender_type: "claude",
@@ -572,6 +587,7 @@ export function useChatSocket({
         if (parsed.type === "error") {
           setHasError(true);
           setCurrentActivity(null);
+          setMessages((prev) => finalizeRunningTools(prev));
         }
 
         if (parsed.type === "options" || parsed.type === "confirm" || parsed.type === "permission_request" || parsed.type === "user_question") {
@@ -707,6 +723,7 @@ export function useChatSocket({
           drainPending();
         }
         setCurrentActivity(null);
+        setMessages((prev) => finalizeRunningTools(prev));
       }
     });
 
@@ -719,7 +736,7 @@ export function useChatSocket({
         content: message,
         timestamp: new Date().toISOString(),
       };
-      setMessages((prev) => [...prev, msg]);
+      setMessages((prev) => [...finalizeRunningTools(prev), msg]);
       setIsRunning(false);
       setCurrentActivity(null);
       setHasError(true);
@@ -855,6 +872,7 @@ export function useChatSocket({
     emit("claude:interrupt", { sessionId: activeSession.id });
     setIsRunning(false);
     setCurrentActivity(null);
+    setMessages((prev) => finalizeRunningTools(prev));
     syncQueue([]);
   }, [activeSession, emit, syncQueue]);
 
