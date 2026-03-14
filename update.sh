@@ -178,12 +178,33 @@ echo ""
 OLD_SHA=$(git rev-parse HEAD)
 info "Current version: ${OLD_SHA:0:8}"
 
-# Create backup
+# Create build backup (for rollback)
 BACKUP_DIR="$(mktemp -d)"
-echo "  Creating backup..."
+echo "  Creating build backup..."
 [ -d .next ] && cp -r .next "$BACKUP_DIR/.next"
 [ -f pnpm-lock.yaml ] && cp pnpm-lock.yaml "$BACKUP_DIR/pnpm-lock.yaml"
-info "Backup created at $BACKUP_DIR"
+info "Build backup created at $BACKUP_DIR"
+
+# Back up SQLite database before update (keep last 3 upgrade backups)
+DATA_DIR_RESOLVED=$(grep -E '^DATA_DIR=' .env 2>/dev/null | cut -d= -f2 || echo "./data")
+: "${DATA_DIR_RESOLVED:=./data}"
+DB_FILE="${DATA_DIR_RESOLVED}/claude-bot.db"
+if [ -f "$DB_FILE" ]; then
+  DB_BACKUP_DIR="${DATA_DIR_RESOLVED}/backups/upgrade"
+  mkdir -p "$DB_BACKUP_DIR"
+  DB_BACKUP_NAME="claude-bot-$(date +%Y%m%d-%H%M%S).db"
+  cp "$DB_FILE" "${DB_BACKUP_DIR}/${DB_BACKUP_NAME}"
+  # Also copy WAL if present
+  [ -f "${DB_FILE}-wal" ] && cp "${DB_FILE}-wal" "${DB_BACKUP_DIR}/${DB_BACKUP_NAME}-wal"
+  info "Database backed up to backups/upgrade/${DB_BACKUP_NAME}"
+  # Rotate: keep only the 3 most recent backups
+  # shellcheck disable=SC2012
+  ls -1t "${DB_BACKUP_DIR}"/claude-bot-*.db 2>/dev/null | tail -n +4 | while read -r old_backup; do
+    rm -f "$old_backup" "${old_backup}-wal"
+  done
+else
+  warn "No database file found at ${DB_FILE} — skipping DB backup"
+fi
 
 # Mark that rollback is now possible
 ROLLBACK_NEEDED=true

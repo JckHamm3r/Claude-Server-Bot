@@ -16,6 +16,15 @@ db.pragma("journal_mode = WAL");
 db.pragma("busy_timeout = 5000");
 db.pragma("foreign_keys = ON");
 
+// Enable incremental auto-vacuum so freed pages can be reclaimed periodically.
+// Switching mode requires a one-time VACUUM if the DB was created without it.
+const autoVacuumMode = (db.pragma("auto_vacuum") as { auto_vacuum: number }[])[0]?.auto_vacuum;
+if (autoVacuumMode !== 2) {
+  db.pragma("auto_vacuum = INCREMENTAL");
+  db.exec("VACUUM");
+  console.log("[db] Switched to incremental auto_vacuum (one-time VACUUM applied)");
+}
+
 // Auto-migrate: create all tables on startup
 // Using plain db.exec() instead of transactions for CREATE TABLE IF NOT EXISTS
 // statements, since they are idempotent and transactions cause SQLITE_BUSY
@@ -172,6 +181,7 @@ const defaultAppSettings: Record<string, string> = {
   budget_limit_session_usd: "0",
   budget_limit_daily_usd: "0",
   budget_limit_monthly_usd: "0",
+  message_retention_days: "0",
 };
 const insertSetting = db.prepare(
   "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)"
@@ -282,39 +292,70 @@ db.exec(`
     CREATE INDEX IF NOT EXISTS idx_uploads_session ON uploads(session_id);
   `);
 
-// Chat improvements: add model + provider_type columns to sessions
-try { db.exec("ALTER TABLE sessions ADD COLUMN model TEXT NOT NULL DEFAULT 'claude-sonnet-4-6'"); } catch (err: unknown) { if (!(err instanceof Error && err.message.includes("duplicate column"))) throw err; }
-try { db.exec("ALTER TABLE sessions ADD COLUMN provider_type TEXT NOT NULL DEFAULT 'subprocess'"); } catch (err: unknown) { if (!(err instanceof Error && err.message.includes("duplicate column"))) throw err; }
+// ── Schema versioning ─────────────────────────────────────────────────────
+// Numbered migrations run sequentially on startup. Each is idempotent so
+// re-running an already-applied migration is harmless.
+function getSchemaVersion(): number {
+  try {
+    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'schema_version'").get() as { value: string } | undefined;
+    return row ? parseInt(row.value, 10) : 0;
+  } catch {
+    return 0;
+  }
+}
 
-// Session status tracking for background persistence
-try { db.exec("ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'idle'"); } catch (err: unknown) { if (!(err instanceof Error && err.message.includes("duplicate column"))) throw err; }
+function setSchemaVersion(v: number) {
+  db.prepare(
+    "INSERT INTO app_settings (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = datetime('now')"
+  ).run(String(v), String(v));
+}
 
-// Store which personality was active when the session was created
-try { db.exec("ALTER TABLE sessions ADD COLUMN personality TEXT"); } catch (err: unknown) { if (!(err instanceof Error && err.message.includes("duplicate column"))) throw err; }
+function addColumnSafe(table: string, col: string, def: string) {
+  try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch (err: unknown) {
+    if (!(err instanceof Error && err.message.includes("duplicate column"))) throw err;
+  }
+}
 
-// Persist Claude CLI session ID so --resume survives server restarts
-try { db.exec("ALTER TABLE sessions ADD COLUMN claude_session_id TEXT"); } catch (err: unknown) { if (!(err instanceof Error && err.message.includes("duplicate column"))) throw err; }
+const migrations: Record<number, () => void> = {
+  1: () => {
+    addColumnSafe("sessions", "model", "TEXT NOT NULL DEFAULT 'claude-sonnet-4-6'");
+    addColumnSafe("sessions", "provider_type", "TEXT NOT NULL DEFAULT 'subprocess'");
+    addColumnSafe("sessions", "status", "TEXT NOT NULL DEFAULT 'idle'");
+    addColumnSafe("sessions", "personality", "TEXT");
+    addColumnSafe("sessions", "claude_session_id", "TEXT");
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS session_templates (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        system_prompt TEXT,
+        model TEXT NOT NULL DEFAULT 'claude-sonnet-4-6',
+        skip_permissions INTEGER NOT NULL DEFAULT 0,
+        provider_type TEXT NOT NULL DEFAULT 'subprocess',
+        icon TEXT,
+        is_default INTEGER NOT NULL DEFAULT 0,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+  },
+  // Future migrations go here as 2, 3, etc.
+};
+
+const LATEST_SCHEMA_VERSION = Math.max(...Object.keys(migrations).map(Number));
+const currentVersion = getSchemaVersion();
+for (let v = currentVersion + 1; v <= LATEST_SCHEMA_VERSION; v++) {
+  if (migrations[v]) {
+    migrations[v]();
+    setSchemaVersion(v);
+    console.log(`[db] Applied migration ${v}`);
+  }
+}
 
 // Reset stale statuses on startup (server restart means no subprocess is running)
 db.exec("UPDATE sessions SET status = 'idle' WHERE status IN ('running', 'needs_attention')");
-
-// Session templates table
-db.exec(`
-  CREATE TABLE IF NOT EXISTS session_templates (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    description TEXT,
-    system_prompt TEXT,
-    model TEXT NOT NULL DEFAULT 'claude-sonnet-4-6',
-    skip_permissions INTEGER NOT NULL DEFAULT 0,
-    provider_type TEXT NOT NULL DEFAULT 'subprocess',
-    icon TEXT,
-    is_default INTEGER NOT NULL DEFAULT 0,
-    created_by TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-`);
 
 // Seed or sync admin user from env
 const adminEmail = process.env.CLAUDE_BOT_ADMIN_EMAIL;
@@ -358,13 +399,22 @@ try {
     END;
   `);
 
-  // One-time rebuild of FTS index from existing data
-  // Only runs if the FTS table is empty but messages exist
+  // One-time rebuild of FTS index from existing data.
+  // Only runs if the FTS table is empty but messages exist.
+  // Guard: skip if message count exceeds 50k to avoid blocking startup.
+  const FTS_REBUILD_THRESHOLD = 50_000;
   const ftsCount = (db.prepare("SELECT COUNT(*) as count FROM messages_fts").get() as { count: number }).count;
   const msgCount = (db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number }).count;
   if (ftsCount === 0 && msgCount > 0) {
-    db.exec("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')");
-    console.log("[db] Rebuilt FTS index for", msgCount, "messages");
+    if (msgCount > FTS_REBUILD_THRESHOLD) {
+      console.warn(
+        `[db] Skipping FTS rebuild: ${msgCount} messages exceeds threshold (${FTS_REBUILD_THRESHOLD}). ` +
+        "Run manually via SQLite: INSERT INTO messages_fts(messages_fts) VALUES('rebuild')"
+      );
+    } else {
+      db.exec("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')");
+      console.log("[db] Rebuilt FTS index for", msgCount, "messages");
+    }
   }
 } catch (err) {
   console.error("[db] FTS5 setup failed (may not be available):", err);

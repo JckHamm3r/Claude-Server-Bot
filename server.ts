@@ -12,8 +12,9 @@ const handle = app.getRequestHandler();
 app.prepare().then(() => {
   // Import handlers AFTER app.prepare() so .env vars are loaded
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { registerHandlers } = require("./src/socket/handlers") as {
+  const { registerHandlers, shutdownAllSessions } = require("./src/socket/handlers") as {
     registerHandlers: (io: Server) => void;
+    shutdownAllSessions: () => void;
   };
 
   const slug = process.env.CLAUDE_BOT_SLUG ?? "";
@@ -154,4 +155,38 @@ app.prepare().then(() => {
   httpServer.listen(port, () => {
     console.log(`> Ready on port ${port} [${useHttps ? "HTTPS" : "HTTP"}] [${process.env.NODE_ENV}]`);
   });
+
+  // Graceful shutdown: close sessions, flush data, checkpoint WAL, close DB
+  let shuttingDown = false;
+  const gracefulShutdown = (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`\n[shutdown] Received ${signal}, shutting down gracefully...`);
+
+    httpServer.close(() => {
+      console.log("[shutdown] HTTP server closed");
+    });
+
+    try {
+      shutdownAllSessions();
+      console.log("[shutdown] All sessions closed, metrics flushed");
+    } catch (err) {
+      console.error("[shutdown] Error closing sessions:", err);
+    }
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const db = require("./src/lib/db").default;
+      db.pragma("wal_checkpoint(TRUNCATE)");
+      db.close();
+      console.log("[shutdown] Database checkpointed and closed");
+    } catch (err) {
+      console.error("[shutdown] Error closing database:", err);
+    }
+
+    process.exit(0);
+  };
+
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 });

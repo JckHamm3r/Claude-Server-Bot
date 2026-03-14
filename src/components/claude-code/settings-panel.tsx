@@ -15,6 +15,8 @@ import {
   Skull,
   RefreshCw,
   ChevronDown,
+  Database,
+  HardDrive,
 } from "lucide-react";
 
 import { DomainsSection } from "@/components/claude-code/settings/domains-section";
@@ -32,6 +34,7 @@ type SectionKey =
   | "project"
   | "activity_log"
   | "backup"
+  | "database"
   | "system"
   | "updates"
   | "domains"
@@ -469,6 +472,7 @@ export function SettingsPanel() {
     { key: "notifications", label: "Notifications" },
     { key: "activity_log", label: "Activity Log" },
     { key: "backup", label: "Backup & Restore", adminOnly: true },
+    { key: "database", label: "Database", adminOnly: true },
     { key: "system", label: "System", adminOnly: true },
     { key: "updates", label: "Updates", adminOnly: true },
     { key: "domains", label: "Domains", adminOnly: true },
@@ -902,6 +906,9 @@ export function SettingsPanel() {
           </div>
         )}
 
+        {/* ── Database ── */}
+        {activeSection === "database" && <DatabaseSection />}
+
         {/* ── System ── */}
         {activeSection === "system" && (
           <div className="mx-auto max-w-2xl space-y-6">
@@ -1037,6 +1044,264 @@ export function SettingsPanel() {
         {/* ── API Key ── */}
         {activeSection === "api_key" && <ApiKeySection />}
 
+      </div>
+    </div>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
+interface DbHealth {
+  dbSize: number;
+  walSize: number;
+  rowCounts: Record<string, number>;
+  schemaVersion: number;
+  lastVacuumAt: string | null;
+  messageRetentionDays: number;
+  autoVacuumMode: string;
+  lastManualBackup: { name: string; created: string; size: number } | null;
+  lastUpgradeBackup: { name: string; created: string; size: number } | null;
+}
+
+interface BackupEntry {
+  name: string;
+  pool: string;
+  size: number;
+  created: string;
+}
+
+function DatabaseSection() {
+  const [health, setHealth] = useState<DbHealth | null>(null);
+  const [backups, setBackups] = useState<{ manual: BackupEntry[]; upgrade: BackupEntry[] } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [backingUp, setBackingUp] = useState(false);
+  const [vacuuming, setVacuuming] = useState(false);
+  const [retentionDays, setRetentionDays] = useState("0");
+  const [savingRetention, setSavingRetention] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const fetchHealth = () => {
+    fetch(apiUrl("/api/settings/db/health"))
+      .then((r) => r.json())
+      .then((data: DbHealth) => {
+        setHealth(data);
+        setRetentionDays(String(data.messageRetentionDays));
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  };
+
+  const fetchBackups = () => {
+    fetch(apiUrl("/api/settings/db/backups"))
+      .then((r) => r.json())
+      .then((data: { manual: BackupEntry[]; upgrade: BackupEntry[] }) => setBackups(data))
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    fetchHealth();
+    fetchBackups();
+  }, []);
+
+  const handleBackup = async () => {
+    setBackingUp(true);
+    setMessage(null);
+    try {
+      const res = await fetch(apiUrl("/api/settings/db/backup"), { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setMessage({ ok: true, text: `Backup created: ${data.backup?.name}` });
+        fetchBackups();
+        fetchHealth();
+      } else {
+        setMessage({ ok: false, text: data.error ?? "Backup failed" });
+      }
+    } catch (err) {
+      setMessage({ ok: false, text: String(err) });
+    } finally {
+      setBackingUp(false);
+    }
+  };
+
+  const handleVacuum = async () => {
+    setVacuuming(true);
+    setMessage(null);
+    try {
+      const res = await fetch(apiUrl("/api/settings/db/vacuum"), { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setMessage({ ok: true, text: `VACUUM complete. Freed ${formatBytes(data.freedBytes)}` });
+        fetchHealth();
+      } else {
+        setMessage({ ok: false, text: data.error ?? "VACUUM failed" });
+      }
+    } catch (err) {
+      setMessage({ ok: false, text: String(err) });
+    } finally {
+      setVacuuming(false);
+    }
+  };
+
+  const handleSaveRetention = () => {
+    setSavingRetention(true);
+    const socket = getSocket();
+    socket.emit("claude:set_app_setting", { key: "message_retention_days", value: retentionDays });
+    setTimeout(() => {
+      setSavingRetention(false);
+      setMessage({ ok: true, text: retentionDays === "0" ? "Messages will be kept forever." : `Messages older than ${retentionDays} days will be cleaned up.` });
+      setTimeout(() => setMessage(null), 3000);
+    }, 300);
+  };
+
+  if (loading) return <div className="text-bot-muted text-caption p-8">Loading database health...</div>;
+
+  return (
+    <div className="mx-auto max-w-2xl space-y-6">
+      <h2 className="mb-2 text-subtitle font-bold text-bot-text">Database</h2>
+
+      {message && (
+        <div className={cn("rounded-lg px-4 py-3 text-caption", message.ok ? "bg-bot-green/10 text-bot-green" : "bg-bot-red/10 text-bot-red")}>
+          {message.text}
+        </div>
+      )}
+
+      {/* Overview */}
+      <div className="rounded-lg border border-bot-border bg-bot-surface p-5 space-y-4">
+        <div className="flex items-center gap-2 mb-2">
+          <HardDrive className="h-5 w-5 text-bot-accent" />
+          <p className="text-body font-medium text-bot-text">Storage</p>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <p className="text-caption text-bot-muted">Database file</p>
+            <p className="text-body text-bot-text font-mono">{health ? formatBytes(health.dbSize) : "—"}</p>
+          </div>
+          <div>
+            <p className="text-caption text-bot-muted">WAL file</p>
+            <p className="text-body text-bot-text font-mono">{health ? formatBytes(health.walSize) : "—"}</p>
+          </div>
+          <div>
+            <p className="text-caption text-bot-muted">Auto-vacuum</p>
+            <p className="text-body text-bot-text">{health?.autoVacuumMode ?? "—"}</p>
+          </div>
+          <div>
+            <p className="text-caption text-bot-muted">Schema version</p>
+            <p className="text-body text-bot-text font-mono">{health?.schemaVersion ?? "—"}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Row counts */}
+      <div className="rounded-lg border border-bot-border bg-bot-surface p-5">
+        <div className="flex items-center gap-2 mb-3">
+          <Database className="h-5 w-5 text-bot-accent" />
+          <p className="text-body font-medium text-bot-text">Row Counts</p>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          {health && Object.entries(health.rowCounts).map(([table, count]) => (
+            <div key={table}>
+              <p className="text-caption text-bot-muted">{table}</p>
+              <p className="text-body text-bot-text font-mono">{count >= 0 ? count.toLocaleString() : "—"}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Message retention */}
+      <div className="rounded-lg border border-bot-border bg-bot-surface p-5 space-y-3">
+        <p className="text-body font-medium text-bot-text">Message Retention</p>
+        <p className="text-caption text-bot-muted">
+          Automatically delete messages from sessions that haven&apos;t been updated in the specified number of days. Set to 0 to keep messages forever.
+        </p>
+        <div className="flex items-center gap-3">
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={retentionDays}
+            onChange={(e) => setRetentionDays(e.target.value)}
+            className="w-32 rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent"
+          />
+          <span className="text-caption text-bot-muted">days (0 = forever)</span>
+          <button
+            onClick={handleSaveRetention}
+            disabled={savingRetention}
+            className="rounded-md bg-bot-accent px-3 py-2 text-caption font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors"
+          >
+            {savingRetention ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </div>
+
+      {/* Vacuum */}
+      <div className="rounded-lg border border-bot-border bg-bot-surface p-5 space-y-3">
+        <p className="text-body font-medium text-bot-text">VACUUM</p>
+        <p className="text-caption text-bot-muted">
+          Reclaim disk space from deleted rows. The database is locked during this operation.
+        </p>
+        {health?.lastVacuumAt && (
+          <p className="text-caption text-bot-muted">Last vacuum: {new Date(health.lastVacuumAt + "Z").toLocaleString()}</p>
+        )}
+        <button
+          onClick={handleVacuum}
+          disabled={vacuuming}
+          className="inline-flex items-center gap-2 rounded-md bg-bot-accent px-4 py-2 text-body font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors"
+        >
+          {vacuuming ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          {vacuuming ? "Running VACUUM..." : "Run VACUUM"}
+        </button>
+      </div>
+
+      {/* Backups */}
+      <div className="rounded-lg border border-bot-border bg-bot-surface p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <p className="text-body font-medium text-bot-text">Database Backups</p>
+          <button
+            onClick={handleBackup}
+            disabled={backingUp}
+            className="inline-flex items-center gap-2 rounded-md bg-bot-accent px-3 py-2 text-caption font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors"
+          >
+            {backingUp ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            {backingUp ? "Creating..." : "Create Backup"}
+          </button>
+        </div>
+        <p className="text-caption text-bot-muted">
+          Manual backups (max 3) and pre-upgrade backups (max 3) are stored on the server.
+        </p>
+
+        {backups && (backups.manual.length > 0 || backups.upgrade.length > 0) ? (
+          <div className="space-y-3">
+            {backups.manual.length > 0 && (
+              <div>
+                <p className="text-caption font-medium text-bot-muted mb-1">Manual</p>
+                {backups.manual.map((b) => (
+                  <div key={b.name} className="flex justify-between items-center py-1 text-caption">
+                    <span className="text-bot-text font-mono">{b.name}</span>
+                    <span className="text-bot-muted">{formatBytes(b.size)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {backups.upgrade.length > 0 && (
+              <div>
+                <p className="text-caption font-medium text-bot-muted mb-1">Pre-upgrade</p>
+                {backups.upgrade.map((b) => (
+                  <div key={b.name} className="flex justify-between items-center py-1 text-caption">
+                    <span className="text-bot-text font-mono">{b.name}</span>
+                    <span className="text-bot-muted">{formatBytes(b.size)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-caption text-bot-muted/60">No backups yet.</p>
+        )}
       </div>
     </div>
   );

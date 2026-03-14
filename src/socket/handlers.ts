@@ -150,6 +150,31 @@ function flushMetrics() {
   metricsBuffer = { session_count: 0, command_count: 0, agent_count: 0, latencies: [] };
 }
 
+function runRetentionCleanup() {
+  try {
+    db.prepare("DELETE FROM activity_log WHERE timestamp < datetime('now', '-30 days')").run();
+    db.prepare("DELETE FROM login_attempts WHERE created_at < datetime('now', '-30 days')").run();
+  } catch {
+    // ignore
+  }
+
+  try {
+    const retentionDays = parseInt(
+      (db.prepare("SELECT value FROM app_settings WHERE key = 'message_retention_days'").get() as { value: string } | undefined)?.value ?? "0",
+      10,
+    );
+    if (retentionDays > 0) {
+      const modifier = `-${retentionDays} days`;
+      db.prepare(
+        "DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE updated_at < datetime('now', ?))",
+      ).run(modifier);
+      db.prepare("DELETE FROM sessions WHERE updated_at < datetime('now', ?) AND id NOT IN (SELECT DISTINCT session_id FROM messages)").run(modifier);
+    }
+  } catch {
+    // ignore
+  }
+}
+
 let metricsInterval: NodeJS.Timeout | undefined;
 let cleanupInterval: NodeJS.Timeout | undefined;
 
@@ -160,9 +185,11 @@ metricsInterval = setInterval(() => {
   }
 }, 60_000);
 
-// Periodic security cleanup: expire temporary IP blocks every 5 minutes
+// Periodic cleanup every 5 minutes: IP blocks, data retention, incremental vacuum
 cleanupInterval = setInterval(() => {
   cleanupExpiredBlocks();
+  runRetentionCleanup();
+  try { db.pragma("incremental_vacuum"); } catch { /* ignore */ }
 }, 5 * 60_000);
 
 const planResumeCallbacks = new Map<string, (action: PlanAction) => void>();
@@ -238,6 +265,35 @@ function incrementSessionCommands(email: string, sessionId: string) {
 
 // ── Main export ──────────────────────────────────────────────────────────────
 
+export function shutdownAllSessions() {
+  // Flush pending metrics before shutdown
+  flushMetrics();
+
+  // Close all active Claude sessions
+  for (const [sessionId, provider] of sessionProviders.entries()) {
+    try {
+      provider.closeSession(sessionId);
+    } catch {
+      // best-effort during shutdown
+    }
+  }
+  sessionProviders.clear();
+
+  // Kill any PTY processes
+  for (const [id, pty] of ptyProcesses.entries()) {
+    try {
+      pty.kill?.();
+    } catch {
+      // best-effort
+    }
+    ptyProcesses.delete(id);
+  }
+
+  // Clear intervals
+  if (metricsInterval) clearInterval(metricsInterval);
+  if (cleanupInterval) clearInterval(cleanupInterval);
+}
+
 export function registerHandlers(io: Server) {
   // Clear any existing intervals to prevent duplicates on re-register
   if (metricsInterval) clearInterval(metricsInterval);
@@ -250,6 +306,8 @@ export function registerHandlers(io: Server) {
   }, 60_000);
   cleanupInterval = setInterval(() => {
     cleanupExpiredBlocks();
+    runRetentionCleanup();
+    try { db.pragma("incremental_vacuum"); } catch { /* ignore */ }
   }, 5 * 60_000);
 
   const provider = getClaudeProvider();

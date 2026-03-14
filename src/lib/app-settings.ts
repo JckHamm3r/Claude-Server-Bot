@@ -20,6 +20,7 @@ const KNOWN_SETTING_KEYS = [
   "budget_limit_daily_usd",
   "budget_limit_monthly_usd",
   "upload_max_size_bytes",
+  "message_retention_days",
 ];
 
 /**
