@@ -6,7 +6,9 @@ alwaysApply: true
 # Installer-Centric Project Context
 
 - This repository is a curl-installable tool with a script-first workflow.
+- We develop and push changes here but do **not** install or run the tool in this workspace. Users install it on their own servers via the curl one-liner.
 - Treat `install.sh`, `update.sh`, `uninstall.sh`, and `scripts/setup-domain.sh` as critical paths.
 - Prioritize shell portability (especially macOS/BSD compatibility) and safe quoting in installer/update scripts.
 - Preserve and validate credential generation/login behavior when changing setup or env generation logic.
 - Ensure API/UI changes remain compatible with base-path slug deployments.
+- Settings UI: "Customization" is the single place for personality configuration. "Command Sandbox" toggle lives only in the Security > Command Sandbox sub-tab. Avoid re-introducing duplicate settings sections.
