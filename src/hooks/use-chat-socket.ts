@@ -322,6 +322,24 @@ export function useChatSocket({
     socket.on("connect_error", (err: Error & { description?: unknown }) => {
       console.warn("[socket] connect_error:", err.message, err.description ?? "");
       setConnected(false);
+
+      if (err.message === "unauthorized") {
+        // Auth was rejected — stop the reconnection loop and surface the error.
+        // A page refresh will re-establish the session cookie.
+        socket.disconnect();
+        setReconnecting(false);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: "auth-error-" + Date.now(),
+            sender_type: "claude",
+            content: "Connection rejected — your session may have expired. Please refresh the page.",
+            parsed: { type: "error", message: "Connection rejected — your session may have expired. Please refresh the page." },
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+        return;
+      }
       setReconnecting(true);
     });
 

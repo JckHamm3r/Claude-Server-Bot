@@ -129,6 +129,9 @@ app.prepare().then(() => {
     path: socketPath,
     cors: { origin: true, credentials: true },
     maxHttpBufferSize: 1e6,
+    pingTimeout: 30000,
+    pingInterval: 25000,
+    connectTimeout: 15000,
   });
 
   registerHandlers(io);

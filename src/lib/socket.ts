@@ -13,14 +13,15 @@ export function getSocket(): Socket {
 
   socket = io({
     path: buildSocketPath(),
-    transports: ["websocket", "polling"],
+    transports: ["polling", "websocket"],
+    upgrade: true,
     autoConnect: false,
     reconnection: true,
     reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 8000,
     randomizationFactor: 0.3,
-    timeout: 10000,
+    timeout: 15000,
   });
 
   return socket;

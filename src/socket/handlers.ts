@@ -471,15 +471,18 @@ export function registerHandlers(io: Server) {
     });
   }
 
-  io.on("connection", async (socket) => {
+  // Auth middleware — rejects before connection so the client gets a clean
+  // connect_error with the reason instead of an opaque disconnect loop.
+  io.use(async (socket, next) => {
     const authorized = await verifySocket(socket);
     if (!authorized) {
       console.warn("[socket] unauthorized connection rejected:", socket.id);
-      socket.emit("claude:error", { message: "Unauthorized" });
-      socket.disconnect(true);
-      return;
+      return next(new Error("unauthorized"));
     }
+    next();
+  });
 
+  io.on("connection", async (socket) => {
     const email = await getEmailFromSocket(socket);
     const isAdmin = await isAdminSocket(socket);
 
