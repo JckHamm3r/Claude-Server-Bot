@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import type { ClaudeSession } from "@/lib/claude-db";
 import { DEFAULT_MODEL } from "@/lib/models";
+import { apiUrl } from "@/lib/utils";
 import { SessionSidebar } from "./session-sidebar";
 import { MessageList, type ChatMessage } from "./message-list";
 import { ChatToolbar } from "./chat-toolbar";
@@ -28,6 +29,8 @@ export function ChatTab() {
   const [searchHighlights, setSearchHighlights] = useState<Set<string>>(new Set());
   const [activeHighlight, setActiveHighlight] = useState<string | null>(null);
 
+  const [botAvatarUrl, setBotAvatarUrl] = useState<string | null>(null);
+
   const chat = useChatSocket({
     sessionStatus,
     activeSession,
@@ -35,6 +38,13 @@ export function ChatTab() {
     setSessions,
     setLoadingSessions,
   });
+
+  useEffect(() => {
+    fetch(apiUrl("/api/bot-identity"))
+      .then((r) => r.json())
+      .then((d: { avatar?: string | null }) => setBotAvatarUrl(d.avatar ?? null))
+      .catch(() => {});
+  }, []);
 
   // Browser tab title badge: show count of sessions needing attention
   useEffect(() => {
@@ -330,7 +340,7 @@ export function ChatTab() {
             activeHighlight={activeHighlight}
             pendingInteraction={chat.pendingInteraction}
             loadingMessages={chat.loadingMessages}
-            avatarState={chat.avatarState}
+            botAvatarUrl={botAvatarUrl}
             onSendStarter={(msg) => handleSendWithAutoName(msg)}
             onRetry={chat.handleRetryLast}
             runStartTime={chat.runStartTime}

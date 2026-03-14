@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { getSocket, connectSocket } from "@/lib/socket";
 import type { ParsedOutput } from "@/lib/claude/provider";
 import type { ClaudeSession } from "@/lib/claude-db";
 import { DEFAULT_MODEL } from "@/lib/models";
-import type { AvatarState } from "@/lib/avatar-state";
 import type { ChatMessage, SessionUsage, BudgetLimits } from "@/types/chat";
 import type { ActivityState } from "@/components/claude-code/message-list";
 import type { ChatInputHandle } from "@/components/claude-code/chat-input";
@@ -102,7 +101,6 @@ export interface UseChatSocketReturn {
   pendingCount: number;
   pendingQueue: string[];
   loadingMessages: boolean;
-  avatarState: AvatarState;
 
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   setSessionModel: React.Dispatch<React.SetStateAction<string>>;
@@ -175,15 +173,6 @@ export function useChatSocket({
   const watchdogChecksRef = useRef(0);
   const editRecoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingInteractionRef = useRef<{ type: string; messageId: string } | null>(null);
-
-  // ── Derived ────────────────────────────────────────────────────────────
-  const avatarState: AvatarState = useMemo(() => {
-    if (hasError) return "error";
-    if (pendingInteraction) return "questioning";
-    if (currentActivity) return "working";
-    if (isRunning) return "thinking";
-    return "waiting";
-  }, [hasError, pendingInteraction, currentActivity, isRunning]);
 
   // ── Sync refs ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1002,7 +991,7 @@ export function useChatSocket({
     messages, isRunning, currentActivity, connected, reconnecting,
     presenceUsers, typingUsers, commandRunner, sessionUsage, budgetLimits,
     sessionModel, hasError, pendingInteraction, runStartTime, pendingCount,
-    pendingQueue, loadingMessages, avatarState,
+    pendingQueue, loadingMessages,
     setMessages, setSessionModel, setSessionUsage, setIsRunning,
     setCurrentActivity, setLoadingMessages,
     activeSessionRef, initializedSessionsRef, freshSessionsRef, chatInputRef,

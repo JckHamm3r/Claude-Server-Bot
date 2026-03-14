@@ -6,9 +6,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { useState, memo } from "react";
 import { Copy, Check, CheckCircle2, Pencil, Trash2, X, FileText, ExternalLink, RotateCcw } from "lucide-react";
-import Image from "next/image";
 import type { ParsedOutput } from "@/lib/claude/provider";
-import { getAvatarPath, type AvatarState } from "@/lib/avatar-state";
 import { apiUrl } from "@/lib/utils";
 import { OptionsButtons } from "./options-buttons";
 import { ConfirmButtons } from "./confirm-buttons";
@@ -32,7 +30,7 @@ interface MessageItemProps {
   isLatest?: boolean;
   isRunning?: boolean;
   isInteractive?: boolean;
-  avatarState?: AvatarState;
+  botAvatarUrl?: string | null;
 }
 
 function CopyButton({ text, size = "sm" }: { text: string; size?: "sm" | "xs" }) {
@@ -238,7 +236,7 @@ export const MessageItem = memo(function MessageItem({
   isLatest,
   isRunning,
   isInteractive,
-  avatarState,
+  botAvatarUrl,
 }: MessageItemProps) {
   const isUser = message.sender_type === "admin";
   const [isEditing, setIsEditing] = useState(false);
@@ -521,7 +519,8 @@ export const MessageItem = memo(function MessageItem({
   return (
     <div className="flex gap-2.5 py-1 group">
       <div className="mt-1 h-8 w-8 shrink-0 rounded-full overflow-hidden ring-1 ring-bot-border/30">
-        <Image unoptimized src={getAvatarPath((isLatest && isRunning) ? (avatarState ?? "waiting") : "waiting")} alt="Claude" width={32} height={32} className="object-cover" />
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={botAvatarUrl || apiUrl("/avatars/waiting.png")} alt="Claude" className="h-full w-full object-cover" />
       </div>
       <div className="min-w-0 flex-1 max-w-[90%]">
         <div className="rounded-2xl rounded-bl-sm glass px-4 py-3 text-body text-bot-text shadow-elevated">

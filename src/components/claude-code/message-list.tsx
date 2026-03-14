@@ -1,12 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useMemo, useState } from "react";
-import Image from "next/image";
 import { Terminal, Code2, FileSearch, MessageSquare, Slash, Sparkles } from "lucide-react";
 import { MessageItem } from "./message-item";
 import { ToolCallGroup } from "./tool-call-group";
-import type { ParsedOutput } from "@/lib/claude/provider";
-import { getAvatarPath, type AvatarState } from "@/lib/avatar-state";
+import { apiUrl } from "@/lib/utils";
 import type { ChatMessage } from "@/types/chat";
 
 export type { ChatMessage };
@@ -35,7 +33,7 @@ interface MessageListProps {
   activeHighlight?: string | null;
   pendingInteraction?: { type: string; messageId: string } | null;
   loadingMessages?: boolean;
-  avatarState?: AvatarState;
+  botAvatarUrl?: string | null;
   onSendStarter?: (message: string) => void;
   runStartTime?: number | null;
 }
@@ -51,7 +49,7 @@ const STARTER_PROMPTS = [
   { icon: MessageSquare, label: "Explain something", prompt: "Explain how ", color: "text-bot-amber" },
 ];
 
-function ThinkingBubble({ avatarState, runStartTime }: { avatarState?: AvatarState; runStartTime?: number | null }) {
+function ThinkingBubble({ botAvatarUrl, runStartTime }: { botAvatarUrl?: string | null; runStartTime?: number | null }) {
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
@@ -69,7 +67,8 @@ function ThinkingBubble({ avatarState, runStartTime }: { avatarState?: AvatarSta
   return (
     <div className="flex gap-3 py-2 justify-start animate-fadeUp">
       <div className="mt-1 h-7 w-7 shrink-0 rounded-full overflow-hidden ring-2 ring-bot-accent/30">
-        <Image unoptimized src={getAvatarPath(avatarState ?? "thinking")} alt="Claude" width={28} height={28} className="object-cover" />
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={botAvatarUrl || apiUrl("/avatars/waiting.png")} alt="Claude" width={28} height={28} className="h-full w-full object-cover" />
       </div>
       <div className="rounded-2xl rounded-bl-sm glass px-4 py-3 flex items-center gap-3">
         <span className="flex gap-1.5 items-center">
@@ -171,7 +170,7 @@ export function MessageList({
   activeHighlight,
   pendingInteraction,
   loadingMessages,
-  avatarState,
+  botAvatarUrl,
   onSendStarter,
   runStartTime,
 }: MessageListProps) {
@@ -325,7 +324,7 @@ export function MessageList({
                       && msg.id === messages.findLast(m => m.parsed?.type === msg.parsed?.type)?.id
                     )
                   }
-                  avatarState={avatarState}
+                  botAvatarUrl={botAvatarUrl}
                 />
               </div>
             );
@@ -335,7 +334,7 @@ export function MessageList({
             const lastType = messages[messages.length - 1]?.parsed?.type;
             return lastType !== "streaming";
           })() && (
-            <ThinkingBubble avatarState={avatarState} runStartTime={runStartTime} />
+            <ThinkingBubble botAvatarUrl={botAvatarUrl} runStartTime={runStartTime} />
           )}
 
           <div ref={bottomRef} />

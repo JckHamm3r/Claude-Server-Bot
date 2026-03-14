@@ -1,18 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Image from "next/image";
-import { getAvatarPath, type AvatarState } from "@/lib/avatar-state";
+import { apiUrl } from "@/lib/utils";
 
 interface BubbleProps {
   onOpen: () => void;
   isRunning: boolean;
-  avatarState?: AvatarState;
+  botAvatarUrl?: string | null;
 }
 
 const STORAGE_KEY = "claude-bubble-pos";
 
-export function ClaudeBubble({ onOpen, isRunning, avatarState }: BubbleProps) {
+export function ClaudeBubble({ onOpen, isRunning, botAvatarUrl }: BubbleProps) {
   const [pos, setPos] = useState({ right: 32, bottom: 32 });
   const posRef = useRef(pos);
   const dragging = useRef(false);
@@ -91,9 +90,9 @@ export function ClaudeBubble({ onOpen, isRunning, avatarState }: BubbleProps) {
       title="Open Claude Code"
     >
       <div className="relative">
-        <Image
-          unoptimized
-          src={getAvatarPath(avatarState ?? (isRunning ? "working" : "waiting"))}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={botAvatarUrl || apiUrl("/avatars/waiting.png")}
           alt="Claude"
           width={36}
           height={36}
