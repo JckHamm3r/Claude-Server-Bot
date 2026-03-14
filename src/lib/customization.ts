@@ -42,10 +42,22 @@ function getBotClaudeMd(): string | null {
   return null;
 }
 
+function isPublicHost(hostname: string): boolean {
+  if (!hostname) return false;
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") return false;
+  // RFC-1918 private ranges
+  if (hostname.startsWith("10.")) return false;
+  if (hostname.startsWith("192.168.")) return false;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(hostname)) return false;
+  // Link-local
+  if (hostname.startsWith("169.254.")) return false;
+  // If it has dots and isn't a private IP, treat it as public (domain or public IP)
+  return true;
+}
+
 /**
  * Derives scheme, hostname, and port from NEXTAUTH_URL so the AI knows the
- * server's public address and can offer to bind services there instead of
- * defaulting to localhost.
+ * server's network context and can make appropriate hosting suggestions.
  */
 function getServerEnvironmentContext(): string | null {
   const nextauthUrl = process.env.NEXTAUTH_URL ?? "";
@@ -62,25 +74,41 @@ function getServerEnvironmentContext(): string | null {
     const hasSSL = !!(sslCert && sslKey);
 
     const projectRoot = process.env.CLAUDE_PROJECT_ROOT ?? process.cwd();
+    const hasPublicAddress = isPublicHost(hostname);
 
     const lines = [
       `SERVER ENVIRONMENT (use this when building, deploying, or serving anything):`,
-      `This server's public address is: ${scheme}://${hostname}:${port}`,
+      `Server address: ${scheme}://${hostname}:${port}`,
       `Hostname / IP: ${hostname}`,
       `Port: ${port}`,
       `Scheme: ${scheme}`,
       `SSL configured: ${hasSSL ? "yes" : "no"}`,
+      `Public-facing: ${hasPublicAddress ? "yes" : "no"}`,
       `Project root: ${projectRoot}`,
       ``,
-      `IMPORTANT — When the user asks you to build, create, deploy, or serve a web app, site, API, or any network service:`,
-      `- Do NOT assume localhost. This server has a public IP/domain: ${hostname}`,
-      `- ASK the user how they want it served. Offer clear options, for example:`,
-      `  1) Serve on the public address (${hostname}:PORT) — accessible from the internet`,
-      `  2) Serve on localhost only (127.0.0.1:PORT) — accessible only from this machine`,
-      `  3) Serve on all interfaces (0.0.0.0:PORT) — accessible from any network interface`,
-      `- If building an HTML page or web app that will be hosted on this server, use ${scheme}://${hostname}:${port} as the base URL (not localhost) unless the user says otherwise.`,
-      `- If the user wants to embed the ${getBotSettings().name} chat widget, include: <script src="${scheme}://${hostname}:${port}/api/w.js"></script>`,
+      `When the user asks you to build, create, deploy, or serve a web app, site, API, or any network service:`,
+      `- ASK the user how they want it hosted before choosing a bind address.`,
     ];
+
+    if (hasPublicAddress) {
+      lines.push(
+        `- This server has a public address (${hostname}). Offer options such as:`,
+        `  1) Serve on the public address (${hostname}:PORT) — accessible from the internet`,
+        `  2) Serve on localhost only (127.0.0.1:PORT) — local access only`,
+        `  3) Serve on all interfaces (0.0.0.0:PORT) — accessible from any network interface`,
+        `- When generating URLs in HTML, configs, or API responses, use ${scheme}://${hostname}:${port} as the default base URL unless the user says otherwise.`,
+      );
+    } else {
+      lines.push(
+        `- This server is on a local/private address (${hostname}). Localhost is a reasonable default, but still confirm with the user.`,
+        `- If the user wants remote access, suggest binding to 0.0.0.0 and note they may need to configure port forwarding or a reverse proxy.`,
+      );
+    }
+
+    const botName = getBotSettings().name;
+    lines.push(
+      `- If the user wants to embed the ${botName} chat widget, include: <script src="${scheme}://${hostname}:${port}/api/w.js"></script>`,
+    );
 
     return lines.join("\n");
   } catch {

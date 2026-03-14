@@ -214,16 +214,13 @@ Tailwind CSS with class-based dark mode. Custom CSS variables for theming define
 
 ## Web Development & Hosting Guidance
 
-This bot runs on a server with a public IP or domain configured during installation. The server address is derived from `NEXTAUTH_URL` in the `.env` file.
+The server address configured during installation is stored in `NEXTAUTH_URL`. It may be a public IP, a domain name, or a local/private address depending on how the user set things up.
 
 **When asked to build, create, or deploy web apps, APIs, or any network service:**
-1. **Always ask the user** how they want the service to be accessible. Present options:
-   - Public address (the configured hostname/IP) — accessible from the internet
-   - Localhost only (127.0.0.1) — accessible only from the machine
-   - All interfaces (0.0.0.0) — accessible from any network interface
-2. **Never default to localhost** unless the user explicitly requests it. The server's public address is available at runtime via `NEXTAUTH_URL`.
-3. Use the correct scheme (`https` if SSL is configured, `http` otherwise) and the server's port in URLs.
-4. For static HTML or web content served on this server, reference assets using the public address so they work for remote visitors.
+1. **Ask the user** how they want the service to be accessible before choosing a bind address. The server environment context in the system prompt tells you whether the server has a public address or is local-only.
+2. If the server has a **public IP or domain**, offer options like serving on the public address, localhost-only, or all interfaces (0.0.0.0). Default to the public address for URLs in generated HTML/configs.
+3. If the server is on a **local/private address**, localhost is a reasonable default — but still confirm with the user. Suggest 0.0.0.0 + port forwarding if they want remote access.
+4. Use the correct scheme (`https` if SSL is configured, `http` otherwise) and port in generated URLs.
 
 ## Widget for User-Built Pages
 
