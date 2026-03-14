@@ -2,7 +2,6 @@ import { createServer as createHttpServer } from "http";
 import { createServer as createHttpsServer } from "https";
 import { readFileSync, existsSync } from "fs";
 import next from "next";
-import type { UrlWithParsedQuery } from "url";
 import { Server } from "socket.io";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -23,29 +22,15 @@ app.prepare().then(() => {
   const scheme = useHttps ? "https" : "http";
 
   const handler = (req: import("http").IncomingMessage, res: import("http").ServerResponse) => {
-    const url = new URL(req.url ?? "/", `${scheme}://${req.headers.host || "localhost"}`);
-    const query: Record<string, string | string[]> = {};
-    for (const [key, value] of url.searchParams.entries()) {
-      const existing = query[key];
-      if (existing !== undefined) {
-        query[key] = Array.isArray(existing) ? [...existing, value] : [existing, value];
-      } else {
-        query[key] = value;
-      }
+    // Tell Next.js the real protocol so redirects use https:// not http:/
+    if (useHttps && !req.headers["x-forwarded-proto"]) {
+      req.headers["x-forwarded-proto"] = "https";
     }
-    const parsedUrl: UrlWithParsedQuery = {
-      protocol: url.protocol,
-      slashes: true,
-      auth: null,
-      host: url.host,
-      port: url.port,
-      hostname: url.hostname,
-      hash: url.hash || null,
-      search: url.search || null,
-      query,
+
+    const url = new URL(req.url ?? "/", `${scheme}://${req.headers.host || "localhost"}`);
+    const parsedUrl = {
       pathname: url.pathname,
-      path: url.pathname + (url.search || ""),
-      href: url.href,
+      query: Object.fromEntries(url.searchParams),
     };
     handle(req, res, parsedUrl);
   };
