@@ -655,7 +655,15 @@ screen_welcome() {
   fi
   info "Deploy mode: $DEPLOY_MODE"
 
+  if [ "$DEPLOY_MODE" = "local" ]; then
+    echo ""
+    warn "Internet access is required — both for installation (downloading"
+    warn "code and dependencies) and at runtime (Claude API calls to Anthropic)."
+    hint "Recommended: 1 GB+ RAM and 500 MB+ free disk space"
+  fi
+
   if [ "$DEPLOY_MODE" = "vps" ]; then
+    hint "VPS mode uses sudo for systemd, nginx, and firewall setup."
     check_sudo || { error "VPS mode requires sudo."; NEXT_STEP=1; return; }
   fi
 
@@ -796,7 +804,12 @@ screen_configure() {
       esac
     fi
 
+    if [ "$HTTPS_METHOD" = "selfsigned" ]; then
+      hint "Browsers will show a security warning; some APIs (clipboard, notifications) may not work until you trust the cert."
+    fi
+
     if $SETUP_NGINX && [ "$PLATFORM" != "macos" ]; then
+      hint "Opens ports 80/443 for web traffic and blocks direct access to port $PORT."
       local ufw_result
       prompt_yn "Enable UFW firewall (ports 80, 443)?" "y" && ufw_result=0 || ufw_result=$?
       [ "$ufw_result" -eq 2 ] && { NEXT_STEP=1; return; }
@@ -820,6 +833,7 @@ screen_configure() {
     elif [ -n "$public_ip" ] && [ "$public_ip" != "$private_ip" ]; then
       echo ""
       echo -e "  ${BOLD}Which IP for remote access?${NC}"
+      hint "Public = accessible from anywhere; Private = local network only"
       echo ""
       echo -e "    ${CYAN}1${NC}  Public   ${GREEN}$public_ip${NC}"
       echo -e "    ${CYAN}2${NC}  Private  $private_ip"
@@ -863,7 +877,7 @@ screen_configure() {
       CLI_API_KEY="$api_key_input"
       info "API key accepted"
     else
-      warn "No API key entered — you can add one later in Settings."
+      warn "No API key entered — the bot cannot chat with Claude until one is added in Settings."
     fi
   else
     warn "No --api-key provided. Add one in Settings after install."
@@ -1677,12 +1691,16 @@ show_completion_summary() {
     if [ "$SERVER_IP_TYPE" = "private" ]; then
       local access_port="$PORT"
       $SETUP_NGINX && access_port="80/443"
-      next_steps+=("Bot is on a private IP (${BOLD}$SERVER_IP${NC}). Set up port forwarding for port ${BOLD}$access_port${NC} to access remotely.")
+      next_steps+=("Bot is on a private IP (${BOLD}$SERVER_IP${NC}). To access remotely, forward port ${BOLD}$access_port${NC} on your router (usually at http://192.168.1.1 or http://192.168.0.1).")
     elif [ "$SERVER_IP_TYPE" = "public" ]; then
       local access_port="$PORT"
       $SETUP_NGINX && access_port="443"
-      next_steps+=("Ensure port ${BOLD}$access_port${NC} is open in your cloud provider's security group / firewall.")
+      next_steps+=("Ensure port ${BOLD}$access_port${NC} is open in your cloud provider's firewall (AWS Security Groups, GCP Firewall Rules, DigitalOcean Firewall, etc.).")
     fi
+    if ! $SETUP_NGINX; then
+      next_steps+=("No reverse proxy configured — port ${BOLD}$PORT${NC} must be reachable for access.")
+    fi
+    next_steps+=("The bot requires internet access to reach the Anthropic API.")
   fi
 
   if [ "$HTTPS_METHOD" = "selfsigned" ]; then
