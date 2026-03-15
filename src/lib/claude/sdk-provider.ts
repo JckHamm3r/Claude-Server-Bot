@@ -496,11 +496,16 @@ async function processOutputStream(
           event: {
             type: string;
             index?: number;
+            message?: { usage?: { input_tokens?: number; output_tokens?: number } };
             content_block?: { type: string; name?: string; id?: string };
             delta?: { type: string; text?: string; partial_json?: string };
           };
         };
         const event = streamMsg.event;
+
+        if (event.type === "message_start" && event.message?.usage?.input_tokens) {
+          lastTurnInputTokens = event.message.usage.input_tokens;
+        }
 
         // New text content block — reset accumulator so post-tool text
         // doesn't concatenate with the previous block's content.
@@ -737,11 +742,13 @@ async function processOutputStream(
             if (modelKey) {
               const mu = resultMsg.modelUsage[modelKey];
               usage.context_window = mu.contextWindow;
-              usage.context_input_tokens = mu.inputTokens;
             }
           }
-          if (!usage.context_input_tokens && lastTurnInputTokens > 0) {
+          if (lastTurnInputTokens > 0) {
             usage.context_input_tokens = lastTurnInputTokens;
+          }
+          if (usage.context_input_tokens && usage.context_window) {
+            console.log(`[sdk] context: ${usage.context_input_tokens}/${usage.context_window} (${Math.round(usage.context_input_tokens / usage.context_window * 100)}%)`);
           }
           state.emitter.emit("output", { type: "usage", usage } as ParsedOutput);
         }
