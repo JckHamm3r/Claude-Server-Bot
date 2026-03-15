@@ -6,7 +6,7 @@ import type { ClaudeSession } from "@/lib/claude-db";
 import { DEFAULT_MODEL } from "@/lib/models";
 import { apiUrl } from "@/lib/utils";
 import { SessionSidebar } from "./session-sidebar";
-import { MessageList, type ChatMessage } from "./message-list";
+import { MessageList } from "./message-list";
 import { ChatToolbar } from "./chat-toolbar";
 import { NewSessionDialog } from "./new-session-dialog";
 import { SkipPermissionsBanner } from "./skip-permissions-banner";
@@ -61,6 +61,17 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
       .then((d: { avatar?: string | null }) => setBotAvatarUrl(d.avatar ?? null))
       .catch(() => {});
   }, []);
+
+  // Sync activeSession when the sessions list changes (e.g. server-side rename)
+  useEffect(() => {
+    if (!activeSession) return;
+    const fresh = sessions.find((s) => s.id === activeSession.id);
+    if (fresh && fresh.name !== activeSession.name) {
+      const updated = { ...activeSession, name: fresh.name };
+      chat.activeSessionRef.current = updated;
+      setActiveSession(updated);
+    }
+  }, [sessions, activeSession, chat.activeSessionRef]);
 
   // Browser tab title badge: show count of sessions needing attention
   useEffect(() => {
@@ -186,18 +197,6 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
       if (!activeSession) {
         handleCreateSession("", false);
         return;
-      }
-
-      const isFirstMessage = chat.messages.filter((m: ChatMessage) => m.sender_type === "admin").length === 0;
-      if (isFirstMessage && !activeSession.name) {
-        const autoName = content.trim().slice(0, 50) || "New Session";
-        chat.emit("claude:rename_session", { sessionId: activeSession.id, name: autoName });
-        const updated = { ...activeSession, name: autoName };
-        chat.activeSessionRef.current = updated;
-        setActiveSession(updated);
-        setSessions((prev) =>
-          prev.map((s) => (s.id === activeSession.id ? { ...s, name: autoName } : s)),
-        );
       }
 
       chat.handleSend(content, attachments);

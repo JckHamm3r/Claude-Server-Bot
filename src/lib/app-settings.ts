@@ -68,8 +68,12 @@ const PERSONALITY_PROMPTS: Record<string, string> = {
     "Personality: highly technical. Use precise technical terminology and provide detailed, expert-level responses.",
   concise:
     "Personality: concise. Keep responses brief and to the point. Avoid unnecessary elaboration.",
+  verbose:
+    "Personality: verbose and thorough. Provide detailed explanations with examples, step-by-step walkthroughs, and comprehensive context.",
   creative:
     "Personality: creative and innovative. Think outside the box and offer unique perspectives.",
+  strict_engineer:
+    "Personality: strict software engineer. Prioritize correctness, type safety, and best practices. Challenge assumptions. Point out edge cases and potential bugs.",
 };
 
 export function getPersonalityPrefix(override?: string, customPrompt?: string): string {

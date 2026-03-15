@@ -393,6 +393,15 @@ export function useChatSocket({
       );
     });
 
+    socket.on("claude:session_renamed", ({ sessionId, name }: { sessionId: string; name: string }) => {
+      setSessions((prev) =>
+        prev.map((s) => (s.id === sessionId ? { ...s, name } : s)),
+      );
+      if (activeSessionRef.current?.id === sessionId) {
+        activeSessionRef.current = { ...activeSessionRef.current, name };
+      }
+    });
+
     socket.on("claude:presence_update", ({ presence }: { presence: PresenceUser[] }) => {
       setPresenceUsers(presence);
     });
@@ -887,6 +896,7 @@ export function useChatSocket({
       socket.off("claude:compact_done");
       socket.off("security:warn");
       socket.off("claude:session_status");
+      socket.off("claude:session_renamed");
       clearEditRecoveryTimer();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

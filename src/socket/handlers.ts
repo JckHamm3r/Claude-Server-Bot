@@ -1,8 +1,9 @@
 import type { Server, Socket } from "socket.io";
 import { getClaudeProvider } from "../lib/claude";
 import type { ClaudeCodeProvider, TokenUsage } from "../lib/claude/provider";
-import { saveMessage, updateSessionStatus, updateClaudeSessionId } from "../lib/claude-db";
+import { saveMessage, updateSessionStatus, updateClaudeSessionId, getSession, getMessages, getUserSettings, renameSession, listSessions } from "../lib/claude-db";
 import type { SessionStatus } from "../lib/claude-db";
+import { generateSessionName } from "../lib/claude/session-namer";
 import { getToken } from "next-auth/jwt";
 import { logActivity } from "../lib/activity-log";
 import { getAppSetting, getPersonalityPrefix } from "../lib/app-settings";
@@ -570,6 +571,34 @@ export function registerHandlers(io: Server) {
 
         logActivity("command_executed", submitterEmail ?? null, { sessionId, latency_ms: latency });
         io.to(`session:${sessionId}`).emit("claude:command_done", { sessionId });
+
+        // AI-powered auto-naming on first completed exchange
+        if (submitterEmail) {
+          const ephemeralPrefixes = ["agent-gen-", "plan-gen-", "plan-step-", "plan-refine-"];
+          const isEphemeral = ephemeralPrefixes.some((p) => sessionId.startsWith(p));
+          if (!isEphemeral) {
+            const session = getSession(sessionId);
+            if (session && !session.name) {
+              const settings = getUserSettings(submitterEmail);
+              if (settings.auto_naming_enabled) {
+                const msgs = getMessages(sessionId);
+                const firstUserMsg = msgs.find((m) => m.sender_type === "admin");
+                if (firstUserMsg) {
+                  const claudeMsgCount = msgs.filter((m) => m.sender_type === "claude").length;
+                  if (claudeMsgCount <= 1) {
+                    generateSessionName(firstUserMsg.content, contentToSave).then((name) => {
+                      renameSession(sessionId, name);
+                      io.to(`session:${sessionId}`).emit("claude:session_renamed", { sessionId, name });
+                      // Broadcast updated session list to all sockets of the submitter
+                      const sessions = listSessions(submitterEmail);
+                      io.to(`session:${sessionId}`).emit("claude:sessions", { sessions });
+                    }).catch(() => {});
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     });
   }

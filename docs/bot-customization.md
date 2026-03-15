@@ -24,7 +24,9 @@ Available presets:
 | Friendly | Warm, conversational tone |
 | Technical | Precise, detail-oriented responses |
 | Concise | Brief, to-the-point answers |
+| Verbose | Thorough explanations with examples and step-by-step walkthroughs |
 | Creative | Imaginative, expressive style |
+| Strict Engineer | Correctness-first; challenges assumptions, flags edge cases and bugs |
 | Custom | Free-text personality description |
 
 The selected personality is injected into the system prompt at session creation time.

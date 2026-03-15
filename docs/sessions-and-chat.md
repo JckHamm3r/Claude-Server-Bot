@@ -5,6 +5,7 @@ The core interaction surface. Users create sessions to chat with Claude, approve
 ## Session Lifecycle
 
 - **Create** -- Open a new session from the sidebar or via the New Session dialog. Choose a name, model, personality, template, and whether to enable skip-permissions mode. The system prompt includes the `.context/_index.md` (or a bootstrap instruction) so the agent has persistent knowledge of installed services and project state from the start.
+- **Auto-naming** -- If no name is provided at creation, the server generates one using Haiku after the first exchange completes. Controlled by the per-user `auto_naming_enabled` setting (default on). Falls back to a truncated first message on error.
 - **Rename** -- Double-click the session name in the sidebar or use inline edit.
 - **Delete** -- Remove a session and its messages permanently.
 - **Close** -- Suspend the Claude SDK session while preserving the `claudeSessionId` for later resume.
@@ -99,10 +100,11 @@ A circular context usage indicator in the toolbar shows the current context wind
 | `src/socket/session-handlers.ts` | Session CRUD, model switching, collaboration |
 | `src/socket/message-handlers.ts` | Message send, edit, delete, tool permissions |
 | `src/hooks/use-chat-socket.ts` | Client-side Socket.IO hook |
+| `src/lib/claude/session-namer.ts` | AI-powered session name generation (Haiku API) |
 | `src/lib/claude-db.ts` | Database queries for sessions and messages |
 
 ## Socket Events
 
 **Client to server:** `claude:create_session`, `claude:set_active_session`, `claude:list_sessions`, `claude:get_messages`, `claude:rename_session`, `claude:delete_session`, `claude:update_session_tags`, `claude:close_session`, `claude:set_model`, `claude:get_session_state`, `claude:rejoin_session`, `claude:invite_to_session`, `claude:remove_from_session`, `claude:list_session_participants`, `claude:send_message`, `claude:interrupt`, `claude:allow_tool`, `claude:edit_message`, `claude:delete_message`, `claude:confirm`
 
-**Server to client:** `claude:sessions`, `claude:session_status`, `claude:presence_update`, `claude:typing`, `claude:command_started`, `claude:command_done`, `claude:output`, `claude:usage`, `claude:session_usage`, `claude:model_changed`, `claude:messages_updated`, `claude:message_deleted`, `claude:session_state`, `claude:error`, `claude:rate_limited`, `claude:budget_exceeded`, `claude:budget_warning`, `claude:compacting`, `claude:compact_done`
+**Server to client:** `claude:sessions`, `claude:session_status`, `claude:session_renamed`, `claude:presence_update`, `claude:typing`, `claude:command_started`, `claude:command_done`, `claude:output`, `claude:usage`, `claude:session_usage`, `claude:model_changed`, `claude:messages_updated`, `claude:message_deleted`, `claude:session_state`, `claude:error`, `claude:rate_limited`, `claude:budget_exceeded`, `claude:budget_warning`, `claude:compacting`, `claude:compact_done`
