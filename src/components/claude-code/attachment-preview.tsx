@@ -37,6 +37,8 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
           className="relative group flex items-center gap-2 rounded-lg border border-bot-border bg-bot-elevated px-2 py-1.5 max-w-[200px]"
         >
           {isImage(att.file) && att.previewUrl ? (
+            // next/image does not support blob:// preview URLs from File objects
+            // eslint-disable-next-line @next/next/no-img-element
             <img
               src={att.previewUrl}
               alt={att.file.name}

@@ -947,7 +947,7 @@ export function useChatSocket({
       }
       sendImmediate(content, activeSession.id, attachments);
     },
-    [activeSession, isRunning, sendImmediate],
+    [activeSession, isRunning, sendImmediate, syncQueue],
   );
 
   const handleInterrupt = useCallback(() => {
