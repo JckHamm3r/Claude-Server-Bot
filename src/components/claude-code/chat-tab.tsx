@@ -411,7 +411,7 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
           }}
           initialMode={searchMode}
           sessionId={activeSession?.id}
-          onNavigate={(targetSessionId, messageId) => {
+          onNavigate={(targetSessionId, _messageId) => {
             const target = sessions.find((s) => s.id === targetSessionId);
             if (target && target.id !== activeSession?.id) {
               handleSelectSession(target);

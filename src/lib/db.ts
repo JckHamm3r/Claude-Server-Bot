@@ -166,7 +166,6 @@ const defaultAppSettings: Record<string, string> = {
   rate_limit_concurrent: "0",
   personality: "professional",
   personality_custom: "",
-  auto_update_enabled: "false",
   // Phase 4: Security defaults
   guard_rails_enabled: "true",
   ip_protection_enabled: "true",

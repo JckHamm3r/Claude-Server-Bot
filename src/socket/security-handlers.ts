@@ -20,6 +20,63 @@ function matchesDangerousPattern(pattern: string): boolean {
 export function registerSecurityHandlers(ctx: HandlerContext) {
   const { socket, email, isAdmin } = ctx;
 
+  // ── App settings (budget limits, retention) ──────────────────────────────
+
+  socket.on("claude:get_app_settings", () => {
+    if (!isAdmin) {
+      socket.emit("claude:error", { message: "Admin only" });
+      return;
+    }
+    try {
+      const keys = [
+        "budget_limit_session_usd",
+        "budget_limit_daily_usd",
+        "budget_limit_monthly_usd",
+        "message_retention_days",
+        "rate_limit_commands",
+        "rate_limit_runtime_min",
+        "rate_limit_concurrent",
+      ];
+      const settings: Record<string, string> = {};
+      for (const key of keys) {
+        settings[key] = getAppSetting(key, "0");
+      }
+      socket.emit("claude:app_settings", { settings });
+    } catch (err) {
+      socket.emit("claude:error", { message: String(err) });
+    }
+  });
+
+  socket.on(
+    "claude:set_app_setting",
+    ({ key, value }: { key: string; value: string }) => {
+      if (!isAdmin) {
+        socket.emit("claude:error", { message: "Admin only" });
+        return;
+      }
+      const allowedKeys = [
+        "budget_limit_session_usd",
+        "budget_limit_daily_usd",
+        "budget_limit_monthly_usd",
+        "message_retention_days",
+        "rate_limit_commands",
+        "rate_limit_runtime_min",
+        "rate_limit_concurrent",
+      ];
+      if (!allowedKeys.includes(key)) {
+        socket.emit("claude:error", { message: `Unknown setting key: ${key}` });
+        return;
+      }
+      try {
+        setAppSetting(key, String(value));
+        logActivity("app_setting_changed", email, { key, value });
+        socket.emit("claude:app_setting_saved", { key });
+      } catch (err) {
+        socket.emit("claude:error", { message: String(err) });
+      }
+    },
+  );
+
   socket.on(
     "claude:always_allow_command",
     ({ pattern }: { pattern: string }) => {

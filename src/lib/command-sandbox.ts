@@ -347,7 +347,7 @@ export function classifyCommand(command: string, options?: { skipPermissions?: b
   let worstResult: ClassifyResult = { category: "safe", displayName: command };
 
   for (const segment of segments) {
-    let segResult = classifySingleCommand(segment, command);
+    const segResult = classifySingleCommand(segment, command);
     worstResult = mostDangerous(worstResult, segResult);
 
     // Check for command substitutions within this segment

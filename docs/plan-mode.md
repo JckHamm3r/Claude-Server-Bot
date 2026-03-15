@@ -59,6 +59,6 @@ Maximum 2 active plan executions per user at any time.
 
 ## Socket Events
 
-**Client to server:** `claude:list_plans`, `claude:create_plan`, `claude:update_plan`, `claude:approve_all_steps`, `claude:reject_all_steps`, `claude:update_step`, `claude:execute_plan`, `claude:refine_plan`, `claude:resume_plan`, `claude:skip_step`, `claude:cancel_plan`, `claude:delete_plan`
+**Client to server:** `claude:list_plans`, `claude:generate_plan`, `claude:update_step`, `claude:approve_all_steps`, `claude:reject_all_steps`, `claude:execute_plan`, `claude:refine_plan`, `claude:resume_plan`, `claude:skip_step`, `claude:cancel_plan`, `claude:delete_plan`
 
 **Server to client:** `claude:plans`, `claude:plan_updated`, `claude:plan_generated`, `claude:plan_executing`, `claude:step_executing`, `claude:step_progress`, `claude:step_completed`, `claude:step_failed`, `claude:plan_paused`, `claude:plan_completed`, `claude:plan_deleted`

@@ -9,7 +9,7 @@ interface BotSettingsRow {
   avatar: string | null;
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
   const row = db
     .prepare("SELECT name, tagline, avatar FROM bot_settings WHERE id = 1")
     .get() as BotSettingsRow | undefined;
