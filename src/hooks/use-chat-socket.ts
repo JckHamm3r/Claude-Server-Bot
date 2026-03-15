@@ -464,6 +464,7 @@ export function useChatSocket({
         watchdogChecksRef.current = 0;
 
         if (parsed.type === "done") {
+          console.log("[stream-debug] client received done", { streamId: streamingMsgIdRef.current });
           turnDoneRef.current = true;
           const streamId = streamingMsgIdRef.current;
           streamingMsgIdRef.current = null;
@@ -610,7 +611,10 @@ export function useChatSocket({
         }
 
         if (parsed.type === "streaming") {
-          if (turnDoneRef.current) return;
+          if (turnDoneRef.current) {
+            console.warn("[stream-debug] client BLOCKED late streaming after done", { len: parsed.content?.length });
+            return;
+          }
           setMessages((prev) => {
             const refId = streamingMsgIdRef.current;
             if (refId) {
@@ -637,11 +641,12 @@ export function useChatSocket({
           return;
         }
 
+        if (parsed.type === "text" || parsed.type === "error") {
+          console.log(`[stream-debug] client catch-all type=${parsed.type}`, { refId: streamingMsgIdRef.current, turnDone: turnDoneRef.current, len: parsed.content?.length });
+        }
         setMessages((prev) => {
           const refId = streamingMsgIdRef.current;
           let idx = refId ? prev.findIndex((m) => m.id === refId) : -1;
-          // Fallback: find the last streaming/text message with matching content
-          // to prevent duplicate entries when the ref was already cleared.
           if (idx < 0 && parsed.type === "text" && parsed.content) {
             for (let i = prev.length - 1; i >= 0; i--) {
               const m = prev[i];
@@ -660,10 +665,12 @@ export function useChatSocket({
           };
           streamingMsgIdRef.current = null;
           if (idx >= 0) {
+            console.log(`[stream-debug] client catch-all REPLACING existing msg at idx=${idx}`);
             const updated = [...prev];
             updated[idx] = finalMsg;
             return updated;
           }
+          console.log(`[stream-debug] client catch-all APPENDING new msg type=${parsed.type}`);
           return [...prev, finalMsg];
         });
       },

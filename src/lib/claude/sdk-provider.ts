@@ -433,6 +433,9 @@ async function processOutputStream(
       state.lastActivity = Date.now();
       lastOutputTime = Date.now();
       const msgType = (msg as { type: string }).type;
+      if (msgType !== "stream_event") {
+        console.log(`[stream-debug] SDK msg type=${msgType} (session=${sessionId}, emittedDone=${emittedDone})`);
+      }
 
       // ── System init: capture session ID ──
       if (msgType === "system") {
@@ -452,7 +455,7 @@ async function processOutputStream(
 
       // ── Streaming partial messages ──
       if (msgType === "stream_event") {
-        if (emittedDone) continue;
+        if (emittedDone) { console.log(`[stream-debug] BLOCKED stream_event after done (session=${sessionId})`); continue; }
         const streamMsg = msg as {
           type: "stream_event";
           event: {
@@ -533,15 +536,14 @@ async function processOutputStream(
         for (const block of assistantMsg.message?.content ?? []) {
           if (block.type === "text" && block.text) {
             accumulatedText = block.text;
-            // Only emit streaming when deltas haven't already delivered
-            // the content AND the turn hasn't finished.  The assistant
-            // message often arrives after result, and emitting a late
-            // streaming event causes the client to create a duplicate.
             if (!emittedDone && !lastStreamedText) {
+              console.log(`[stream-debug] assistant text → emit streaming (session=${sessionId}, len=${block.text.length})`);
               state.emitter.emit("output", {
                 type: "streaming",
                 content: block.text,
               } as ParsedOutput);
+            } else {
+              console.log(`[stream-debug] assistant text SKIPPED (session=${sessionId}, emittedDone=${emittedDone}, hadStreaming=${!!lastStreamedText}, len=${block.text.length})`);
             }
             lastStreamedText = block.text;
           }
@@ -663,16 +665,14 @@ async function processOutputStream(
           } as ParsedOutput);
         }
 
-        // Only emit a text event when there was no streaming — the client
-        // already has the content from streaming events and will finalize
-        // the message when "done" arrives.  Emitting a duplicate text event
-        // when streaming already delivered the content causes the client to
-        // render two copies of the response.
         if (!lastStreamedText && resultMsg.result) {
+          console.log(`[stream-debug] result → emit text (no prior streaming, session=${sessionId}, len=${resultMsg.result.length})`);
           state.emitter.emit("output", {
             type: "text",
             content: resultMsg.result,
           } as ParsedOutput);
+        } else {
+          console.log(`[stream-debug] result → text SKIPPED (session=${sessionId}, hadStreaming=${!!lastStreamedText}, hasResult=${!!resultMsg.result})`);
         }
 
         if (resultMsg.usage) {
@@ -705,6 +705,7 @@ async function processOutputStream(
         state.running = false;
         clearTimers(state);
         emittedDone = true;
+        console.log(`[stream-debug] result → emit done (session=${sessionId})`);
         state.emitter.emit("output", { type: "done" } as ParsedOutput);
         continue;
       }
