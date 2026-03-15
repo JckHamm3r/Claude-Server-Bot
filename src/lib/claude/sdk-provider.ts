@@ -1,4 +1,6 @@
 import { EventEmitter } from "events";
+import * as fs from "fs";
+import * as path from "path";
 import type { ClaudeCodeProvider, ParsedOutput, TokenUsage } from "./provider";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -21,9 +23,15 @@ interface SDKSessionState {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   activeQuery: any | null;
   toolCallCounter: number;
+  heartbeatTimer: ReturnType<typeof setInterval> | null;
+  timeoutTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const sessions = new Map<string, SDKSessionState>();
+
+const SDK_TIMEOUT_MS = parseInt(process.env.CLAUDE_SDK_TIMEOUT_MS ?? "600000", 10); // 10 min default
+const HEARTBEAT_INTERVAL_MS = 10_000;
+const HEARTBEAT_SILENCE_THRESHOLD_MS = 8_000;
 
 // ── Session GC ───────────────────────────────────────────────────────────────
 
@@ -33,6 +41,7 @@ setInterval(() => {
   const now = Date.now();
   for (const [id, state] of sessions) {
     if (!state.running && (now - state.lastActivity) > SDK_IDLE_THRESHOLD) {
+      clearTimers(state);
       state.emitter.removeAllListeners();
       if (state.activeQuery) {
         try { state.activeQuery.close(); } catch { /* ignore */ }
@@ -43,6 +52,11 @@ setInterval(() => {
 }, SDK_GC_INTERVAL).unref();
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+function clearTimers(state: SDKSessionState): void {
+  if (state.heartbeatTimer) { clearInterval(state.heartbeatTimer); state.heartbeatTimer = null; }
+  if (state.timeoutTimer) { clearTimeout(state.timeoutTimer); state.timeoutTimer = null; }
+}
 
 function getOrCreate(sessionId: string): SDKSessionState {
   if (!sessions.has(sessionId)) {
@@ -57,6 +71,8 @@ function getOrCreate(sessionId: string): SDKSessionState {
       pendingPermission: null,
       activeQuery: null,
       toolCallCounter: 0,
+      heartbeatTimer: null,
+      timeoutTimer: null,
     });
   }
   const state = sessions.get(sessionId)!;
@@ -92,6 +108,60 @@ function classifySDKError(err: unknown): { message: string; retryable: boolean }
   }
 
   return { message: msg, retryable: false };
+}
+
+// ── Input file handling ─────────────────────────────────────────────────────
+
+const projectRoot = () => process.env.CLAUDE_PROJECT_ROOT ?? process.cwd();
+
+function validateFilePath(filePath: string): boolean {
+  if (filePath.startsWith("-")) return false;
+  const resolved = path.resolve(filePath);
+  const root = path.resolve(projectRoot());
+  // Allow paths within project root OR in the data/uploads directory
+  const dataDir = path.resolve(process.env.DATA_DIR ?? "./data");
+  return resolved.startsWith(root + path.sep) || resolved.startsWith(dataDir + path.sep) || resolved === root;
+}
+
+function buildPromptWithFiles(message: string, inputFiles: string[]): string {
+  if (inputFiles.length === 0) return message;
+
+  const fileParts: string[] = [];
+  for (const filePath of inputFiles) {
+    if (!validateFilePath(filePath)) {
+      fileParts.push(`[Skipped: ${path.basename(filePath)} — path outside allowed directories]`);
+      continue;
+    }
+
+    try {
+      const stats = fs.statSync(filePath);
+      if (stats.size > 10 * 1024 * 1024) {
+        fileParts.push(`[Skipped: ${path.basename(filePath)} — file too large (${(stats.size / 1024 / 1024).toFixed(1)} MB)]`);
+        continue;
+      }
+
+      const ext = path.extname(filePath).toLowerCase();
+      const isImage = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"].includes(ext);
+
+      if (isImage) {
+        const data = fs.readFileSync(filePath);
+        const base64 = data.toString("base64");
+        const mimeMap: Record<string, string> = {
+          ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+          ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+        };
+        const mime = mimeMap[ext] ?? "application/octet-stream";
+        fileParts.push(`[Image: ${path.basename(filePath)}]\ndata:${mime};base64,${base64}`);
+      } else {
+        const content = fs.readFileSync(filePath, "utf-8");
+        fileParts.push(`<file name="${path.basename(filePath)}">\n${content}\n</file>`);
+      }
+    } catch {
+      fileParts.push(`[Error reading: ${path.basename(filePath)}]`);
+    }
+  }
+
+  return fileParts.join("\n\n") + "\n\n" + message;
 }
 
 // ── Core SDK runner ──────────────────────────────────────────────────────────
@@ -137,12 +207,8 @@ async function runSDK(
     return;
   }
 
-  // Build prompt with optional file references
-  let fullPrompt = message;
-  if (inputFiles.length > 0) {
-    const fileList = inputFiles.map(f => `[Attached file: ${f}]`).join("\n");
-    fullPrompt = fileList + "\n\n" + message;
-  }
+  // Build prompt with file contents inlined
+  const fullPrompt = buildPromptWithFiles(message, inputFiles);
 
   // Build SDK options
   const allowedToolsList = Array.from(state.allowedTools);
@@ -152,7 +218,7 @@ async function runSDK(
     model: state.model,
     maxTurns: 30,
     includePartialMessages: true,
-    cwd: process.env.CLAUDE_PROJECT_ROOT ?? process.cwd(),
+    cwd: projectRoot(),
   };
 
   // System prompt: use SDK's systemPrompt option (not prepended to message)
@@ -180,18 +246,15 @@ async function runSDK(
       options.allowedTools = allowedToolsList;
     }
 
-    // canUseTool callback: emit permission_request and wait for user response
     options.canUseTool = async (
       toolName: string,
       toolInput: Record<string, unknown>,
       callOpts: { signal: AbortSignal; toolUseID: string },
     ) => {
-      // If tool is already allowed for this session, permit it
       if (state.allowedTools.has(toolName)) {
         return { behavior: "allow" as const };
       }
 
-      // Emit permission request and wait for user response
       state.emitter.emit("output", {
         type: "permission_request",
         toolName,
@@ -199,11 +262,9 @@ async function runSDK(
         toolCallId: callOpts.toolUseID,
       } as ParsedOutput);
 
-      // Create a Promise that resolves when allowTool/denyPermission is called
       return new Promise<{ behavior: "allow" | "deny"; message?: string }>((resolve) => {
         state.pendingPermission = { resolve };
 
-        // If the query is aborted while waiting, deny
         const onAbort = () => {
           state.pendingPermission = null;
           resolve({ behavior: "deny", message: "Request interrupted" });
@@ -213,23 +274,47 @@ async function runSDK(
     };
   }
 
-  // Don't persist sessions to disk on the server — we manage state ourselves
   options.persistSession = false;
-
-  // Suppress loading of filesystem settings from the server's home dir
   options.settingSources = [];
 
-  // Environment: pass API key and identify ourselves
   options.env = {
     ...process.env,
     ANTHROPIC_API_KEY: apiKey,
     CLAUDE_AGENT_SDK_CLIENT_APP: "claude-code-server-bot/1.0",
   };
-  // Strip CLAUDECODE to avoid subprocess detection issues
   delete options.env.CLAUDECODE;
 
   let accumulatedText = "";
   let lastStreamedText = "";
+  let lastOutputTime = Date.now();
+
+  // Track active tool calls for tool_result emission
+  const activeToolCalls = new Map<string, string>(); // toolUseId -> toolName
+
+  // ── Heartbeat: emit progress when output is silent ──
+  state.heartbeatTimer = setInterval(() => {
+    if (!state.running) return;
+    const silenceMs = Date.now() - lastOutputTime;
+    if (silenceMs > HEARTBEAT_SILENCE_THRESHOLD_MS) {
+      state.emitter.emit("output", {
+        type: "progress",
+        message: silenceMs > 30_000 ? "Still processing..." : "Processing...",
+      } as ParsedOutput);
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+
+  // ── Timeout: prevent infinite hangs ──
+  state.timeoutTimer = setTimeout(() => {
+    if (!state.running) return;
+    state.emitter.emit("output", {
+      type: "error",
+      message: `Query timed out after ${SDK_TIMEOUT_MS / 1000}s. You can retry.`,
+      retryable: true,
+    } as ParsedOutput);
+    if (state.activeQuery) {
+      try { state.activeQuery.close(); } catch { /* ignore */ }
+    }
+  }, SDK_TIMEOUT_MS);
 
   try {
     const queryInstance = queryFn({ prompt: fullPrompt, options });
@@ -237,6 +322,7 @@ async function runSDK(
 
     for await (const msg of queryInstance) {
       state.lastActivity = Date.now();
+      lastOutputTime = Date.now();
       const msgType = (msg as { type: string }).type;
 
       // ── System init: capture session ID ──
@@ -265,7 +351,6 @@ async function runSDK(
         };
         const event = streamMsg.event;
 
-        // Text streaming
         if (event.type === "content_block_delta" && event.delta?.type === "text_delta" && event.delta.text) {
           accumulatedText += event.delta.text;
           state.emitter.emit("output", {
@@ -275,21 +360,23 @@ async function runSDK(
           lastStreamedText = accumulatedText;
         }
 
-        // Tool use start
         if (event.type === "content_block_start" && event.content_block?.type === "tool_use") {
           const callId = event.content_block.id ?? `tool_${++state.toolCallCounter}`;
+          const toolName = event.content_block.name ?? "unknown";
+          activeToolCalls.set(callId, toolName);
+
           state.emitter.emit("output", {
             type: "tool_call",
             toolCallId: callId,
-            toolName: event.content_block.name,
+            toolName,
             toolInput: {},
             toolStatus: "running",
           } as ParsedOutput);
 
           state.emitter.emit("output", {
             type: "progress",
-            message: `Using ${event.content_block.name}`,
-            toolName: event.content_block.name,
+            message: `Using ${toolName}`,
+            toolName,
           } as ParsedOutput);
         }
         continue;
@@ -316,7 +403,6 @@ async function runSDK(
           } as ParsedOutput);
         }
 
-        // Handle error on assistant message (rate limit, auth, etc.)
         if (assistantMsg.error) {
           const classified = classifySDKError(assistantMsg.error);
           state.emitter.emit("output", {
@@ -339,6 +425,25 @@ async function runSDK(
           }
           if (block.type === "tool_use" && block.name) {
             const callId = block.id ?? `tool_${++state.toolCallCounter}`;
+            activeToolCalls.set(callId, block.name);
+
+            // Intercept AskUserQuestion tool
+            if (block.name === "AskUserQuestion") {
+              const input = block.input as { question?: string; options?: { label: string; description?: string }[] } | undefined;
+              if (input?.question) {
+                state.emitter.emit("output", {
+                  type: "user_question",
+                  toolCallId: callId,
+                  toolName: block.name,
+                  questions: [{
+                    question: input.question,
+                    options: input.options ?? [],
+                  }],
+                } as ParsedOutput);
+                continue;
+              }
+            }
+
             state.emitter.emit("output", {
               type: "tool_call",
               toolCallId: callId,
@@ -352,6 +457,47 @@ async function runSDK(
               toolName: block.name,
               toolInput: block.input,
             } as ParsedOutput);
+          }
+        }
+        continue;
+      }
+
+      // ── User message with tool results ──
+      if (msgType === "user") {
+        const userMsg = msg as {
+          type: "user";
+          message: { content?: unknown };
+          parent_tool_use_id: string | null;
+          tool_use_result?: unknown;
+        };
+
+        // Extract tool results from the message content
+        const content = userMsg.message?.content;
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            const tb = block as { type?: string; tool_use_id?: string; content?: unknown; is_error?: boolean };
+            if (tb.type === "tool_result" && tb.tool_use_id) {
+              const toolName = activeToolCalls.get(tb.tool_use_id) ?? "unknown";
+              let resultText = "";
+              if (typeof tb.content === "string") {
+                resultText = tb.content;
+              } else if (Array.isArray(tb.content)) {
+                resultText = (tb.content as { type?: string; text?: string }[])
+                  .filter(c => c.type === "text" && c.text)
+                  .map(c => c.text)
+                  .join("\n");
+              }
+
+              state.emitter.emit("output", {
+                type: "tool_result",
+                toolCallId: tb.tool_use_id,
+                toolName,
+                toolResult: resultText.slice(0, 5000),
+                toolStatus: tb.is_error ? "error" : "done",
+              } as ParsedOutput);
+
+              activeToolCalls.delete(tb.tool_use_id);
+            }
           }
         }
         continue;
@@ -411,7 +557,6 @@ async function runSDK(
           state.emitter.emit("output", { type: "usage", usage } as ParsedOutput);
         }
 
-        // Handle errors in result
         if (resultMsg.subtype !== "success" && resultMsg.errors?.length) {
           for (const errMsg of resultMsg.errors) {
             const classified = classifySDKError(errMsg);
@@ -437,11 +582,8 @@ async function runSDK(
         }
         continue;
       }
-
-      // Other message types (auth_status, compact_boundary, etc.) are ignored
     }
   } catch (err) {
-    // AbortError means the user interrupted — not a real error
     if (err instanceof Error && (err.name === "AbortError" || err.message.includes("aborted"))) {
       // Interrupted — don't emit error
     } else {
@@ -457,6 +599,7 @@ async function runSDK(
     state.activeQuery = null;
     state.pendingPermission = null;
     state.lastActivity = Date.now();
+    clearTimers(state);
     state.emitter.emit("output", { type: "done" } as ParsedOutput);
   }
 }
@@ -498,7 +641,6 @@ export const sdkProvider: ClaudeCodeProvider = {
       state.allowedTools.add(toolName);
     }
 
-    // Resolve the pending permission promise
     if (state.pendingPermission) {
       state.pendingPermission.resolve({ behavior: "allow" });
       state.pendingPermission = null;
@@ -520,13 +662,13 @@ export const sdkProvider: ClaudeCodeProvider = {
     if (!state) return;
     state.running = false;
 
-    // Resolve any pending permission to unblock the canUseTool callback
     if (state.pendingPermission) {
       state.pendingPermission.resolve({ behavior: "deny", message: "Interrupted" });
       state.pendingPermission = null;
     }
 
-    // Close the active query (kills the SDK subprocess)
+    clearTimers(state);
+
     if (state.activeQuery) {
       try { state.activeQuery.close(); } catch { /* ignore */ }
       state.activeQuery = null;
@@ -541,6 +683,7 @@ export const sdkProvider: ClaudeCodeProvider = {
       state.pendingPermission.resolve({ behavior: "deny", message: "Session closed" });
       state.pendingPermission = null;
     }
+    clearTimers(state);
     if (state.activeQuery) {
       try { state.activeQuery.close(); } catch { /* ignore */ }
     }
@@ -556,6 +699,7 @@ export const sdkProvider: ClaudeCodeProvider = {
       state.pendingPermission.resolve({ behavior: "deny", message: "Session suspended" });
       state.pendingPermission = null;
     }
+    clearTimers(state);
     if (state.activeQuery) {
       try { state.activeQuery.close(); } catch { /* ignore */ }
       state.activeQuery = null;
