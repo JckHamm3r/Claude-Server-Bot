@@ -177,27 +177,27 @@ export interface SessionTokenUsage {
 }
 
 export function getSessionTokenUsage(sessionId: string): SessionTokenUsage {
-  const rows = db.prepare("SELECT metadata FROM messages WHERE session_id = ? AND sender_type = 'claude'").all(sessionId) as { metadata: string }[];
-  let totalInput = 0;
-  let totalOutput = 0;
-  let totalCost = 0;
+  const rows = db.prepare("SELECT metadata FROM messages WHERE session_id = ? AND sender_type = 'claude' ORDER BY timestamp ASC").all(sessionId) as { metadata: string }[];
+  let latestInput = 0;
+  let latestOutput = 0;
+  let latestCost = 0;
   let count = 0;
   for (const row of rows) {
     try {
       const meta = JSON.parse(row.metadata);
       if (meta.usage) {
-        totalInput += meta.usage.input_tokens ?? 0;
-        totalOutput += meta.usage.output_tokens ?? 0;
-        totalCost += meta.usage.cost_usd ?? 0;
+        latestInput = meta.usage.input_tokens ?? latestInput;
+        latestOutput = meta.usage.output_tokens ?? latestOutput;
+        latestCost = meta.usage.cost_usd ?? latestCost;
         count++;
       }
     } catch { /* skip */ }
   }
-  return { total_input_tokens: totalInput, total_output_tokens: totalOutput, total_cost_usd: totalCost, message_count: count };
+  return { total_input_tokens: latestInput, total_output_tokens: latestOutput, total_cost_usd: latestCost, message_count: count };
 }
 
 export function getGlobalTokenUsage(opts?: { since?: string; userId?: string }): SessionTokenUsage {
-  let query = "SELECT m.metadata FROM messages m";
+  let query = "SELECT m.session_id, m.metadata FROM messages m";
   const conditions: string[] = ["m.sender_type = 'claude'"];
   const params: unknown[] = [];
 
@@ -211,23 +211,32 @@ export function getGlobalTokenUsage(opts?: { since?: string; userId?: string }):
     params.push(opts.since);
   }
 
-  query += " WHERE " + conditions.join(" AND ");
-  const rows = db.prepare(query).all(...params) as { metadata: string }[];
+  query += " WHERE " + conditions.join(" AND ") + " ORDER BY m.timestamp ASC";
+  const rows = db.prepare(query).all(...params) as { session_id: string; metadata: string }[];
 
-  let totalInput = 0;
-  let totalOutput = 0;
-  let totalCost = 0;
+  const perSession = new Map<string, { input: number; output: number; cost: number }>();
   let count = 0;
   for (const row of rows) {
     try {
       const meta = JSON.parse(row.metadata);
       if (meta.usage) {
-        totalInput += meta.usage.input_tokens ?? 0;
-        totalOutput += meta.usage.output_tokens ?? 0;
-        totalCost += meta.usage.cost_usd ?? 0;
+        perSession.set(row.session_id, {
+          input: meta.usage.input_tokens ?? 0,
+          output: meta.usage.output_tokens ?? 0,
+          cost: meta.usage.cost_usd ?? 0,
+        });
         count++;
       }
     } catch { /* skip */ }
+  }
+
+  let totalInput = 0;
+  let totalOutput = 0;
+  let totalCost = 0;
+  for (const usage of perSession.values()) {
+    totalInput += usage.input;
+    totalOutput += usage.output;
+    totalCost += usage.cost;
   }
   return { total_input_tokens: totalInput, total_output_tokens: totalOutput, total_cost_usd: totalCost, message_count: count };
 }

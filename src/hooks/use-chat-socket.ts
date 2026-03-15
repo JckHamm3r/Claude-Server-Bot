@@ -697,11 +697,11 @@ export function useChatSocket({
         }
         return updated;
       });
-      setSessionUsage((prev) => ({
-        total_input_tokens: (prev?.total_input_tokens ?? 0) + (usage.input_tokens ?? 0),
-        total_output_tokens: (prev?.total_output_tokens ?? 0) + (usage.output_tokens ?? 0),
-        total_cost_usd: usage.cost_usd ?? (prev?.total_cost_usd ?? 0),
-      }));
+      setSessionUsage({
+        total_input_tokens: usage.input_tokens ?? 0,
+        total_output_tokens: usage.output_tokens ?? 0,
+        total_cost_usd: usage.cost_usd ?? 0,
+      });
 
       if (usage.context_input_tokens && usage.context_input_tokens > 0) {
         const ctxWindow = (usage.context_window && usage.context_window > 0) ? usage.context_window : 200_000;
