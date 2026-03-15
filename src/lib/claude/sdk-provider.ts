@@ -503,8 +503,11 @@ async function processOutputStream(
         };
         const event = streamMsg.event;
 
-        if (event.type === "message_start" && event.message?.usage?.input_tokens) {
-          lastTurnInputTokens = event.message.usage.input_tokens;
+        if (event.type === "message_start") {
+          console.log(`[sdk] stream message_start usage=${JSON.stringify(event.message?.usage)}`);
+          if (event.message?.usage?.input_tokens) {
+            lastTurnInputTokens = event.message.usage.input_tokens;
+          }
         }
 
         // New text content block — reset accumulator so post-tool text
@@ -570,6 +573,7 @@ async function processOutputStream(
           } as ParsedOutput);
         }
 
+        console.log(`[sdk] assistant msg usage=${JSON.stringify(assistantMsg.message?.usage)}`);
         if (assistantMsg.message?.usage?.input_tokens) {
           lastTurnInputTokens = assistantMsg.message.usage.input_tokens;
         }
@@ -747,6 +751,7 @@ async function processOutputStream(
           if (lastTurnInputTokens > 0) {
             usage.context_input_tokens = lastTurnInputTokens;
           }
+          console.log(`[sdk] result: lastTurnInputTokens=${lastTurnInputTokens}, context_window=${usage.context_window}, context_input_tokens=${usage.context_input_tokens}, modelUsage=${JSON.stringify(resultMsg.modelUsage)}`);
           if (usage.context_input_tokens && usage.context_window) {
             console.log(`[sdk] context: ${usage.context_input_tokens}/${usage.context_window} (${Math.round(usage.context_input_tokens / usage.context_window * 100)}%)`);
           }
