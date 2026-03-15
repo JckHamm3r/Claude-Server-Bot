@@ -769,13 +769,13 @@ screen_configure() {
       local linfo
       linfo="$(port_listener_info "$default_port")"
       [ -n "$linfo" ] && hint "$linfo"
-      hint "Type 'k' to kill and reclaim, or Enter for port $suggested"
+      hint "Type 'y' to kill and reclaim, or Enter for port $suggested"
       local reclaim_choice
-      read -r -p "  Reclaim port $default_port? [k/N]: " reclaim_choice
+      read -r -p "  Reclaim port $default_port? [y/N]: " reclaim_choice
       if [[ "$reclaim_choice" == "b" || "$reclaim_choice" == "B" ]]; then
         NEXT_STEP=1; return
       fi
-      if [[ "$reclaim_choice" == "k" || "$reclaim_choice" == "K" ]]; then
+      if [[ "$reclaim_choice" == "y" || "$reclaim_choice" == "Y" ]]; then
         kill_port_listener "$default_port" && info "Reclaimed port $default_port" || default_port="$suggested"
       else
         default_port="$suggested"
