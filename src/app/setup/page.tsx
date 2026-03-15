@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { CheckCircle2, XCircle, Loader2, Terminal, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -34,7 +33,6 @@ const stepVariants = {
 };
 
 export default function SetupPage() {
-  const router = useRouter();
   const bp = getBasePath();
   const [step, setStep] = useState<Step>(1);
 

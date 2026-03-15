@@ -149,7 +149,7 @@ export const authOptions: NextAuthOptions = {
     async session({ session, token }) {
       if (session.user) {
         session.user.email = token.email as string;
-        (session.user as any).isAdmin = token.isAdmin ?? false;
+        (session.user as { isAdmin: boolean }).isAdmin = Boolean(token.isAdmin);
       }
       return session;
     },
