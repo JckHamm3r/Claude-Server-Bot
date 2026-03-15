@@ -16,8 +16,7 @@ interface ChatToolbarProps {
   model?: string;
   onModelChange?: (model: string) => void;
   sessionUsage?: SessionUsage | null;
-  onSearch?: () => void;
-  onGlobalSearch?: () => void;
+  onOpenSearch?: () => void;
   sessionId?: string;
   budgetLimits?: BudgetLimits | null;
   messages?: ChatMessage[];
@@ -164,8 +163,7 @@ export function ChatToolbar({
   model,
   onModelChange,
   sessionUsage,
-  onSearch,
-  onGlobalSearch,
+  onOpenSearch,
   sessionId,
   budgetLimits,
   messages = [],
@@ -220,24 +218,13 @@ export function ChatToolbar({
           <ContextRing usage={contextUsage} compacting={isCompacting} onCompact={onCompact} />
         )}
 
-        {onSearch && (
+        {onOpenSearch && (
           <button
-            onClick={onSearch}
+            onClick={onOpenSearch}
             className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated/50 transition-all duration-200"
-            title="Search in session (Ctrl+F)"
+            title="Search (Ctrl+F: Session, Ctrl+Shift+F: All)"
           >
             <Search className="h-3.5 w-3.5" />
-          </button>
-        )}
-
-        {onGlobalSearch && (
-          <button
-            onClick={onGlobalSearch}
-            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated/50 transition-all duration-200"
-            title="Search all sessions (Ctrl+Shift+F)"
-          >
-            <Search className="h-3.5 w-3.5" />
-            <span className="hidden xl:inline">All</span>
           </button>
         )}
 

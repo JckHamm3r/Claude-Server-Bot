@@ -10,8 +10,7 @@ import { MessageList } from "./message-list";
 import { ChatToolbar } from "./chat-toolbar";
 import { NewSessionDialog } from "./new-session-dialog";
 import { SkipPermissionsBanner } from "./skip-permissions-banner";
-import { SessionSearchBar } from "./session-search-bar";
-import { GlobalSearchDialog } from "./global-search-dialog";
+import { UnifiedSearchDialog } from "./unified-search-dialog";
 import { ChatInput } from "./chat-input";
 import { useChatSocket } from "@/hooks/use-chat-socket";
 
@@ -40,8 +39,8 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
   }, []);
 
   // Search state
-  const [showSessionSearch, setShowSessionSearch] = useState(false);
-  const [showGlobalSearch, setShowGlobalSearch] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchMode, setSearchMode] = useState<"session" | "global">("session");
   const [searchHighlights, setSearchHighlights] = useState<Set<string>>(new Set());
   const [activeHighlight, setActiveHighlight] = useState<string | null>(null);
 
@@ -87,12 +86,14 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
 
       if (mod && e.shiftKey && e.key === "f") {
         e.preventDefault();
-        setShowGlobalSearch(true);
+        setSearchMode("global");
+        setShowSearch(true);
         return;
       }
       if (mod && e.key === "f" && activeSession) {
         e.preventDefault();
-        setShowSessionSearch(true);
+        setSearchMode("session");
+        setShowSearch(true);
         return;
       }
       if (mod && e.key === "/") {
@@ -327,26 +328,10 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
           contextUsage={chat.contextUsage}
           isCompacting={chat.isCompacting}
           onCompact={handleCompact}
-          onSearch={activeSession ? () => setShowSessionSearch(true) : undefined}
-          onGlobalSearch={() => setShowGlobalSearch(true)}
+          onOpenSearch={() => setShowSearch(true)}
           sessionId={activeSession?.id}
           messages={chat.messages}
         />
-
-        {showSessionSearch && activeSession && (
-          <SessionSearchBar
-            sessionId={activeSession.id}
-            onClose={() => {
-              setShowSessionSearch(false);
-              setSearchHighlights(new Set());
-              setActiveHighlight(null);
-            }}
-            onHighlightsChange={(highlights, activeId) => {
-              setSearchHighlights(highlights);
-              setActiveHighlight(activeId);
-            }}
-          />
-        )}
 
         {!chat.connected && (
           <div className="flex items-center justify-center gap-2 bg-bot-amber/10 border-b border-bot-amber/20 px-4 py-2 text-caption text-bot-amber">
@@ -417,12 +402,24 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
         />
       )}
 
-      {showGlobalSearch && (
-        <GlobalSearchDialog
-          onClose={() => setShowGlobalSearch(false)}
-          onNavigate={(sessionId, _messageId) => {
-            const target = sessions.find((s) => s.id === sessionId);
-            if (target) handleSelectSession(target);
+      {showSearch && (
+        <UnifiedSearchDialog
+          onClose={() => {
+            setShowSearch(false);
+            setSearchHighlights(new Set());
+            setActiveHighlight(null);
+          }}
+          initialMode={searchMode}
+          sessionId={activeSession?.id}
+          onNavigate={(targetSessionId, messageId) => {
+            const target = sessions.find((s) => s.id === targetSessionId);
+            if (target && target.id !== activeSession?.id) {
+              handleSelectSession(target);
+            }
+          }}
+          onHighlightsChange={(highlights, activeId) => {
+            setSearchHighlights(highlights);
+            setActiveHighlight(activeId);
           }}
         />
       )}
