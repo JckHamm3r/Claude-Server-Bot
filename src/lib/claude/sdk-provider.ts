@@ -428,6 +428,7 @@ async function processOutputStream(
   let lastStreamedText = "";
   let lastOutputTime = Date.now();
   let emittedDone = false;
+  let lastTurnInputTokens = 0;
 
   const activeToolCalls = new Map<string, string>();
   const toolIdToName = new Map<string, string>();
@@ -564,6 +565,10 @@ async function processOutputStream(
           } as ParsedOutput);
         }
 
+        if (assistantMsg.message?.usage?.input_tokens) {
+          lastTurnInputTokens = assistantMsg.message.usage.input_tokens;
+        }
+
         if (assistantMsg.error) {
           const classified = classifySDKError(assistantMsg.error);
           state.emitter.emit("output", {
@@ -687,17 +692,13 @@ async function processOutputStream(
 
       // ── Result message ──
       if (msgType === "result") {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rawResult = msg as Record<string, any>;
-        const resultKeys = Object.keys(rawResult).filter(k => k !== "result" && k !== "session_id");
-        console.log(`[sdk] result keys: ${resultKeys.join(", ")}`, rawResult.modelUsage ? `modelUsage keys: ${Object.keys(rawResult.modelUsage).join(", ")}` : "no modelUsage");
         const resultMsg = msg as {
           type: "result";
           subtype: string;
           result?: string;
           usage?: { input_tokens: number; output_tokens: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number };
           total_cost_usd?: number;
-          modelUsage?: Record<string, { inputTokens: number; outputTokens: number; contextWindow: number; maxOutputTokens: number }>;
+          modelUsage?: Record<string, { inputTokens: number; outputTokens: number; contextWindow: number; maxOutputTokens: number; costUSD: number }>;
           session_id: string;
           permission_denials?: { tool_name: string; tool_use_id: string; tool_input: Record<string, unknown> }[];
           errors?: string[];
@@ -736,8 +737,10 @@ async function processOutputStream(
             if (modelKey) {
               const mu = resultMsg.modelUsage[modelKey];
               usage.context_window = mu.contextWindow;
-              usage.context_input_tokens = mu.inputTokens;
             }
+          }
+          if (lastTurnInputTokens > 0) {
+            usage.context_input_tokens = lastTurnInputTokens;
           }
           state.emitter.emit("output", { type: "usage", usage } as ParsedOutput);
         }

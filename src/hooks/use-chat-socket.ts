@@ -688,12 +688,13 @@ export function useChatSocket({
       setSessionUsage((prev) => ({
         total_input_tokens: (prev?.total_input_tokens ?? 0) + (usage.input_tokens ?? 0),
         total_output_tokens: (prev?.total_output_tokens ?? 0) + (usage.output_tokens ?? 0),
-        total_cost_usd: (prev?.total_cost_usd ?? 0) + (usage.cost_usd ?? 0),
+        total_cost_usd: usage.cost_usd ?? (prev?.total_cost_usd ?? 0),
       }));
 
-      if (usage.context_window && usage.context_input_tokens) {
-        const pct = Math.min(100, Math.round((usage.context_input_tokens / usage.context_window) * 100));
-        setContextUsage({ inputTokens: usage.context_input_tokens, contextWindow: usage.context_window, percentage: pct });
+      if (usage.context_input_tokens && usage.context_input_tokens > 0) {
+        const ctxWindow = (usage.context_window && usage.context_window > 0) ? usage.context_window : 200_000;
+        const pct = Math.min(100, Math.round((usage.context_input_tokens / ctxWindow) * 100));
+        setContextUsage({ inputTokens: usage.context_input_tokens, contextWindow: ctxWindow, percentage: pct });
 
         if (pct >= 93 && !isCompactingRef.current && !autoCompactFiredRef.current) {
           autoCompactFiredRef.current = true;
