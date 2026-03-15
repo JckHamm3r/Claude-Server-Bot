@@ -687,6 +687,10 @@ async function processOutputStream(
 
       // ── Result message ──
       if (msgType === "result") {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rawResult = msg as Record<string, any>;
+        const resultKeys = Object.keys(rawResult).filter(k => k !== "result" && k !== "session_id");
+        console.log(`[sdk] result keys: ${resultKeys.join(", ")}`, rawResult.modelUsage ? `modelUsage keys: ${Object.keys(rawResult.modelUsage).join(", ")}` : "no modelUsage");
         const resultMsg = msg as {
           type: "result";
           subtype: string;
