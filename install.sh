@@ -177,9 +177,33 @@ prompt_yn() {
   fi
 }
 
-# ─── Spinner tips ─────────────────────────────────────────────────────────
+# ─── Spinner messages ─────────────────────────────────────────────────────
 QUIPS=(
   "Asking Claude nicely..."
+  "Compiling good vibes..."
+  "Warming up the server..."
+  "Negotiating with pnpm..."
+  "Downloading the internet..."
+  "Counting backwards from infinity..."
+  "Convincing electrons to cooperate..."
+  "Brewing a fresh pot of JavaScript..."
+  "Assembling the bits and bytes..."
+  "Rolling up the dependencies..."
+  "Polishing the pixels..."
+  "Tuning the WebSocket frequencies..."
+  "Teaching the database to remember..."
+  "Running npm audit... just kidding..."
+  "Consulting the ancient scrolls of MDN..."
+  "Rearranging deck chairs on the node_modules..."
+  "Aligning the CSS grid stars..."
+  "Calibrating the token counter..."
+  "Untangling the promise chain..."
+  "Waking up the SQLite gnomes..."
+  "Generating a witty loading message..."
+  "Spinning up the hamster wheel..."
+  "Inflating the Next.js balloon..."
+  "Sprinkling some async/await fairy dust..."
+  "Optimizing the vibes..."
   "Tip: Use CLAUDE.md to give your bot project context"
   "Tip: The bot auto-saves chat sessions to SQLite"
   "Tip: You can run multiple agents in parallel"
@@ -187,6 +211,24 @@ QUIPS=(
   "Tip: Check Settings to configure rate limits and budgets"
   "Tip: Upload files directly in chat with drag-and-drop"
   "Tip: The update script at ./update.sh supports rollback"
+  "Tip: Customize bot personality per-session in the New Session dialog"
+  "Tip: IP protection blocks brute-force logins automatically"
+  "Tip: Export chat sessions from the toolbar"
+  "Tip: Create reusable agent configs with custom tools and models"
+  "Tip: Plan Mode lets Claude build multi-step execution plans"
+  "Tip: Edit project memory files directly from the Memory tab"
+  "Tip: Embed the chat widget on external pages with a script tag"
+  "Tip: The admin panel has a built-in terminal for server access"
+  "Tip: Session templates let you predefine prompts and permissions"
+  "Tip: Set API budgets and rate limits in Settings"
+  "Tip: Search across all chat messages from the session sidebar"
+  "Tip: The bot supports dark mode out of the box"
+  "Tip: File browser lets you navigate and attach project files"
+  "Tip: You can approve or reject tool calls before they run"
+  "Tip: Multiple users can share a single bot instance"
+  "Tip: Email notifications keep you posted when sessions need attention"
+  "Tip: The system prompt is composed from security rules + templates + personality"
+  "Tip: Self-signed HTTPS is generated automatically if no domain is set"
 )
 
 SPINNER_PID=""
@@ -195,15 +237,15 @@ start_spinner() {
   (
     local chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
     local i=0
-    local msg_i=0
     local quip_count=${#QUIPS[@]}
+    local msg_i=$((RANDOM % quip_count))
     while true; do
       local char="${chars:$((i % ${#chars})):1}"
       local msg="${QUIPS[$((msg_i % quip_count))]}"
       printf "\r  ${CYAN}%s${NC} ${DIM}%s${NC}   \033[K" "$char" "$msg"
       i=$((i + 1))
       if (( i % 25 == 0 )); then
-        msg_i=$((msg_i + 1))
+        msg_i=$((RANDOM % quip_count))
       fi
       sleep 0.2
     done
