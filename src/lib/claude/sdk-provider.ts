@@ -737,9 +737,10 @@ async function processOutputStream(
             if (modelKey) {
               const mu = resultMsg.modelUsage[modelKey];
               usage.context_window = mu.contextWindow;
+              usage.context_input_tokens = mu.inputTokens;
             }
           }
-          if (lastTurnInputTokens > 0) {
+          if (!usage.context_input_tokens && lastTurnInputTokens > 0) {
             usage.context_input_tokens = lastTurnInputTokens;
           }
           state.emitter.emit("output", { type: "usage", usage } as ParsedOutput);
