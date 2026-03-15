@@ -26,6 +26,7 @@ export function isSDKAvailable(): boolean {
   }
 }
 
+// SDK is the only provider. _type is accepted for future extensibility but currently unused.
 export function getClaudeProvider(_type?: string): ClaudeCodeProvider {
   return getSDKProvider();
 }

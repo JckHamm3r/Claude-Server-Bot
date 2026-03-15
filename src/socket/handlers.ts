@@ -116,6 +116,13 @@ const sessionCmdStartTimes = new Map<string, number>();
 const MAX_EVENT_BUFFER_SIZE = 50;
 const sessionEventBuffers = new Map<string, { sessionId: string; parsed: unknown; submittedBy?: string }[]>();
 
+// Throttle streaming events to avoid flooding the Socket.IO connection.
+const STREAMING_THROTTLE_MS = 50;
+const sessionStreamingThrottles = new Map<string, {
+  timer: ReturnType<typeof setTimeout>;
+  pending: { sessionId: string; parsed: unknown; submittedBy?: string } | null;
+}>();
+
 const MAX_LATENCIES = 10000;
 
 // In-memory metrics counter (flushed to DB every minute)
@@ -177,20 +184,6 @@ function runRetentionCleanup() {
 
 let metricsInterval: NodeJS.Timeout | undefined;
 let cleanupInterval: NodeJS.Timeout | undefined;
-
-metricsInterval = setInterval(() => {
-  if (Date.now() - lastMetricsFlush > 60_000) {
-    flushMetrics();
-    lastMetricsFlush = Date.now();
-  }
-}, 60_000);
-
-// Periodic cleanup every 5 minutes: IP blocks, data retention, incremental vacuum
-cleanupInterval = setInterval(() => {
-  cleanupExpiredBlocks();
-  runRetentionCleanup();
-  try { db.pragma("incremental_vacuum"); } catch { /* ignore */ }
-}, 5 * 60_000);
 
 const planResumeCallbacks = new Map<string, (action: PlanAction) => void>();
 
@@ -356,6 +349,16 @@ export function registerHandlers(io: Server) {
     return false;
   }
 
+  function flushStreamingThrottle(sessionId: string) {
+    const throttle = sessionStreamingThrottles.get(sessionId);
+    if (!throttle) return;
+    clearTimeout(throttle.timer);
+    if (throttle.pending) {
+      io.to(`session:${sessionId}`).emit("claude:output", throttle.pending);
+    }
+    sessionStreamingThrottles.delete(sessionId);
+  }
+
   function ensureSessionListener(sessionId: string) {
     if (sessionListeners.has(sessionId)) return;
     sessionListeners.add(sessionId);
@@ -468,7 +471,23 @@ export function registerHandlers(io: Server) {
         setSessionStatus(sessionId, "needs_attention");
       }
 
-      io.to(`session:${sessionId}`).emit("claude:output", { sessionId, parsed, submittedBy });
+      // Throttle streaming events to prevent flooding; send all others immediately
+      if (parsed.type === "streaming") {
+        let throttle = sessionStreamingThrottles.get(sessionId);
+        if (!throttle) {
+          // First streaming event -- send immediately, start throttle window
+          io.to(`session:${sessionId}`).emit("claude:output", { sessionId, parsed, submittedBy });
+          throttle = { timer: setTimeout(() => flushStreamingThrottle(sessionId), STREAMING_THROTTLE_MS), pending: null };
+          sessionStreamingThrottles.set(sessionId, throttle);
+        } else {
+          // Within throttle window -- buffer the latest
+          throttle.pending = { sessionId, parsed, submittedBy };
+        }
+      } else {
+        // Flush any pending streaming event before sending a non-streaming event
+        flushStreamingThrottle(sessionId);
+        io.to(`session:${sessionId}`).emit("claude:output", { sessionId, parsed, submittedBy });
+      }
 
       // Buffer recent events for replay when a client reconnects mid-stream
       if (parsed.type !== "progress") {

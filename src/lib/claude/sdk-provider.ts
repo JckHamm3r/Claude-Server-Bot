@@ -287,6 +287,7 @@ async function runSDK(
   let accumulatedText = "";
   let lastStreamedText = "";
   let lastOutputTime = Date.now();
+  let emittedDone = false;
 
   // Track active tool calls for tool_result emission
   const activeToolCalls = new Map<string, string>(); // toolUseId -> toolName
@@ -600,7 +601,10 @@ async function runSDK(
     state.pendingPermission = null;
     state.lastActivity = Date.now();
     clearTimers(state);
-    state.emitter.emit("output", { type: "done" } as ParsedOutput);
+    if (!emittedDone) {
+      emittedDone = true;
+      state.emitter.emit("output", { type: "done" } as ParsedOutput);
+    }
   }
 }
 

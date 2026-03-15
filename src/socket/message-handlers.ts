@@ -17,6 +17,50 @@ import { getAppSetting } from "../lib/app-settings";
 import { checkBotConfigRequest } from "../lib/security-guard";
 import { dispatchNotification } from "../lib/notifications";
 
+interface BudgetResult {
+  exceeded: boolean;
+  warning: boolean;
+  type?: "session" | "daily" | "monthly";
+  limit?: number;
+  current?: number;
+}
+
+function checkBudget(email: string, sessionId: string): BudgetResult {
+  const sessionBudget = parseFloat(getAppSetting("budget_limit_session_usd", "0"));
+  if (sessionBudget > 0) {
+    const usage = getSessionTokenUsage(sessionId);
+    if (usage.total_cost_usd >= sessionBudget) {
+      return { exceeded: true, warning: false, type: "session", limit: sessionBudget, current: usage.total_cost_usd };
+    }
+    if (usage.total_cost_usd >= sessionBudget * 0.8) {
+      return { exceeded: false, warning: true, type: "session", limit: sessionBudget, current: usage.total_cost_usd };
+    }
+  }
+
+  const dailyBudget = parseFloat(getAppSetting("budget_limit_daily_usd", "0"));
+  if (dailyBudget > 0) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const usage = getGlobalTokenUsage({ since: today.toISOString(), userId: email });
+    if (usage.total_cost_usd >= dailyBudget) {
+      return { exceeded: true, warning: false, type: "daily", limit: dailyBudget, current: usage.total_cost_usd };
+    }
+  }
+
+  const monthlyBudget = parseFloat(getAppSetting("budget_limit_monthly_usd", "0"));
+  if (monthlyBudget > 0) {
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    const usage = getGlobalTokenUsage({ since: monthStart.toISOString(), userId: email });
+    if (usage.total_cost_usd >= monthlyBudget) {
+      return { exceeded: true, warning: false, type: "monthly", limit: monthlyBudget, current: usage.total_cost_usd };
+    }
+  }
+
+  return { exceeded: false, warning: false };
+}
+
 export function registerMessageHandlers(ctx: HandlerContext) {
   const { socket, io, email } = ctx;
 
@@ -81,40 +125,13 @@ export function registerMessageHandlers(ctx: HandlerContext) {
         ctx.incrementSessionCommands(email, sessionId);
 
         // Budget check before sending
-        const sessionBudget = parseFloat(getAppSetting("budget_limit_session_usd", "0"));
-        const dailyBudget = parseFloat(getAppSetting("budget_limit_daily_usd", "0"));
-        const monthlyBudget = parseFloat(getAppSetting("budget_limit_monthly_usd", "0"));
-
-        if (sessionBudget > 0) {
-          const sessionUsage = getSessionTokenUsage(sessionId);
-          if (sessionUsage.total_cost_usd >= sessionBudget) {
-            socket.emit("claude:budget_exceeded", { sessionId, type: "session", limit: sessionBudget, current: sessionUsage.total_cost_usd });
-            return;
-          }
-          if (sessionUsage.total_cost_usd >= sessionBudget * 0.8) {
-            socket.emit("claude:budget_warning", { sessionId, type: "session", limit: sessionBudget, current: sessionUsage.total_cost_usd });
-          }
+        const budget = checkBudget(email, sessionId);
+        if (budget.exceeded) {
+          socket.emit("claude:budget_exceeded", { sessionId, type: budget.type, limit: budget.limit, current: budget.current });
+          return;
         }
-
-        if (dailyBudget > 0) {
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          const dailyUsage = getGlobalTokenUsage({ since: today.toISOString(), userId: email });
-          if (dailyUsage.total_cost_usd >= dailyBudget) {
-            socket.emit("claude:budget_exceeded", { sessionId, type: "daily", limit: dailyBudget, current: dailyUsage.total_cost_usd });
-            return;
-          }
-        }
-
-        if (monthlyBudget > 0) {
-          const monthStart = new Date();
-          monthStart.setDate(1);
-          monthStart.setHours(0, 0, 0, 0);
-          const monthlyUsage = getGlobalTokenUsage({ since: monthStart.toISOString(), userId: email });
-          if (monthlyUsage.total_cost_usd >= monthlyBudget) {
-            socket.emit("claude:budget_exceeded", { sessionId, type: "monthly", limit: monthlyBudget, current: monthlyUsage.total_cost_usd });
-            return;
-          }
+        if (budget.warning) {
+          socket.emit("claude:budget_warning", { sessionId, type: budget.type, limit: budget.limit, current: budget.current });
         }
 
         // Process attachments: separate images for --input-file, text for inline
@@ -270,36 +287,10 @@ export function registerMessageHandlers(ctx: HandlerContext) {
           return;
         }
 
-        const sessionBudget = parseFloat(getAppSetting("budget_limit_session_usd", "0"));
-        if (sessionBudget > 0) {
-          const sessionUsage = getSessionTokenUsage(sessionId);
-          if (sessionUsage.total_cost_usd >= sessionBudget) {
-            socket.emit("claude:budget_exceeded", { sessionId, type: "session", limit: sessionBudget, current: sessionUsage.total_cost_usd });
-            return;
-          }
-        }
-
-        const dailyBudget = parseFloat(getAppSetting("budget_limit_daily_usd", "0"));
-        if (dailyBudget > 0) {
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          const dailyUsage = getGlobalTokenUsage({ since: today.toISOString(), userId: email });
-          if (dailyUsage.total_cost_usd >= dailyBudget) {
-            socket.emit("claude:budget_exceeded", { sessionId, type: "daily", limit: dailyBudget, current: dailyUsage.total_cost_usd });
-            return;
-          }
-        }
-
-        const monthlyBudget = parseFloat(getAppSetting("budget_limit_monthly_usd", "0"));
-        if (monthlyBudget > 0) {
-          const monthStart = new Date();
-          monthStart.setDate(1);
-          monthStart.setHours(0, 0, 0, 0);
-          const monthlyUsage = getGlobalTokenUsage({ since: monthStart.toISOString(), userId: email });
-          if (monthlyUsage.total_cost_usd >= monthlyBudget) {
-            socket.emit("claude:budget_exceeded", { sessionId, type: "monthly", limit: monthlyBudget, current: monthlyUsage.total_cost_usd });
-            return;
-          }
+        const budget = checkBudget(email, sessionId);
+        if (budget.exceeded) {
+          socket.emit("claude:budget_exceeded", { sessionId, type: budget.type, limit: budget.limit, current: budget.current });
+          return;
         }
 
         const session = getSession(sessionId);

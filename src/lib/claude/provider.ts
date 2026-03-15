@@ -38,7 +38,7 @@ export interface ParsedOutput {
   toolResult?: string;      // for 'tool_result'
   exitCode?: number;        // for 'tool_result'
   questions?: UserQuestion[]; // for 'user_question'
-  claudeSessionId?: string;   // for 'session_id' — the CLI resume ID
+  claudeSessionId?: string;   // for 'session_id' — SDK session resume ID
 }
 
 export interface ClaudeCodeProvider {

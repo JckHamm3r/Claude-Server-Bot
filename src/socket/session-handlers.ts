@@ -193,6 +193,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
       ctx.sessionListeners.delete(sessionId);
       ctx.sessionStartTimes.delete(sessionId);
       ctx.sessionProviders.delete(sessionId);
+      ctx.sessionEventBuffers.delete(sessionId);
 
       // Clean up upload files from disk
       try {
@@ -424,6 +425,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         ctx.sessionCommandSubmitter.delete(sid);
         ctx.sessionPendingUsage.delete(sid);
         ctx.sessionStartTimes.delete(sid);
+        ctx.sessionEventBuffers.delete(sid);
       }
       logActivity("kill_all", email);
       socket.emit("claude:kill_all_done", { killed: allSessionIds.size });

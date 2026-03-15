@@ -21,6 +21,7 @@ import {
 } from "../lib/claude-db";
 import { logActivity } from "../lib/activity-log";
 import { dispatchNotification } from "../lib/notifications";
+import { DEFAULT_MODEL } from "../lib/models";
 
 function sanitizePromptInput(input: string, maxLen = 2000): string {
   return input.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').slice(0, maxLen);
@@ -118,7 +119,7 @@ Return ONLY valid JSON with these fields:
 {
   "name": "string",
   "description": "string",
-  "model": "claude-opus-4-6",
+  "model": "${DEFAULT_MODEL}",
   "allowed_tools": ["array", "of", "tool", "names"],
   "icon": "emoji"
 }
@@ -132,7 +133,7 @@ Return only the JSON object, no markdown, no explanation.`;
         if (parsed.type === "text" && parsed.content) {
           lastTextOutput = parsed.content;
         } else if (parsed.type === "streaming" && parsed.content) {
-          lastTextOutput += parsed.content;
+          lastTextOutput = parsed.content;
         }
         if (parsed.type === "done") {
           provider.offOutput(sessionId);
@@ -197,7 +198,7 @@ Be specific. Each step should be atomic and independently executable. Return onl
             lastOutput = parsed.content;
             socket.emit("claude:plan_progress", { planId: plan.id, content: lastOutput });
           } else if (parsed.type === "streaming" && parsed.content) {
-            lastOutput += parsed.content;
+            lastOutput = parsed.content;
             socket.emit("claude:plan_progress", { planId: plan.id, content: lastOutput });
           }
           if (parsed.type === "done") {
@@ -414,7 +415,7 @@ Be specific. Each step should be atomic and independently executable. Return onl
               stepOutput = parsed.content;
               socket.emit("claude:step_progress", { planId, stepId: step.id, content: stepOutput });
             } else if (parsed.type === "streaming" && parsed.content) {
-              stepOutput += parsed.content;
+              stepOutput = parsed.content;
               socket.emit("claude:step_progress", { planId, stepId: step.id, content: stepOutput });
             }
             if (parsed.type === "error") {
@@ -549,7 +550,7 @@ Be specific. Each step should be atomic and independently executable. Return onl
             lastOutput = parsed.content;
             socket.emit("claude:plan_progress", { planId, content: lastOutput });
           } else if (parsed.type === "streaming" && parsed.content) {
-            lastOutput += parsed.content;
+            lastOutput = parsed.content;
             socket.emit("claude:plan_progress", { planId, content: lastOutput });
           }
           if (parsed.type === "done") {
