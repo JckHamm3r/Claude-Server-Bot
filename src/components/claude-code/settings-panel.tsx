@@ -572,23 +572,6 @@ export function SettingsPanel() {
                   className="w-full rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent"
                 />
               </div>
-              {/* Preview */}
-              <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5">
-                <p className="text-caption text-bot-muted mb-3">Login page preview</p>
-                <div className="flex flex-col items-center gap-2 py-4 bg-bot-bg rounded-lg">
-                  <div className="h-14 w-14 rounded-full overflow-hidden border border-bot-border">
-                    {botAvatar ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={botAvatar} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src="/claude-code.png" alt="" className="h-full w-full object-cover" />
-                    )}
-                  </div>
-                  <p className="text-title font-semibold text-bot-text">{botName || "Bot Name"}</p>
-                  <p className="text-caption text-bot-muted">{botTagline || "Tagline"}</p>
-                </div>
-              </div>
               <div className="flex items-center gap-3">
                 <button type="submit" disabled={savingIdentity} className="rounded-lg bg-bot-accent px-4 py-2 text-body font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors">
                   {savingIdentity ? "Saving…" : "Save Identity"}
