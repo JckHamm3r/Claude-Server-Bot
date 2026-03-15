@@ -127,6 +127,16 @@ app.prepare().then(() => {
       return;
     }
 
+    // Block requests outside basePath from reaching Next.js.
+    // The slug URL is a security layer — if you don't know it, you shouldn't
+    // be able to discover it. Next.js's default 404 page leaks the slug in
+    // asset URLs, so we intercept here and return an opaque 404 instead.
+    if (widgetBasePath && !url.startsWith(widgetBasePath + "/") && url !== widgetBasePath) {
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.end("Not Found");
+      return;
+    }
+
     handle(req, res, parse(url, true));
   };
 
