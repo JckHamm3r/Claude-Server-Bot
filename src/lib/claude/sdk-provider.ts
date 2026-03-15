@@ -535,15 +535,19 @@ async function processOutputStream(
 
         for (const block of assistantMsg.message?.content ?? []) {
           if (block.type === "text" && block.text) {
+            // Skip only when this is a redundant echo of content that
+            // streaming deltas already delivered (same text).  When the
+            // text is NEW (e.g. post-tool-use response), emit it.
+            const isRedundant = lastStreamedText === block.text;
             accumulatedText = block.text;
-            if (!emittedDone && !lastStreamedText) {
+            if (!emittedDone && !isRedundant) {
               console.log(`[stream-debug] assistant text → emit streaming (session=${sessionId}, len=${block.text.length})`);
               state.emitter.emit("output", {
                 type: "streaming",
                 content: block.text,
               } as ParsedOutput);
             } else {
-              console.log(`[stream-debug] assistant text SKIPPED (session=${sessionId}, emittedDone=${emittedDone}, hadStreaming=${!!lastStreamedText}, len=${block.text.length})`);
+              console.log(`[stream-debug] assistant text SKIPPED (session=${sessionId}, emittedDone=${emittedDone}, isRedundant=${isRedundant}, len=${block.text.length})`);
             }
             lastStreamedText = block.text;
           }
