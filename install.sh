@@ -73,15 +73,45 @@ MAX_COLLECTION_STEP=3
 
 # ─── Colors & helpers ──────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; BLUE='\033[0;34m'; MAGENTA='\033[0;35m'
+CYAN='\033[0;36m'
 BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
 
 info()    { echo -e "  ${GREEN}✓${NC} $*"; }
 warn()    { echo -e "  ${YELLOW}⚠${NC} $*"; }
 error()   { echo -e "  ${RED}✗${NC} $*"; }
 hint()    { echo -e "  ${DIM}$*${NC}"; }
-step()    { echo -e "\n${BOLD}${CYAN}$*${NC}"; }
-divider() { echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"; }
+
+header() {
+  local title="${1:-Claude Server Bot}"
+  local ver="v${SCRIPT_VERSION}"
+  local inner_w=48
+  local pad=$((inner_w - ${#title} - ${#ver}))
+  [ "$pad" -lt 1 ] && pad=1
+  echo ""
+  printf "  ${DIM}┌"; printf '─%.0s' $(seq 1 $inner_w); printf "┐${NC}\n"
+  printf "  ${DIM}│${NC} ${BOLD}%s${NC}%*s${DIM}%s │${NC}\n" "$title" "$pad" "" "$ver"
+  printf "  ${DIM}└"; printf '─%.0s' $(seq 1 $inner_w); printf "┘${NC}\n"
+  echo ""
+}
+
+step_indicator() {
+  local current="$1"
+  local labels=("Setup" "Configure" "Confirm")
+  local out="  "
+  for i in "${!labels[@]}"; do
+    local n=$((i + 1))
+    if [ "$n" -lt "$current" ]; then
+      out+="${GREEN}● ${labels[$i]}${NC}"
+    elif [ "$n" -eq "$current" ]; then
+      out+="${CYAN}● ${labels[$i]}${NC}"
+    else
+      out+="${DIM}○ ${labels[$i]}${NC}"
+    fi
+    [ "$n" -lt "${#labels[@]}" ] && out+="  ${DIM}─${NC}  "
+  done
+  echo -e "$out"
+  echo ""
+}
 
 prompt_input() {
   local question="$1"
@@ -147,133 +177,15 @@ prompt_yn() {
   fi
 }
 
-# ─── Mascot: Zorp the Alien ───────────────────────────────────────────────
-mascot() {
-  local pose="${1:-greeting}"
-  echo ""
-  case "$pose" in
-    greeting)
-      printf "       ${CYAN}${BOLD}o   o${NC}\n"
-      printf "       ${CYAN}${BOLD} \\ / ${NC}\n"
-      printf "      ${CYAN}${BOLD}.-\"\"\"-.${NC}\n"
-      printf "     ${CYAN}${BOLD}/ o   o \\\\${NC}   ${MAGENTA}~{ greetings, earthling }~${NC}\n"
-      printf "     ${CYAN}${BOLD}|   ${GREEN}^${CYAN}${BOLD}   |${NC}\n"
-      printf "     ${CYAN}${BOLD}|  '-'  |${NC}\n"
-      printf "      ${CYAN}${BOLD}\\\\_____/${NC}\n"
-      printf "      ${CYAN}${BOLD} |   |${NC}\n"
-      case $((RANDOM % 3)) in
-        0) echo -e "  ${CYAN}I come in peace. Mostly. Let's install some stuff.${NC}" ;;
-        1) echo -e "  ${CYAN}Take me to your server. Actually, I'll just set one up.${NC}" ;;
-        2) echo -e "  ${CYAN}Your planet's tech is... cute. Let me help with that.${NC}" ;;
-      esac
-      ;;
-    working)
-      printf "       ${YELLOW}${BOLD}~   ~${NC}\n"
-      printf "       ${YELLOW}${BOLD} \\ / ${NC}\n"
-      printf "      ${YELLOW}${BOLD}.-\"\"\"-.${NC}\n"
-      printf "     ${YELLOW}${BOLD}/ -   - \\\\${NC}   ${DIM}*beaming data*${NC}\n"
-      printf "     ${YELLOW}${BOLD}|   ${YELLOW}o${YELLOW}${BOLD}   |${NC}\n"
-      printf "     ${YELLOW}${BOLD}|  '~'  |${NC}\n"
-      printf "      ${YELLOW}${BOLD}\\\\_____/${NC}\n"
-      printf "      ${YELLOW}${BOLD} |   |${NC}\n"
-      case $((RANDOM % 3)) in
-        0) echo -e "  ${YELLOW}Engaging hyperdrive... I mean, pnpm install.${NC}" ;;
-        1) echo -e "  ${YELLOW}Shhh. Alien genius at work. No probing questions.${NC}" ;;
-        2) echo -e "  ${YELLOW}On my planet this would take 0.003 seconds. Patience.${NC}" ;;
-      esac
-      ;;
-    celebrating)
-      printf "       ${GREEN}${BOLD}*   *${NC}\n"
-      printf "       ${GREEN}${BOLD} \\ / ${NC}\n"
-      printf "      ${GREEN}${BOLD}.-\"\"\"-.${NC}\n"
-      printf "    ${GREEN}${BOLD}\\\\/ ^   ^ \\\\/${NC}   ${GREEN}~{ MISSION COMPLETE }~${NC}\n"
-      printf "     ${GREEN}${BOLD}|   ${GREEN}v${GREEN}${BOLD}   |${NC}\n"
-      printf "     ${GREEN}${BOLD}|  'v'  |${NC}\n"
-      printf "      ${GREEN}${BOLD}\\\\_____/${NC}\n"
-      printf "      ${GREEN}${BOLD} |   |${NC}\n"
-      case $((RANDOM % 3)) in
-        0) echo -e "  ${GREEN}WOOOO! *does zero-gravity victory dance*${NC}" ;;
-        1) echo -e "  ${GREEN}Another successful deployment across the galaxy!${NC}" ;;
-        2) echo -e "  ${GREEN}Nailed it. I'm putting this on my space resume.${NC}" ;;
-      esac
-      ;;
-    error)
-      printf "       ${RED}${BOLD}!   !${NC}\n"
-      printf "       ${RED}${BOLD} \\ / ${NC}\n"
-      printf "      ${RED}${BOLD}.-\"\"\"-.${NC}\n"
-      printf "     ${RED}${BOLD}/ x   x \\\\${NC}   ${RED}~{ MAYDAY MAYDAY }~${NC}\n"
-      printf "     ${RED}${BOLD}|   ${RED}o${RED}${BOLD}   |${NC}\n"
-      printf "     ${RED}${BOLD}|  '~'  |${NC}\n"
-      printf "      ${RED}${BOLD}\\\\_____/${NC}\n"
-      printf "      ${RED}${BOLD} |   |${NC}\n"
-      case $((RANDOM % 3)) in
-        0) echo -e "  ${RED}Houston, we have a problem. And I'm not even from Houston.${NC}" ;;
-        1) echo -e "  ${RED}*antenna sparking* This was NOT in the mission briefing!${NC}" ;;
-        2) echo -e "  ${RED}Uh oh. Deploying emergency protocols. Don't panic.${NC}" ;;
-      esac
-      ;;
-    goodbye)
-      printf "       ${DIM}${BOLD}.   .${NC}\n"
-      printf "       ${DIM}${BOLD} \\ / ${NC}\n"
-      printf "      ${DIM}${BOLD}.-\"\"\"-.${NC}\n"
-      printf "     ${DIM}${BOLD}/ o   o \\\\${NC}   ${DIM}~{ transmission ending }~${NC}\n"
-      printf "     ${DIM}${BOLD}|   ${DIM}^${DIM}${BOLD}   |${NC}\n"
-      printf "     ${DIM}${BOLD}|  '.'  |${NC}\n"
-      printf "      ${DIM}${BOLD}\\\\_____/${NC}\n"
-      printf "      ${DIM}${BOLD} |   |${NC}\n"
-      case $((RANDOM % 3)) in
-        0) echo -e "  ${DIM}Beaming back to the mothership. Don't forget your password.${NC}" ;;
-        1) echo -e "  ${DIM}See you, space cowboy. I'll be watching from orbit.${NC}" ;;
-        2) echo -e "  ${DIM}Zorp out. *vanishes in a puff of stardust*${NC}" ;;
-      esac
-      ;;
-    *)
-      printf "      ${BOLD}.-\"\"\"-.${NC}\n"
-      printf "     ${BOLD}/ ?   ? \\\\${NC}\n"
-      printf "     ${BOLD}|   o   |${NC}\n"
-      printf "      ${BOLD}\\\\_____/${NC}\n"
-      echo -e "  ${DIM}*confused alien noises*${NC}"
-      ;;
-  esac
-  echo ""
-}
-
-# ─── Quips & spinner ──────────────────────────────────────────────────────
+# ─── Spinner tips ─────────────────────────────────────────────────────────
 QUIPS=(
-  "Reticulating splines..."
-  "Teaching robots to love..."
-  "Downloading more RAM..."
-  "Convincing electrons to cooperate..."
-  "Warming up the flux capacitor..."
   "Asking Claude nicely..."
-  "Compiling compliments..."
-  "Feeding the hamsters that power the server..."
-  "Bribing the compiler..."
-  "Negotiating with pnpm..."
-  "Performing calculations... just kidding, it's JavaScript..."
-  "Consulting the ancient scrolls of Stack Overflow..."
-  "Summoning the mass of node_modules..."
-  "Polishing the pixels..."
-  "Untangling the spaghetti code..."
-  "Charging the laser sharks..."
-  "Waking up the server gnomes..."
-  "Counting backwards from infinity..."
-  "Dividing by zero... carefully..."
-  "Generating witty loading messages..."
-  "Herding cats (they're feral)..."
-  "Calibrating the sassiness module..."
-  "Debugging the debugger..."
-  "Turning it off and on again..."
-  "Calibrating the alien antennae..."
   "Tip: Use CLAUDE.md to give your bot project context"
   "Tip: The bot auto-saves chat sessions to SQLite"
   "Tip: You can run multiple agents in parallel"
   "Tip: Guard rails protect sensitive files by default"
   "Tip: Check Settings to configure rate limits and budgets"
-  "Tip: Customize bot personality in Settings"
-  "Tip: IP protection blocks brute-force logins automatically"
   "Tip: Upload files directly in chat with drag-and-drop"
-  "Tip: Export chat sessions from the toolbar"
   "Tip: The update script at ./update.sh supports rollback"
 )
 
@@ -290,7 +202,7 @@ start_spinner() {
       local msg="${QUIPS[$((msg_i % quip_count))]}"
       printf "\r  ${CYAN}%s${NC} ${DIM}%s${NC}   \033[K" "$char" "$msg"
       i=$((i + 1))
-      if (( i % 16 == 0 )); then
+      if (( i % 25 == 0 )); then
         msg_i=$((msg_i + 1))
       fi
       sleep 0.2
@@ -343,7 +255,6 @@ cleanup_on_exit() {
   if $INSTALL_IN_PROGRESS && ! $DRY_RUN; then
     if $CLONE_DONE && [ -d "$INSTALL_DIR" ] && [ ! -f "$INSTALL_DIR/.next/BUILD_ID" ]; then
       echo ""
-      mascot error
       error "Installation failed before completing build."
       [ -n "${INSTALL_LOG:-}" ] && [ -f "$INSTALL_LOG" ] && echo "  Install log: $INSTALL_LOG"
       if $UNATTENDED; then
@@ -633,22 +544,16 @@ validate_unattended() {
   fi
 }
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  SCREEN 1: Welcome + Name
-# ═══════════════════════════════════════════════════════════════════════════════
+# ─── Screen 1: Setup ──────────────────────────────────────────────────────
 screen_welcome() {
   CURRENT_SCREEN=1
   clear 2>/dev/null || true
-  divider
-  echo -e "${BOLD}       Claude Server Bot — Installer v${SCRIPT_VERSION}${NC}"
-  divider
-
-  mascot greeting
+  header "Claude Server Bot"
+  step_indicator 1
 
   detect_platform
   detect_pkg_manager
 
-  # Compact system info
   local os_info=""
   if [ "$PLATFORM" = "macos" ]; then
     os_info="$(sw_vers -productName 2>/dev/null || echo 'macOS') $(sw_vers -productVersion 2>/dev/null || echo '')"
@@ -662,14 +567,14 @@ screen_welcome() {
   command -v node &>/dev/null && node_ver="$(node --version)" || node_ver="not installed"
   local disk_free=""
   disk_free="$(df -h "${HOME}" 2>/dev/null | awk 'NR==2 {print $4}' || echo '?')"
-  echo -e "  ${DIM}$PLATFORM ($os_info) | Node: $node_ver | Disk: ${disk_free} free${NC}"
+  hint "$PLATFORM ($os_info)  ·  Node $node_ver  ·  ${disk_free} free"
   echo ""
 
   if [ "$PLATFORM" = "wsl" ]; then
     warn "WSL detected — use WSL filesystem paths (not /mnt/c/) for best performance."
+    echo ""
   fi
 
-  # Bot name
   if [ -n "$CLI_BOT_NAME" ]; then
     BOT_NAME="$CLI_BOT_NAME"
     local err
@@ -688,16 +593,16 @@ screen_welcome() {
       error "$err"
     done
   fi
-  info "Nice to meet you, ${BOLD}${BOT_NAME}${NC}!"
+  info "Bot name: ${BOLD}${BOT_NAME}${NC}"
   echo ""
 
-  # Deploy mode
   if [ -n "$CLI_MODE" ]; then
     DEPLOY_MODE="$CLI_MODE"
   else
     echo -e "  ${BOLD}Where will ${BOT_NAME} live?${NC}"
-    echo -e "    ${BOLD}1)${NC} Production server ${DIM}(VPS/cloud — includes systemd, nginx, HTTPS)${NC}"
-    echo -e "    ${BOLD}2)${NC} Local machine     ${DIM}(dev, home server, Raspberry Pi)${NC}"
+    echo ""
+    echo -e "    ${CYAN}1${NC}  Production server  ${DIM}— systemd, nginx, HTTPS${NC}"
+    echo -e "    ${CYAN}2${NC}  Local machine      ${DIM}— dev, home server, Raspberry Pi${NC}"
     echo ""
     if ! prompt_input "Choice" "1"; then continue; fi
     case "$REPLY" in
@@ -715,16 +620,12 @@ screen_welcome() {
   NEXT_STEP=2
 }
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  SCREEN 2: Configure
-# ═══════════════════════════════════════════════════════════════════════════════
+# ─── Screen 2: Configure ─────────────────────────────────────────────────
 screen_configure() {
   CURRENT_SCREEN=2
   clear 2>/dev/null || true
-  divider
-  echo -e "${BOLD}       Configure ${BOT_NAME}${NC}"
-  divider
-  echo ""
+  header "Configure ${BOT_NAME}"
+  step_indicator 2
 
   # Admin email
   if [ -n "$CLI_EMAIL" ]; then
@@ -840,9 +741,10 @@ screen_configure() {
     else
       echo ""
       echo -e "  ${BOLD}HTTPS method:${NC}"
-      echo -e "    ${BOLD}1)${NC} nginx + Let's Encrypt ${DIM}(recommended)${NC}"
-      echo -e "    ${BOLD}2)${NC} Cloudflare Tunnel     ${DIM}(no port exposure)${NC}"
-      echo -e "    ${BOLD}3)${NC} Self-signed            ${DIM}(browser warning)${NC}"
+      echo ""
+      echo -e "    ${CYAN}1${NC}  nginx + Let's Encrypt  ${DIM}— recommended${NC}"
+      echo -e "    ${CYAN}2${NC}  Cloudflare Tunnel      ${DIM}— no port exposure${NC}"
+      echo -e "    ${CYAN}3${NC}  Self-signed             ${DIM}— browser warning${NC}"
       echo ""
       if ! prompt_input "Choice" "1"; then NEXT_STEP=1; return; fi
       case "$REPLY" in
@@ -876,8 +778,9 @@ screen_configure() {
     elif [ -n "$public_ip" ] && [ "$public_ip" != "$private_ip" ]; then
       echo ""
       echo -e "  ${BOLD}Which IP for remote access?${NC}"
-      echo -e "    ${BOLD}1)${NC} Public:  ${GREEN}$public_ip${NC}"
-      echo -e "    ${BOLD}2)${NC} Private: $private_ip"
+      echo ""
+      echo -e "    ${CYAN}1${NC}  Public   ${GREEN}$public_ip${NC}"
+      echo -e "    ${CYAN}2${NC}  Private  $private_ip"
       echo ""
       if ! prompt_input "Choice" "1"; then NEXT_STEP=1; return; fi
       case "$REPLY" in
@@ -927,16 +830,12 @@ screen_configure() {
   NEXT_STEP=3
 }
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  SCREEN 3: Confirm & Go
-# ═══════════════════════════════════════════════════════════════════════════════
+# ─── Screen 3: Confirm ───────────────────────────────────────────────────
 screen_confirm() {
   CURRENT_SCREEN=3
   clear 2>/dev/null || true
-  divider
-  echo -e "${BOLD}       Ready to install ${BOT_NAME}${NC}"
-  divider
-  echo ""
+  header "Confirm Installation"
+  step_indicator 3
 
   SLUG=$(openssl rand -base64 96 2>/dev/null | tr -dc 'a-zA-Z0-9' | head -c64)
   BOT_PATH_PREFIX=$(echo "$BOT_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
@@ -946,7 +845,6 @@ screen_confirm() {
     exit 1
   fi
 
-  # Generate password now
   if [ -n "$CLI_PASSWORD" ]; then
     if [ ${#CLI_PASSWORD} -lt 12 ]; then
       error "Password must be at least 12 characters."; exit 1
@@ -971,21 +869,23 @@ screen_confirm() {
     selfsigned)  https_display="Self-signed" ;;
   esac
 
-  echo -e "  ${BOLD}Bot name:${NC}    $BOT_NAME"
-  echo -e "  ${BOLD}Mode:${NC}        $mode_display"
-  echo -e "  ${BOLD}Admin:${NC}       $ADMIN_EMAIL"
-  echo -e "  ${BOLD}Project:${NC}     $PROJECT_ROOT"
-  echo -e "  ${BOLD}Install to:${NC}  $INSTALL_DIR"
-  echo -e "  ${BOLD}Port:${NC}        $PORT"
-  echo -e "  ${BOLD}Domain:${NC}      ${DOMAIN:-—}"
-  echo -e "  ${BOLD}HTTPS:${NC}       $https_display"
+  echo -e "  ${DIM}┌────────────────────────────────────────────────┐${NC}"
+  echo -e "  ${DIM}│${NC}  ${BOLD}Bot name${NC}     $BOT_NAME"
+  echo -e "  ${DIM}│${NC}  ${BOLD}Mode${NC}         $mode_display"
+  echo -e "  ${DIM}│${NC}  ${BOLD}Admin${NC}        $ADMIN_EMAIL"
+  echo -e "  ${DIM}│${NC}  ${BOLD}Project${NC}      $PROJECT_ROOT"
+  echo -e "  ${DIM}│${NC}  ${BOLD}Install to${NC}   $INSTALL_DIR"
+  echo -e "  ${DIM}│${NC}  ${BOLD}Port${NC}         $PORT"
+  echo -e "  ${DIM}│${NC}  ${BOLD}Domain${NC}       ${DOMAIN:-—}"
+  echo -e "  ${DIM}│${NC}  ${BOLD}HTTPS${NC}        $https_display"
   if [ -n "${CLI_API_KEY:-}" ]; then
-    echo -e "  ${BOLD}API key:${NC}     ${GREEN}configured${NC}"
+    echo -e "  ${DIM}│${NC}  ${BOLD}API key${NC}      ${GREEN}configured${NC}"
   else
-    echo -e "  ${BOLD}API key:${NC}     ${YELLOW}not set (can add later)${NC}"
+    echo -e "  ${DIM}│${NC}  ${BOLD}API key${NC}      ${YELLOW}not set (add later)${NC}"
   fi
-  echo ""
-  echo -e "  ${BOLD}URL:${NC} ${CYAN}${full_url}${NC}"
+  echo -e "  ${DIM}│${NC}"
+  echo -e "  ${DIM}│${NC}  ${BOLD}URL${NC}  ${CYAN}${full_url}${NC}"
+  echo -e "  ${DIM}└────────────────────────────────────────────────┘${NC}"
   echo ""
 
   if $DRY_RUN; then
@@ -1007,9 +907,7 @@ screen_confirm() {
   NEXT_STEP=4
 }
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  PREREQUISITES (batch check + single confirm)
-# ═══════════════════════════════════════════════════════════════════════════════
+# ─── Prerequisites ───────────────────────────────────────────────────────
 check_and_install_prerequisites() {
   local missing=()
   local need_node=false need_pnpm=false need_git=false need_openssl=false need_build_tools=false
@@ -1106,9 +1004,7 @@ check_and_install_prerequisites() {
   return 0
 }
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  ENV GENERATION
-# ═══════════════════════════════════════════════════════════════════════════════
+# ─── Env generation ──────────────────────────────────────────────────────
 generate_env() {
   local config_file
   config_file="$(mktemp)"
@@ -1169,9 +1065,7 @@ fs.writeFileSync(process.argv[11], JSON.stringify(config));
   fi
 }
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  SERVICE SETUP (systemd, launchd, nginx, certs, cloudflare)
-# ═══════════════════════════════════════════════════════════════════════════════
+# ─── Service setup (systemd, launchd, nginx, certs, cloudflare) ──────────
 generate_selfsigned_cert() {
   local cert_dir="$INSTALL_DIR/certs"
   mkdir -p "$cert_dir"
@@ -1504,9 +1398,7 @@ restart_existing_service() {
   fi
 }
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  INSTALLATION EXECUTION (progress bar driven)
-# ═══════════════════════════════════════════════════════════════════════════════
+# ─── Installation execution ──────────────────────────────────────────────
 run_installation() {
   local lockdir="/tmp/claude-bot-install.lock"
   if ! mkdir "$lockdir" 2>/dev/null; then
@@ -1516,8 +1408,6 @@ run_installation() {
 
   INSTALL_IN_PROGRESS=true
   echo ""
-
-  mascot working
 
   # Phase 1: Prerequisites
   progress_bar 5 "Checking prerequisites..."
@@ -1531,8 +1421,9 @@ run_installation() {
     [ -d "$INSTALL_DIR/.next" ] && has_build=true
     if $has_env && $has_build && ! $UNATTENDED; then
       warn "Existing installation at $INSTALL_DIR"
-      echo -e "    ${BOLD}1)${NC} Upgrade in-place (preserves data)"
-      echo -e "    ${BOLD}2)${NC} Fresh install (backup + re-clone)"
+      echo ""
+      echo -e "    ${CYAN}1${NC}  Upgrade in-place  ${DIM}— preserves data${NC}"
+      echo -e "    ${CYAN}2${NC}  Fresh install     ${DIM}— backup + re-clone${NC}"
       if ! prompt_input "Choice" "1"; then rmdir "$lockdir" 2>/dev/null || true; exit 0; fi
       if [ "$REPLY" = "1" ]; then
         progress_bar 15 "Upgrading..."
@@ -1590,7 +1481,6 @@ run_installation() {
     start_spinner
     if ! pnpm install --reporter=silent > "$deps_log" 2>&1; then
       stop_spinner
-      mascot error
       error "pnpm install failed!"
       tail -30 "$deps_log"
       rm -f "$deps_log"
@@ -1614,7 +1504,6 @@ run_installation() {
   build_log="$(mktemp)"
   if ! CLAUDE_BOT_SLUG="$SLUG" CLAUDE_BOT_PATH_PREFIX="$BOT_PATH_PREFIX" pnpm build > "$build_log" 2>&1; then
     stop_spinner
-    mascot error
     error "Build failed!"
     tail -50 "$build_log"
     rm -f "$build_log"
@@ -1688,45 +1577,42 @@ show_completion_summary() {
   local full_url="$BASE_URL/$BOT_PATH_PREFIX/$SLUG"
 
   echo ""
-  divider
-  mascot celebrating
-
-  echo -e "  ${BOLD}${BOT_NAME} is live!${NC}"
+  echo -e "  ${GREEN}${BOLD}Setup complete — ${BOT_NAME} is live!${NC}"
   echo ""
 
-  # Print credentials to /dev/tty only, bypassing tee log capture
   {
-    echo -e "  ${BOLD}${GREEN}═══ Your Credentials ═══${NC}"
-    echo ""
-    echo -e "  ${BOLD}URL:${NC}       ${CYAN}${full_url}${NC}"
-    echo -e "  ${BOLD}Email:${NC}     ${ADMIN_EMAIL}"
-    echo -e "  ${BOLD}Password:${NC}  ${ADMIN_PASSWORD}"
-    echo ""
-    copy_to_clipboard "$ADMIN_PASSWORD" && echo -e "  ${GREEN}✓${NC} Password copied to clipboard!"
-    echo -e "  ${RED}${BOLD}!! SAVE THIS PASSWORD — IT WILL NEVER BE SHOWN AGAIN !!${NC}"
+    echo -e "  ${DIM}┌────────────────────────────────────────────────┐${NC}"
+    echo -e "  ${DIM}│${NC}                                                ${DIM}│${NC}"
+    echo -e "  ${DIM}│${NC}  ${BOLD}URL${NC}       ${CYAN}${full_url}${NC}"
+    echo -e "  ${DIM}│${NC}  ${BOLD}Email${NC}     ${ADMIN_EMAIL}"
+    echo -e "  ${DIM}│${NC}  ${BOLD}Password${NC}  ${ADMIN_PASSWORD}"
+    echo -e "  ${DIM}│${NC}                                                ${DIM}│${NC}"
+    copy_to_clipboard "$ADMIN_PASSWORD" && echo -e "  ${DIM}│${NC}  ${GREEN}✓${NC} Password copied to clipboard"
+    echo -e "  ${DIM}│${NC}  ${RED}${BOLD}Save this password — it won't be shown again${NC}"
+    echo -e "  ${DIM}│${NC}                                                ${DIM}│${NC}"
+    echo -e "  ${DIM}└────────────────────────────────────────────────┘${NC}"
     echo ""
   } > /dev/tty
 
   if $SETUP_SERVICE; then
-    echo -e "  ${BOLD}Service commands:${NC}"
+    echo -e "  ${BOLD}Service commands${NC}"
     if [ "$PLATFORM" = "macos" ]; then
-      echo "    launchctl start com.claude-server-bot"
-      echo "    launchctl stop com.claude-server-bot"
-      echo "    tail -f $INSTALL_DIR/data/claude-bot.log"
+      echo -e "  ${DIM}$${NC} launchctl start com.claude-server-bot"
+      echo -e "  ${DIM}$${NC} launchctl stop com.claude-server-bot"
+      echo -e "  ${DIM}$${NC} tail -f $INSTALL_DIR/data/claude-bot.log"
     else
-      echo "    sudo systemctl status ${SERVICE_NAME}"
-      echo "    sudo journalctl -u ${SERVICE_NAME} -f"
-      echo "    sudo systemctl restart ${SERVICE_NAME}"
+      echo -e "  ${DIM}$${NC} sudo systemctl status ${SERVICE_NAME}"
+      echo -e "  ${DIM}$${NC} sudo journalctl -u ${SERVICE_NAME} -f"
+      echo -e "  ${DIM}$${NC} sudo systemctl restart ${SERVICE_NAME}"
     fi
   else
-    echo -e "  ${BOLD}Start manually:${NC}"
-    echo "    cd $INSTALL_DIR && pnpm start"
+    echo -e "  ${BOLD}Start manually${NC}"
+    echo -e "  ${DIM}$${NC} cd $INSTALL_DIR && pnpm start"
   fi
 
   echo ""
-  echo -e "  ${BOLD}To update:${NC} cd $INSTALL_DIR && ./update.sh"
+  echo -e "  ${BOLD}Update${NC}  ${DIM}$${NC} cd $INSTALL_DIR && ./update.sh"
 
-  # ── Next Steps (DNS, port forwarding, firewall, cert warnings) ──
   local next_steps=()
 
   if [ -n "$DOMAIN" ]; then
@@ -1741,7 +1627,7 @@ show_completion_summary() {
       fi
     fi
     if ! $SETUP_NGINX && ! $SETUP_CF_TUNNEL; then
-      next_steps+=("No reverse proxy was configured — users must access port ${BOLD}$PORT${NC} directly. You can set up nginx + Let's Encrypt later from Settings.")
+      next_steps+=("No reverse proxy was configured — users must access port ${BOLD}$PORT${NC} directly. Set up nginx + Let's Encrypt later from Settings.")
     fi
   fi
 
@@ -1749,7 +1635,7 @@ show_completion_summary() {
     if [ "$SERVER_IP_TYPE" = "private" ]; then
       local access_port="$PORT"
       $SETUP_NGINX && access_port="80/443"
-      next_steps+=("Your bot is on a local/private IP (${BOLD}$SERVER_IP${NC}). To access remotely, set up port forwarding on your router for port ${BOLD}$access_port${NC} to this machine.")
+      next_steps+=("Bot is on a private IP (${BOLD}$SERVER_IP${NC}). Set up port forwarding for port ${BOLD}$access_port${NC} to access remotely.")
     elif [ "$SERVER_IP_TYPE" = "public" ]; then
       local access_port="$PORT"
       $SETUP_NGINX && access_port="443"
@@ -1758,29 +1644,23 @@ show_completion_summary() {
   fi
 
   if [ "$HTTPS_METHOD" = "selfsigned" ]; then
-    next_steps+=("You're using a self-signed certificate — your browser will show a security warning. Accept it to proceed, or set up a domain with Let's Encrypt later from Settings.")
+    next_steps+=("Self-signed cert in use — browser will show a warning. Set up a domain with Let's Encrypt later from Settings.")
   fi
 
   if [ ${#next_steps[@]} -gt 0 ]; then
     echo ""
-    echo -e "  ${BOLD}${YELLOW}═══ Next Steps ═══${NC}"
-    echo ""
+    echo -e "  ${BOLD}${YELLOW}Next steps${NC}"
     for ns in "${next_steps[@]}"; do
-      echo -e "  • $ns"
+      echo -e "    ${DIM}→${NC} $ns"
     done
   fi
 
   echo ""
   [ -n "${INSTALL_LOG:-}" ] && [ -f "$INSTALL_LOG" ] && hint "Install log: $INSTALL_LOG"
-
-  mascot goodbye
-  divider
   echo ""
 }
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  MAIN
-# ═══════════════════════════════════════════════════════════════════════════════
+# ─── Main ────────────────────────────────────────────────────────────────
 main() {
   parse_args "$@"
 
