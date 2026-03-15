@@ -572,12 +572,10 @@ async function processOutputStream(
           }
         }
 
-        // When stop_reason is set, this turn is complete -- emit done
+        // When stop_reason is set, reset accumulated text for the next turn.
+        // Don't emit done here — the result message that follows handles it.
         if (isFinal) {
           accumulatedText = "";
-          state.running = false;
-          clearTimers(state);
-          state.emitter.emit("output", { type: "done" } as ParsedOutput);
         }
         continue;
       }
@@ -656,7 +654,8 @@ async function processOutputStream(
           } as ParsedOutput);
         }
 
-        if (resultMsg.result && resultMsg.result !== lastStreamedText) {
+        // Only emit final text if nothing was streamed for this turn
+        if (resultMsg.result && !lastStreamedText) {
           state.emitter.emit("output", {
             type: "text",
             content: resultMsg.result,
@@ -687,8 +686,9 @@ async function processOutputStream(
           }
         }
 
-        // Result means this turn is done
+        // Result means this turn is done — reset for next turn
         accumulatedText = "";
+        lastStreamedText = "";
         state.running = false;
         clearTimers(state);
         state.emitter.emit("output", { type: "done" } as ParsedOutput);
