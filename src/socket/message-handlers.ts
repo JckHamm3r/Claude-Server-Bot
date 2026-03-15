@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import type { HandlerContext } from "./types";
 import {
   saveMessage,
@@ -11,6 +13,7 @@ import {
   getGlobalTokenUsage,
   canAccessSession,
   canModifySession,
+  getUpload,
 } from "../lib/claude-db";
 import { logActivity } from "../lib/activity-log";
 import { getAppSetting } from "../lib/app-settings";
@@ -145,10 +148,6 @@ export function registerMessageHandlers(ctx: HandlerContext) {
         const inputFiles: string[] = [];
         if (attachments && attachments.length > 0) {
           try {
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            const { getUpload } = require("../lib/claude-db") as typeof import("../lib/claude-db");
-            const fs = require("fs");
-            const pathMod = require("path");
             const DATA_DIR = process.env.DATA_DIR ?? "./data";
 
             const contextParts: string[] = [];
@@ -156,7 +155,7 @@ export function registerMessageHandlers(ctx: HandlerContext) {
             for (const uploadId of attachments) {
               const upload = getUpload(uploadId);
               if (!upload) continue;
-              const filePath = pathMod.join(DATA_DIR, "uploads", upload.session_id, upload.stored_name);
+              const filePath = path.join(DATA_DIR, "uploads", upload.session_id, upload.stored_name);
               if (!fs.existsSync(filePath)) continue;
 
               if (upload.mime_type.startsWith("image/")) {

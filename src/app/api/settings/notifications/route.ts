@@ -3,16 +3,29 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import db from "@/lib/db";
 
-// Canonical set of notification event types with human-readable labels.
+// Canonical set of notification event types — must match NotificationEventType
+// in src/lib/notifications.ts.
 const EVENT_TYPES: { event_type: string; label: string }[] = [
-  { event_type: "session_started", label: "Session started" },
-  { event_type: "session_completed", label: "Session completed" },
-  { event_type: "session_error", label: "Session error" },
-  { event_type: "plan_ready", label: "Plan ready for review" },
-  { event_type: "plan_approved", label: "Plan approved" },
-  { event_type: "plan_rejected", label: "Plan rejected" },
-  { event_type: "agent_status_changed", label: "Agent status changed" },
-  { event_type: "system_alert", label: "System alert" },
+  { event_type: "plan_completed", label: "Plan completed" },
+  { event_type: "plan_failed", label: "Plan failed" },
+  { event_type: "command_error", label: "Command error" },
+  { event_type: "session_limit_reached", label: "Session limit reached" },
+  { event_type: "user_added", label: "User added" },
+  { event_type: "user_removed", label: "User removed" },
+  { event_type: "kill_all_triggered", label: "Kill-all triggered" },
+  { event_type: "backup_created", label: "Backup created" },
+  { event_type: "backup_failed", label: "Backup failed" },
+  { event_type: "domain_changed", label: "Domain changed" },
+  { event_type: "smtp_configured", label: "SMTP configured" },
+  { event_type: "claude_offline", label: "Claude offline" },
+  { event_type: "claude_recovered", label: "Claude recovered" },
+  { event_type: "high_cpu", label: "High CPU usage" },
+  { event_type: "high_ram", label: "High RAM usage" },
+  { event_type: "low_disk", label: "Low disk space" },
+  { event_type: "update_completed", label: "Update completed" },
+  { event_type: "update_failed", label: "Update failed" },
+  { event_type: "security_prompt_injection_detected", label: "Prompt injection detected" },
+  { event_type: "security_ip_blocked", label: "IP blocked — brute force" },
 ];
 
 interface PrefRow {
