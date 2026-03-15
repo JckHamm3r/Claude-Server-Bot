@@ -410,6 +410,7 @@ async function processOutputStream(
   let accumulatedText = "";
   let lastStreamedText = "";
   let lastOutputTime = Date.now();
+  let emittedDone = false;
 
   const activeToolCalls = new Map<string, string>();
 
@@ -696,6 +697,7 @@ async function processOutputStream(
         lastStreamedText = "";
         state.running = false;
         clearTimers(state);
+        emittedDone = true;
         state.emitter.emit("output", { type: "done" } as ParsedOutput);
         continue;
       }
@@ -739,8 +741,9 @@ async function processOutputStream(
     state.pendingPermissions.clear();
     state.lastActivity = Date.now();
     clearTimers(state);
-    // Emit done if the stream ended unexpectedly without a result message
-    state.emitter.emit("output", { type: "done" } as ParsedOutput);
+    if (!emittedDone) {
+      state.emitter.emit("output", { type: "done" } as ParsedOutput);
+    }
   }
 }
 

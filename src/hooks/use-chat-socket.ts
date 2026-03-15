@@ -482,6 +482,7 @@ export function useChatSocket({
           setIsRunning(false);
           setMessages((prev) => {
             const last = prev[prev.length - 1];
+            if (last?.parsed?.type === "done") return prev;
             if (last?.parsed?.type === "error" && last.parsed.retryable) {
               return finalizeRunningTools(prev);
             }
