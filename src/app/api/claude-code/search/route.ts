@@ -27,9 +27,9 @@ export async function GET(req: NextRequest) {
   // For non-admin users, filter results to only sessions they own or participate in
   const user = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(token.email) as { is_admin: number } | undefined;
   if (!user?.is_admin && !sessionId) {
-    const userSessionIds = new Set(
-      (db.prepare("SELECT id FROM sessions WHERE created_by = ?").all(token.email) as { id: string }[]).map(r => r.id)
-    );
+    const ownedIds = (db.prepare("SELECT id FROM sessions WHERE created_by = ?").all(token.email) as { id: string }[]).map(r => r.id);
+    const participantIds = (db.prepare("SELECT session_id FROM session_participants WHERE user_email = ?").all(token.email) as { session_id: string }[]).map(r => r.session_id);
+    const userSessionIds = new Set([...ownedIds, ...participantIds]);
     const filtered = results.filter((r: { sessionId: string }) => userSessionIds.has(r.sessionId));
     return NextResponse.json({ results: filtered });
   }

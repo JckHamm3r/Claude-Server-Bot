@@ -148,7 +148,7 @@ export default function SetupPage() {
   const skipInit = projectStatus?.hasClaudeMd ?? false;
 
   useEffect(() => {
-    if (step === 2 && projectStatus !== null && (skipInit || !projectStatus.hasClaudeMd)) {
+    if (step === 2 && projectStatus !== null && skipInit) {
       setStep(3);
     }
   }, [step, skipInit, projectStatus]);

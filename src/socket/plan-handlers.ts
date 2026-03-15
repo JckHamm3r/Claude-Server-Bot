@@ -609,9 +609,20 @@ Be specific. Each step should be atomic and independently executable. Return onl
   });
 
   socket.on("disconnect", () => {
+    // Cancel plans waiting for user action (paused at a resume callback)
     for (const [planId, cb] of ctx.planResumeCallbacks) {
       if (planOwners.get(planId) === email) {
         cb("cancel");
+      }
+    }
+    // Decrement counts for any plans that are still running but have no resume
+    // callback (i.e. they are actively executing a step, not waiting for input).
+    // Without this the in-memory counter leaks and blocks new plan executions
+    // for the lifetime of the server process.
+    for (const [planId, owner] of planOwners) {
+      if (owner === email && !ctx.planResumeCallbacks.has(planId)) {
+        planExecutionCounts.set(email, Math.max(0, (planExecutionCounts.get(email) ?? 1) - 1));
+        planOwners.delete(planId);
       }
     }
   });

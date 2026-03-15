@@ -24,6 +24,7 @@ interface SDKSessionState {
   skipPermissions: boolean;
   claudeSessionId: string | null;
   lastActivity: number;
+  lastOutputTime: number;
   allowedTools: Set<string>;
   pendingPermissions: Map<string, PermissionResolver>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -87,20 +88,16 @@ function endStream(state: SDKSessionState): void {
 }
 
 function resetTimers(state: SDKSessionState): void {
-  clearTimers(state);
+  // Reset the per-message output timestamp so the heartbeat starts fresh for
+  // this message. The heartbeat interval itself is owned by processOutputStream
+  // and must NOT be restarted here — doing so would create a second timer that
+  // reads a stale, disconnected lastOutputTime and fires spurious progress events.
+  state.lastOutputTime = Date.now();
 
-  let lastOutputTime = Date.now();
-
-  state.heartbeatTimer = setInterval(() => {
-    if (!state.running) return;
-    const silenceMs = Date.now() - lastOutputTime;
-    if (silenceMs > HEARTBEAT_SILENCE_THRESHOLD_MS) {
-      state.emitter.emit("output", {
-        type: "progress",
-        message: silenceMs > 30_000 ? "Still processing..." : "Processing...",
-      } as ParsedOutput);
-    }
-  }, HEARTBEAT_INTERVAL_MS);
+  if (state.timeoutTimer) {
+    clearTimeout(state.timeoutTimer);
+    state.timeoutTimer = null;
+  }
 
   state.timeoutTimer = setTimeout(() => {
     if (!state.running) return;
@@ -115,10 +112,6 @@ function resetTimers(state: SDKSessionState): void {
       }
     }
   }, SDK_TIMEOUT_MS);
-
-  // Return a function that output handlers call to reset the timeout
-  const updateOutputTime = () => { lastOutputTime = Date.now(); };
-  return updateOutputTime as unknown as void;
 }
 
 function getOrCreate(sessionId: string): SDKSessionState {
@@ -129,6 +122,7 @@ function getOrCreate(sessionId: string): SDKSessionState {
       skipPermissions: false,
       claudeSessionId: null,
       lastActivity: Date.now(),
+      lastOutputTime: Date.now(),
       allowedTools: new Set(),
       pendingPermissions: new Map(),
       activeQuery: null,
@@ -426,7 +420,6 @@ async function processOutputStream(
 ): Promise<void> {
   let accumulatedText = "";
   let lastStreamedText = "";
-  let lastOutputTime = Date.now();
   let emittedDone = false;
   let lastTurnInputTokens = 0;
 
@@ -436,15 +429,18 @@ async function processOutputStream(
   const resetTurnState = () => {
     accumulatedText = "";
     lastStreamedText = "";
-    lastOutputTime = Date.now();
+    state.lastOutputTime = Date.now();
     emittedDone = false;
     activeToolCalls.clear();
     emittedToolCallIds.clear();
   };
 
+  // Single authoritative heartbeat per streaming session. Uses state.lastOutputTime
+  // so that resetTimers() (called on each sendMessage) can reset the silence clock
+  // without killing and recreating this interval.
   state.heartbeatTimer = setInterval(() => {
     if (!state.running) return;
-    const silenceMs = Date.now() - lastOutputTime;
+    const silenceMs = Date.now() - state.lastOutputTime;
     if (silenceMs > HEARTBEAT_SILENCE_THRESHOLD_MS) {
       state.emitter.emit("output", {
         type: "progress",
@@ -460,7 +456,7 @@ async function processOutputStream(
 
     for await (const msg of queryInstance) {
       state.lastActivity = Date.now();
-      lastOutputTime = Date.now();
+      state.lastOutputTime = Date.now();
       const msgType = (msg as { type: string }).type;
       if (msgType !== "stream_event" && msgType !== "system") {
         console.log(`[sdk] ${msgType} (session=${sessionId})`);

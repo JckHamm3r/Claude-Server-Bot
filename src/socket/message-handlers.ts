@@ -45,6 +45,9 @@ function checkBudget(email: string, sessionId: string): BudgetResult {
     if (usage.total_cost_usd >= dailyBudget) {
       return { exceeded: true, warning: false, type: "daily", limit: dailyBudget, current: usage.total_cost_usd };
     }
+    if (usage.total_cost_usd >= dailyBudget * 0.8) {
+      return { exceeded: false, warning: true, type: "daily", limit: dailyBudget, current: usage.total_cost_usd };
+    }
   }
 
   const monthlyBudget = parseFloat(getAppSetting("budget_limit_monthly_usd", "0"));
@@ -55,6 +58,9 @@ function checkBudget(email: string, sessionId: string): BudgetResult {
     const usage = getGlobalTokenUsage({ since: monthStart.toISOString(), userId: email });
     if (usage.total_cost_usd >= monthlyBudget) {
       return { exceeded: true, warning: false, type: "monthly", limit: monthlyBudget, current: usage.total_cost_usd };
+    }
+    if (usage.total_cost_usd >= monthlyBudget * 0.8) {
+      return { exceeded: false, warning: true, type: "monthly", limit: monthlyBudget, current: usage.total_cost_usd };
     }
   }
 

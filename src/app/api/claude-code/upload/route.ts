@@ -25,8 +25,15 @@ export async function POST(req: NextRequest) {
     }
 
     const session = db.prepare("SELECT created_by FROM sessions WHERE id = ?").get(sessionId) as { created_by: string } | undefined;
-    if (!session || session.created_by !== token.email) {
+    if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+    const uploaderIsAdmin = (db.prepare("SELECT is_admin FROM users WHERE email = ?").get(token.email) as { is_admin: number } | undefined)?.is_admin;
+    if (session.created_by !== token.email && !uploaderIsAdmin) {
+      const participant = db.prepare("SELECT 1 FROM session_participants WHERE session_id = ? AND user_email = ?").get(sessionId, token.email);
+      if (!participant) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+      }
     }
 
     const maxSize = parseInt(getAppSetting("upload_max_size_bytes", "10485760"), 10);
@@ -94,8 +101,15 @@ export async function GET(req: NextRequest) {
   }
 
   const session = db.prepare("SELECT created_by FROM sessions WHERE id = ?").get(sessionId) as { created_by: string } | undefined;
-  if (!session || session.created_by !== token.email) {
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+  }
+  const viewerIsAdmin = (db.prepare("SELECT is_admin FROM users WHERE email = ?").get(token.email) as { is_admin: number } | undefined)?.is_admin;
+  if (session.created_by !== token.email && !viewerIsAdmin) {
+    const participant = db.prepare("SELECT 1 FROM session_participants WHERE session_id = ? AND user_email = ?").get(sessionId, token.email);
+    if (!participant) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
   }
 
   const uploads = getSessionUploads(sessionId);
