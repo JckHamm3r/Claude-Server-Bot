@@ -116,15 +116,19 @@ export const authOptions: NextAuthOptions = {
 
   callbacks: {
     async jwt({ token, user }) {
+      // On initial sign-in (user object is present) OR on periodic refresh,
+      // load the latest values from the database. Reading setupComplete only
+      // on refresh meant every fresh login saw the setup wizard for up to 5 min.
+      const REFRESH_INTERVAL = 5 * 60 * 1000;
+      const lastRefresh = (token.lastRefresh as number) ?? 0;
+      const shouldRefresh = !!user || (Date.now() - lastRefresh > REFRESH_INTERVAL);
+
       if (user) {
         token.email = user.email;
         token.isAdmin = (user as { isAdmin?: boolean }).isAdmin ?? false;
-        token.lastRefresh = Date.now();
       }
 
-      const REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
-      const lastRefresh = (token.lastRefresh as number) ?? 0;
-      if (Date.now() - lastRefresh > REFRESH_INTERVAL) {
+      if (shouldRefresh) {
         try {
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           const db = (require("./db") as { default: import("better-sqlite3").Database }).default;
@@ -141,6 +145,7 @@ export const authOptions: NextAuthOptions = {
           token.lastRefresh = Date.now();
         } catch {
           // DB unavailable in edge runtime — keep existing value
+          if (user) token.lastRefresh = Date.now();
         }
       }
 
