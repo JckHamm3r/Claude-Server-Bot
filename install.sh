@@ -885,6 +885,31 @@ screen_configure() {
   fi
   info "Base URL: $BASE_URL"
 
+  # Anthropic API key
+  echo ""
+  if [ -n "$CLI_API_KEY" ]; then
+    info "Anthropic API key provided"
+  elif ! $UNATTENDED; then
+    echo -e "  ${BOLD}Enter your Anthropic API key${NC}"
+    echo -e "  ${DIM}Get one at: https://console.anthropic.com/settings/keys${NC}"
+    echo ""
+    if [ "$CURRENT_SCREEN" -gt 1 ] && [ "$CURRENT_SCREEN" -le "$MAX_COLLECTION_STEP" ]; then
+      hint "Type 'b' to go back"
+    fi
+    read -r -p "  API key (sk-ant-...): " api_key_input
+    if [[ "$api_key_input" == "b" || "$api_key_input" == "B" ]]; then
+      NEXT_STEP=1; return
+    fi
+    if [ -n "$api_key_input" ]; then
+      CLI_API_KEY="$api_key_input"
+      info "API key accepted"
+    else
+      warn "No API key entered — you can add one later in Settings."
+    fi
+  else
+    warn "No --api-key provided. Add one in Settings after install."
+  fi
+
   NEXT_STEP=3
 }
 
@@ -940,6 +965,11 @@ screen_confirm() {
   echo -e "  ${BOLD}Port:${NC}        $PORT"
   echo -e "  ${BOLD}Domain:${NC}      ${DOMAIN:-—}"
   echo -e "  ${BOLD}HTTPS:${NC}       $https_display"
+  if [ -n "${CLI_API_KEY:-}" ]; then
+    echo -e "  ${BOLD}API key:${NC}     ${GREEN}configured${NC}"
+  else
+    echo -e "  ${BOLD}API key:${NC}     ${YELLOW}not set (can add later)${NC}"
+  fi
   echo ""
   echo -e "  ${BOLD}URL:${NC} ${CYAN}${full_url}${NC}"
   echo ""
@@ -1524,29 +1554,8 @@ run_installation() {
     rm -rf "$backup_dir"
   fi
 
-  # Phase 3: Anthropic API key
-  progress_bar 20 "Setting up Anthropic API key..."
-  echo ""
-
-  if [ -n "$CLI_API_KEY" ]; then
-    info "Anthropic API key provided"
-  elif ! $UNATTENDED; then
-    echo -e "  ${BOLD}Enter your Anthropic API key${NC}"
-    echo -e "  ${DIM}Get one at: https://console.anthropic.com/settings/keys${NC}"
-    echo ""
-    read -r -p "  API key (sk-ant-...): " api_key_input
-    if [ -n "$api_key_input" ]; then
-      CLI_API_KEY="$api_key_input"
-      info "API key accepted"
-    else
-      warn "No API key entered — you can add one later in Settings."
-    fi
-  else
-    warn "No --api-key provided. Add one in Settings after install."
-  fi
-
-  # Phase 5: Dependencies
-  progress_bar 36 "Installing dependencies..."
+  # Phase 3: Dependencies
+  progress_bar 20 "Installing dependencies..."
   echo ""
   start_spinner
   local deps_log
