@@ -242,11 +242,12 @@ function buildPromptWithFiles(message: string, inputFiles: string[]): string {
 // Creates an AsyncGenerator that yields SDKUserMessage objects on demand.
 // sendMessage() pushes into the queue; the generator yields when ready.
 
-function createMessageStream(state: SDKSessionState) {
+function createMessageStream(state: SDKSessionState, onBeforeYield?: () => void) {
   async function* generator() {
     while (!state.streamEnded) {
       if (state.messageQueue.length > 0) {
         const queued = state.messageQueue.shift()!;
+        onBeforeYield?.();
         yield {
           type: "user" as const,
           message: {
@@ -385,10 +386,8 @@ async function startStreamingSession(
   state.messageQueue = [];
   state.messageReady = null;
 
-  const messageStream = createMessageStream(state);
-
   // Start output processing in background
-  processOutputStream(state, queryFn, messageStream, options, sessionId).catch((err) => {
+  processOutputStream(state, queryFn, options, sessionId).catch((err) => {
     console.error(`[sdk] Stream processing error for session ${sessionId}:`, err);
     state.emitter.emit("output", { type: "error", message: String(err) } as ParsedOutput);
     state.emitter.emit("output", { type: "done" } as ParsedOutput);
@@ -402,8 +401,6 @@ async function processOutputStream(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   queryFn: (params: { prompt: any; options?: any }) => any,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  messageStream: AsyncGenerator<any>,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   options: Record<string, any>,
   sessionId: string,
 ): Promise<void> {
@@ -414,6 +411,14 @@ async function processOutputStream(
 
   const activeToolCalls = new Map<string, string>();
   const emittedToolCallIds = new Set<string>();
+  const resetTurnState = () => {
+    accumulatedText = "";
+    lastStreamedText = "";
+    lastOutputTime = Date.now();
+    emittedDone = false;
+    activeToolCalls.clear();
+    emittedToolCallIds.clear();
+  };
 
   state.heartbeatTimer = setInterval(() => {
     if (!state.running) return;
@@ -427,6 +432,7 @@ async function processOutputStream(
   }, HEARTBEAT_INTERVAL_MS);
 
   try {
+    const messageStream = createMessageStream(state, resetTurnState);
     const queryInstance = queryFn({ prompt: messageStream, options });
     state.activeQuery = queryInstance;
 
@@ -716,9 +722,8 @@ async function processOutputStream(
           }
         }
 
-        // Result means this turn is done — reset for next turn
-        accumulatedText = "";
-        lastStreamedText = "";
+        // Result means this turn is done. Per-turn state resets when the next
+        // queued user message is yielded into the long-lived SDK stream.
         state.running = false;
         clearTimers(state);
         emittedDone = true;
