@@ -4,7 +4,7 @@ The core interaction surface. Users create sessions to chat with Claude, approve
 
 ## Session Lifecycle
 
-- **Create** -- Open a new session from the sidebar or via the New Session dialog. Choose a name, model, personality, template, and whether to enable skip-permissions mode.
+- **Create** -- Open a new session from the sidebar or via the New Session dialog. Choose a name, model, personality, template, and whether to enable skip-permissions mode. The system prompt includes the `.context/_index.md` (or a bootstrap instruction) so the agent has persistent knowledge of installed services and project state from the start.
 - **Rename** -- Double-click the session name in the sidebar or use inline edit.
 - **Delete** -- Remove a session and its messages permanently.
 - **Close** -- Suspend the Claude SDK session while preserving the `claudeSessionId` for later resume.
@@ -24,7 +24,7 @@ When enabled, tool use is auto-approved without prompting the user. A banner is 
 - **Slash commands** -- `/compact`, `/clear`, `/memory`, and others for quick actions.
 - **@ file references** -- Type `@` to autocomplete and reference project files.
 - **File attachments** -- Attach uploaded files (including images) to messages.
-- **Tool approval** -- When Claude wants to use a tool, a permission card appears with three options: Allow Once, Allow for Session, or Always Allow.
+- **Tool approval** -- When Claude wants to use a tool, a permission card appears with three options: Allow Once, Allow for Session, or Always Allow. Multiple permission requests can be pending simultaneously; each card remains interactive and can be approved independently. The session resumes only after all pending permissions are resolved.
 - **AskUserQuestion** -- Claude can ask the user structured questions; dedicated UI cards handle these.
 - **Message editing** -- Edit a previously sent message and re-execute from that point.
 - **Message deletion** -- Remove individual messages from the conversation.
@@ -103,6 +103,6 @@ A circular context usage indicator in the toolbar shows the current context wind
 
 ## Socket Events
 
-**Client to server:** `claude:create_session`, `claude:set_active_session`, `claude:list_sessions`, `claude:get_messages`, `claude:rename_session`, `claude:delete_session`, `claude:update_session_tags`, `claude:close_session`, `claude:set_model`, `claude:get_session_state`, `claude:rejoin_session`, `claude:invite_to_session`, `claude:remove_from_session`, `claude:list_session_participants`, `claude:send_message`, `claude:interrupt`, `claude:allow_tool`, `claude:deny_tool`, `claude:allow_all_tools`, `claude:edit_message`, `claude:delete_message`, `claude:confirm`
+**Client to server:** `claude:create_session`, `claude:set_active_session`, `claude:list_sessions`, `claude:get_messages`, `claude:rename_session`, `claude:delete_session`, `claude:update_session_tags`, `claude:close_session`, `claude:set_model`, `claude:get_session_state`, `claude:rejoin_session`, `claude:invite_to_session`, `claude:remove_from_session`, `claude:list_session_participants`, `claude:send_message`, `claude:interrupt`, `claude:allow_tool`, `claude:edit_message`, `claude:delete_message`, `claude:confirm`
 
 **Server to client:** `claude:sessions`, `claude:session_status`, `claude:presence_update`, `claude:typing`, `claude:command_started`, `claude:command_done`, `claude:output`, `claude:usage`, `claude:session_usage`, `claude:model_changed`, `claude:messages_updated`, `claude:message_deleted`, `claude:session_state`, `claude:error`, `claude:rate_limited`, `claude:budget_exceeded`, `claude:budget_warning`, `claude:compacting`, `claude:compact_done`

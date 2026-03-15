@@ -34,6 +34,39 @@ function readProjectClaudeMd(): string | undefined {
   return undefined;
 }
 
+const CONTEXT_BOOTSTRAP_INSTRUCTION = `CONTEXT SYSTEM: You have a .context/ folder for persistent project/server knowledge.
+No context has been recorded yet. After discovering or installing anything notable, create:
+  .context/_index.md  -- Master table of contents (keep under 40 lines)
+  .context/services.md -- Installed services with versions, config paths, status
+  .context/stack.md    -- Languages, frameworks, package managers, build tools
+  .context/structure.md -- Key directories and what lives where
+  .context/connections.md -- Ports, hostnames, users (NEVER secrets/passwords)
+  .context/history.md  -- Chronological log of what you built/changed
+Always update _index.md when you create or modify a context file.`;
+
+const CONTEXT_USAGE_INSTRUCTION = `CONTEXT SYSTEM: The .context/ folder contains your persistent knowledge about this server/project.
+- Before installing or checking for software, read the relevant .context/ file first.
+- After installing software, configuring services, or making significant changes, update the relevant .context/ file and _index.md.
+- Keep _index.md under 40 lines. It is loaded into every session's system prompt.
+- Use Read/Write tools to access .context/ files. Never store secrets or passwords.`;
+
+/**
+ * Read .context/_index.md from the project root.
+ * Returns a <project-context> block for the system prompt, or a bootstrap
+ * instruction if no context files exist yet.
+ */
+function readContextIndex(): string {
+  const root = process.env.CLAUDE_PROJECT_ROOT ?? process.cwd();
+  const indexPath = path.join(root, ".context", "_index.md");
+  try {
+    const content = fs.readFileSync(indexPath, "utf-8").trim();
+    if (content) {
+      return `<project-context>\n${content}\n\n${CONTEXT_USAGE_INSTRUCTION}\n</project-context>`;
+    }
+  } catch { /* file doesn't exist */ }
+  return `<project-context>\n${CONTEXT_BOOTSTRAP_INSTRUCTION}\n</project-context>`;
+}
+
 /**
  * Single source of truth for composing the system prompt sent to Claude.
  * Composition order: security → template → project CLAUDE.md → identity + personality
@@ -76,6 +109,13 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
       ? systemPrompt + "\n\n" + claudeSection
       : claudeSection;
   }
+
+  // Append .context/_index.md (or bootstrap instruction) so the agent
+  // always knows what persistent context is available.
+  const contextSection = readContextIndex();
+  systemPrompt = systemPrompt
+    ? systemPrompt + "\n\n" + contextSection
+    : contextSection;
 
   const guardEnabled = getAppSetting("guard_rails_enabled", "true") === "true";
   const securityPrefix = getSecuritySystemPrompt(guardEnabled);

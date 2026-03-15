@@ -7,6 +7,7 @@ import path from "path";
 
 const PROJECT_ROOT = process.env.CLAUDE_PROJECT_ROOT ?? process.cwd();
 const MEMORY_DIR = path.join(PROJECT_ROOT, ".claude/memory");
+const CONTEXT_DIR = path.join(PROJECT_ROOT, ".context");
 const CLAUDE_MD_PATH = path.join(PROJECT_ROOT, "CLAUDE.md");
 
 async function getAvailableFiles(): Promise<string[]> {
@@ -20,7 +21,18 @@ async function getAvailableFiles(): Promise<string[]> {
       }
     }
   } catch {
-    // memory dir might not exist yet — that's fine
+    // memory dir might not exist yet
+  }
+
+  try {
+    const entries = await fs.readdir(CONTEXT_DIR);
+    for (const entry of entries) {
+      if (entry.endsWith(".md")) {
+        files.add(`context/${entry}`);
+      }
+    }
+  } catch {
+    // context dir might not exist yet
   }
 
   return Array.from(files);
@@ -32,9 +44,14 @@ function resolvePath(file: string): string | null {
   }
   if (file.startsWith("memory/") && file.endsWith(".md")) {
     const basename = path.basename(file);
-    // Prevent path traversal
     if (basename === path.basename(basename) && !basename.includes("..")) {
       return path.join(MEMORY_DIR, basename);
+    }
+  }
+  if (file.startsWith("context/") && file.endsWith(".md")) {
+    const basename = path.basename(file);
+    if (basename === path.basename(basename) && !basename.includes("..")) {
+      return path.join(CONTEXT_DIR, basename);
     }
   }
   return null;
