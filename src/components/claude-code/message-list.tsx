@@ -21,8 +21,8 @@ interface MessageListProps {
   sessionId: string;
   onSelectOption: (sessionId: string, choice: string) => void;
   onConfirm: (sessionId: string, value: boolean) => void;
-  onAllowTool?: (sessionId: string, toolName: string, scope: "session" | "once", toolCallId?: string) => void;
-  onAlwaysAllow?: (sessionId: string, toolName: string, command: string) => void;
+  onAllowTool?: (sessionId: string, toolName: string, scope: "session" | "once", toolCallId?: string, messageId?: string) => void;
+  onAlwaysAllow?: (sessionId: string, toolName: string, command: string, toolCallId?: string) => void;
   onAnswerQuestion?: (sessionId: string, answer: string) => void;
   onEditMessage?: (messageId: string, newContent: string) => void;
   onDeleteMessage?: (messageId: string) => void;
@@ -31,7 +31,7 @@ interface MessageListProps {
   currentActivity?: ActivityState | null;
   searchHighlights?: Set<string>;
   activeHighlight?: string | null;
-  pendingInteraction?: { type: string; messageId: string } | null;
+  pendingInteractions?: Map<string, string>;
   loadingMessages?: boolean;
   botAvatarUrl?: string | null;
   onSendStarter?: (message: string) => void;
@@ -168,7 +168,7 @@ export function MessageList({
   currentActivity,
   searchHighlights,
   activeHighlight,
-  pendingInteraction,
+  pendingInteractions,
   loadingMessages,
   botAvatarUrl,
   onSendStarter,
@@ -337,10 +337,10 @@ export function MessageList({
                   isLatest={isLastMsg && msg.id === messages[messages.length - 1]?.id}
                   isRunning={isRunning}
                   isInteractive={
-                    pendingInteraction?.messageId === msg.id
+                    pendingInteractions?.has(msg.id)
                     || (
                       !isRunning
-                      && !pendingInteraction
+                      && (!pendingInteractions || pendingInteractions.size === 0)
                       && (msg.parsed?.type === "permission_request" || msg.parsed?.type === "user_question")
                       && msg.id === messages.findLast(m => m.parsed?.type === msg.parsed?.type)?.id
                     )

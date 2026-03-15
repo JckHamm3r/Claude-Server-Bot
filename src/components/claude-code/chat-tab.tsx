@@ -381,7 +381,7 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
             currentActivity={chat.currentActivity}
             searchHighlights={searchHighlights}
             activeHighlight={activeHighlight}
-            pendingInteraction={chat.pendingInteraction}
+            pendingInteractions={chat.pendingInteractions}
             loadingMessages={chat.loadingMessages}
             botAvatarUrl={botAvatarUrl}
             onSendStarter={(msg) => handleSendWithAutoName(msg)}

@@ -872,13 +872,17 @@ export const sdkProvider: ClaudeCodeProvider = {
       const pending = state.pendingPermissions.get(toolCallId)!;
       state.pendingPermissions.delete(toolCallId);
       pending.resolve({ behavior: "allow", updatedInput: pending.toolInput });
-    } else {
-      // Fallback: resolve the first pending permission matching toolName
+    } else if (!toolCallId && state.pendingPermissions.size > 0) {
+      // Legacy fallback: if no toolCallId was provided (shouldn't happen with
+      // updated client), resolve the first pending permission as a best-effort.
+      console.warn(`[sdk] allowTool called without toolCallId for session ${sessionId}, tool ${toolName}`);
       for (const [id, pending] of state.pendingPermissions) {
         state.pendingPermissions.delete(id);
         pending.resolve({ behavior: "allow", updatedInput: pending.toolInput });
         break;
       }
+    } else if (toolCallId) {
+      console.warn(`[sdk] allowTool: toolCallId ${toolCallId} not found in pendingPermissions for session ${sessionId}`);
     }
   },
 

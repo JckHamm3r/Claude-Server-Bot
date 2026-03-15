@@ -98,7 +98,7 @@ export interface UseChatSocketReturn {
   isCompacting: boolean;
   sessionModel: string;
   hasError: boolean;
-  pendingInteraction: { type: string; messageId: string } | null;
+  pendingInteractions: Map<string, string>;
   runStartTime: number | null;
   pendingCount: number;
   pendingQueue: string[];
@@ -123,9 +123,9 @@ export interface UseChatSocketReturn {
   handleRetryLast: () => void;
   handleSelectOption: (sessionId: string, choice: string) => void;
   handleConfirm: (sessionId: string, value: boolean) => void;
-  handleAllowTool: (sessionId: string, toolName: string, scope: "session" | "once", toolCallId?: string) => void;
+  handleAllowTool: (sessionId: string, toolName: string, scope: "session" | "once", toolCallId?: string, messageId?: string) => void;
   handleAnswerQuestion: (sessionId: string, answer: string) => void;
-  handleAlwaysAllow: (sessionId: string, toolName: string, command: string) => void;
+  handleAlwaysAllow: (sessionId: string, toolName: string, command: string, toolCallId?: string) => void;
   handleEditMessage: (messageId: string, newContent: string) => void;
   handleDeleteMessage: (messageId: string) => void;
   handleEditQueueItem: (index: number, newContent: string) => void;
@@ -155,7 +155,7 @@ export function useChatSocket({
   const [budgetLimits, setBudgetLimits] = useState<BudgetLimits | null>(null);
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
   const [isCompacting, setIsCompacting] = useState(false);
-  const [pendingInteraction, setPendingInteraction] = useState<{ type: string; messageId: string } | null>(null);
+  const [pendingInteractions, setPendingInteractions] = useState<Map<string, string>>(new Map());
   const [hasError, setHasError] = useState(false);
   const [runStartTime, setRunStartTime] = useState<number | null>(null);
   const [pendingCount, setPendingCount] = useState(0);
@@ -177,7 +177,7 @@ export function useChatSocket({
   const doneWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const watchdogChecksRef = useRef(0);
   const editRecoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingInteractionRef = useRef<{ type: string; messageId: string } | null>(null);
+  const pendingInteractionsRef = useRef<Map<string, string>>(new Map());
   const isCompactingRef = useRef(false);
   const autoCompactFiredRef = useRef(false);
 
@@ -187,27 +187,30 @@ export function useChatSocket({
   }, [autoAccept]);
 
   useEffect(() => {
-    pendingInteractionRef.current = pendingInteraction;
-  }, [pendingInteraction]);
+    pendingInteractionsRef.current = pendingInteractions;
+  }, [pendingInteractions]);
 
   useEffect(() => {
     if (!isRunning) {
       setRunStartTime(null);
 
-      // When isRunning goes false but no pendingInteraction is set,
-      // scan for an unresolved permission_request or user_question and restore it.
-      if (!pendingInteractionRef.current) {
+      // When isRunning goes false but no pending interactions exist,
+      // scan for unresolved permission_request or user_question and restore them.
+      if (pendingInteractionsRef.current.size === 0) {
         setMessages((prev) => {
-          const last = prev.findLast(
-            (m) => m.parsed?.type === "permission_request" || m.parsed?.type === "user_question",
-          );
-          if (last) {
-            const doneAfter = prev.some(
-              (m, i) => i > prev.indexOf(last) && m.parsed?.type === "done",
-            );
-            if (!doneAfter) {
-              setPendingInteraction({ type: last.parsed!.type!, messageId: last.id });
+          const unresolvedInteractions = new Map<string, string>();
+          for (const m of prev) {
+            if (m.parsed?.type === "permission_request" || m.parsed?.type === "user_question") {
+              const doneAfter = prev.some(
+                (later, i) => i > prev.indexOf(m) && later.parsed?.type === "done",
+              );
+              if (!doneAfter) {
+                unresolvedInteractions.set(m.id, m.parsed.type);
+              }
             }
+          }
+          if (unresolvedInteractions.size > 0) {
+            setPendingInteractions(new Map(unresolvedInteractions));
           }
           return prev;
         });
@@ -290,7 +293,7 @@ export function useChatSocket({
     watchdogChecksRef.current = 0;
     const poll = () => {
       // Don't count ticks while waiting for user input (permission / question)
-      if (pendingInteractionRef.current) {
+      if (pendingInteractionsRef.current.size > 0) {
         watchdogChecksRef.current = 0;
         doneWatchdogRef.current = setTimeout(poll, WATCHDOG_POLL_MS);
         return;
@@ -432,18 +435,21 @@ export function useChatSocket({
           setMessages(expanded);
           setLoadingMessages(false);
 
-          // Restore pendingInteraction for an unresolved permission/question after reconnect
-          const lastInteractive = expanded.findLast(
-            (m) => m.parsed?.type === "permission_request" || m.parsed?.type === "user_question",
-          );
-          if (lastInteractive) {
-            const lastInteractiveIdx = expanded.lastIndexOf(lastInteractive);
-            const doneAfter = expanded.some(
-              (m, i) => i > lastInteractiveIdx && m.parsed?.type === "done",
-            );
-            if (!doneAfter) {
-              setPendingInteraction({ type: lastInteractive.parsed!.type!, messageId: lastInteractive.id });
+          // Restore pending interactions for unresolved permissions/questions after reconnect
+          const restored = new Map<string, string>();
+          for (const m of expanded) {
+            if (m.parsed?.type === "permission_request" || m.parsed?.type === "user_question") {
+              const idx = expanded.indexOf(m);
+              const doneAfter = expanded.some(
+                (later, i) => i > idx && later.parsed?.type === "done",
+              );
+              if (!doneAfter) {
+                restored.set(m.id, m.parsed.type);
+              }
             }
+          }
+          if (restored.size > 0) {
+            setPendingInteractions(new Map(restored));
           }
         }
       },
@@ -476,16 +482,9 @@ export function useChatSocket({
           clearEditRecoveryTimer();
           setCurrentActivity(null);
 
-          const waitingOnUser =
-            pendingInteractionRef.current?.type === "permission_request" ||
-            pendingInteractionRef.current?.type === "user_question";
+          const hasWaitingInteractions = pendingInteractionsRef.current.size > 0;
 
-          setPendingInteraction((prev) => {
-            if (prev?.type === "permission_request" || prev?.type === "user_question") return prev;
-            return null;
-          });
-
-          if (waitingOnUser) {
+          if (hasWaitingInteractions) {
             return;
           }
 
@@ -601,7 +600,11 @@ export function useChatSocket({
 
         if (parsed.type === "options" || parsed.type === "confirm" || parsed.type === "permission_request" || parsed.type === "user_question") {
           const interactionId = crypto.randomUUID();
-          setPendingInteraction({ type: parsed.type, messageId: interactionId });
+          setPendingInteractions((prev) => {
+            const next = new Map(prev);
+            next.set(interactionId, parsed.type!);
+            return next;
+          });
           setMessages((prev) => [
             ...prev,
             {
@@ -774,11 +777,8 @@ export function useChatSocket({
         setIsRunning(true);
         watchdogChecksRef.current = 0;
       } else {
-        // Don't mark idle while the user has a pending permission/question to act on
-        const waitingOnUser =
-          pendingInteractionRef.current?.type === "permission_request" ||
-          pendingInteractionRef.current?.type === "user_question";
-        if (!waitingOnUser) {
+        // Don't mark idle while the user has pending permissions/questions to act on
+        if (pendingInteractionsRef.current.size === 0) {
           setIsRunning(false);
           drainPending();
         }
@@ -937,6 +937,7 @@ export function useChatSocket({
     if (!activeSession) return;
     emit("claude:interrupt", { sessionId: activeSession.id });
     setIsRunning(false);
+    setPendingInteractions(new Map());
     setCurrentActivity(null);
     setMessages((prev) => finalizeRunningTools(prev));
     syncQueue([]);
@@ -965,7 +966,7 @@ export function useChatSocket({
   const handleSelectOption = useCallback(
     (sessionId: string, choice: string) => {
       emit("claude:select_option", { sessionId, choice });
-      setPendingInteraction(null);
+      setPendingInteractions(new Map());
       const msg: ChatMessage = {
         id: crypto.randomUUID(),
         sender_type: "admin",
@@ -981,7 +982,7 @@ export function useChatSocket({
   const handleConfirm = useCallback(
     (sessionId: string, value: boolean) => {
       emit("claude:confirm", { sessionId, value });
-      setPendingInteraction(null);
+      setPendingInteractions(new Map());
       const msg: ChatMessage = {
         id: crypto.randomUUID(),
         sender_type: "admin",
@@ -995,10 +996,18 @@ export function useChatSocket({
   );
 
   const handleAllowTool = useCallback(
-    (sessionId: string, toolName: string, scope: "session" | "once", toolCallId?: string) => {
+    (sessionId: string, toolName: string, scope: "session" | "once", toolCallId?: string, messageId?: string) => {
       emit("claude:allow_tool", { sessionId, toolName, scope, toolCallId });
-      setPendingInteraction(null);
-      setIsRunning(true);
+      setPendingInteractions((prev) => {
+        const next = new Map(prev);
+        if (messageId) {
+          next.delete(messageId);
+        }
+        if (next.size === 0) {
+          setIsRunning(true);
+        }
+        return next;
+      });
     },
     [emit],
   );
@@ -1006,7 +1015,7 @@ export function useChatSocket({
   const handleAnswerQuestion = useCallback(
     (sessionId: string, answer: string) => {
       emit("claude:answer_question", { sessionId, answer });
-      setPendingInteraction(null);
+      setPendingInteractions(new Map());
       const msg: ChatMessage = {
         id: crypto.randomUUID(),
         sender_type: "admin",
@@ -1020,10 +1029,23 @@ export function useChatSocket({
   );
 
   const handleAlwaysAllow = useCallback(
-    (sessionId: string, _toolName: string, command: string) => {
+    (sessionId: string, _toolName: string, command: string, toolCallId?: string) => {
       emit("claude:always_allow_command", { pattern: command.trim().split(/\s+/)[0] });
-      emit("claude:allow_tool", { sessionId, toolName: "Bash", scope: "once" });
-      setIsRunning(true);
+      emit("claude:allow_tool", { sessionId, toolName: "Bash", scope: "once", toolCallId });
+      setPendingInteractions((prev) => {
+        const next = new Map(prev);
+        // Remove the entry for this permission card
+        for (const [msgId, type] of next) {
+          if (type === "permission_request") {
+            next.delete(msgId);
+            break;
+          }
+        }
+        if (next.size === 0) {
+          setIsRunning(true);
+        }
+        return next;
+      });
     },
     [emit],
   );
@@ -1068,7 +1090,7 @@ export function useChatSocket({
     messages, isRunning, currentActivity, connected, reconnecting,
     presenceUsers, typingUsers, commandRunner, sessionUsage, budgetLimits,
     contextUsage, isCompacting,
-    sessionModel, hasError, pendingInteraction, runStartTime, pendingCount,
+    sessionModel, hasError, pendingInteractions, runStartTime, pendingCount,
     pendingQueue, loadingMessages,
     setMessages, setSessionModel, setSessionUsage, setIsRunning,
     setCurrentActivity, setLoadingMessages,

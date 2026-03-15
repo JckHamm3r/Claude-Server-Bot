@@ -7,8 +7,9 @@ interface PermissionCardProps {
   toolInput?: unknown;
   toolCallId?: string;
   sessionId: string;
-  onAllow: (sessionId: string, toolName: string, scope: "session" | "once", toolCallId?: string) => void;
-  onAlwaysAllow?: (sessionId: string, toolName: string, command: string) => void;
+  messageId?: string;
+  onAllow: (sessionId: string, toolName: string, scope: "session" | "once", toolCallId?: string, messageId?: string) => void;
+  onAlwaysAllow?: (sessionId: string, toolName: string, command: string, toolCallId?: string) => void;
   disabled?: boolean;
   sandboxCategory?: string;
   sandboxReason?: string;
@@ -68,7 +69,7 @@ function ToolInputPreview({ toolName, toolInput }: { toolName: string; toolInput
   );
 }
 
-export function PermissionCard({ toolName, toolInput, toolCallId, sessionId, onAllow, onAlwaysAllow, disabled, sandboxCategory, sandboxReason }: PermissionCardProps) {
+export function PermissionCard({ toolName, toolInput, toolCallId, sessionId, messageId, onAllow, onAlwaysAllow, disabled, sandboxCategory, sandboxReason }: PermissionCardProps) {
   const isDangerous = sandboxCategory === "dangerous";
   const isRestricted = sandboxCategory === "restricted";
   const hasSandboxWarning = isDangerous || isRestricted;
@@ -110,7 +111,7 @@ export function PermissionCard({ toolName, toolInput, toolCallId, sessionId, onA
       )}
       <div className="flex flex-wrap gap-2">
         <button
-          onClick={() => onAllow(sessionId, toolName, "session", toolCallId)}
+          onClick={() => onAllow(sessionId, toolName, "session", toolCallId, messageId)}
           disabled={disabled}
           className={cn(
             "rounded-xl px-4 py-1.5 text-white text-caption font-semibold disabled:opacity-50 transition-all duration-200 active:scale-[0.98]",
@@ -122,7 +123,7 @@ export function PermissionCard({ toolName, toolInput, toolCallId, sessionId, onA
           Allow for Session
         </button>
         <button
-          onClick={() => onAllow(sessionId, toolName, "once", toolCallId)}
+          onClick={() => onAllow(sessionId, toolName, "once", toolCallId, messageId)}
           disabled={disabled}
           className="rounded-xl px-4 py-1.5 border border-bot-border/40 text-caption font-medium text-bot-muted hover:bg-bot-elevated/40 hover:text-bot-text disabled:opacity-50 transition-all duration-200"
         >
@@ -130,7 +131,7 @@ export function PermissionCard({ toolName, toolInput, toolCallId, sessionId, onA
         </button>
         {onAlwaysAllow && (isRestricted || isDangerous) && command && (
           <button
-            onClick={() => onAlwaysAllow(sessionId, toolName, command)}
+            onClick={() => onAlwaysAllow(sessionId, toolName, command, toolCallId)}
             disabled={disabled}
             className="rounded-xl px-4 py-1.5 border border-bot-green/30 text-caption font-medium text-bot-green hover:bg-bot-green/10 disabled:opacity-50 transition-all duration-200"
           >

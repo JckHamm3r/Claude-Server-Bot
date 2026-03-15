@@ -20,8 +20,8 @@ interface MessageItemProps {
   message: ChatMessage;
   onSelectOption?: (sessionId: string, choice: string) => void;
   onConfirm?: (sessionId: string, value: boolean) => void;
-  onAllowTool?: (sessionId: string, toolName: string, scope: "session" | "once", toolCallId?: string) => void;
-  onAlwaysAllow?: (sessionId: string, toolName: string, command: string) => void;
+  onAllowTool?: (sessionId: string, toolName: string, scope: "session" | "once", toolCallId?: string, messageId?: string) => void;
+  onAlwaysAllow?: (sessionId: string, toolName: string, command: string, toolCallId?: string) => void;
   onAnswerQuestion?: (sessionId: string, answer: string) => void;
   onEdit?: (messageId: string, newContent: string) => void;
   onDelete?: (messageId: string) => void;
@@ -333,6 +333,7 @@ export const MessageItem = memo(function MessageItem({
             toolInput={p.toolInput}
             toolCallId={p.toolCallId}
             sessionId={sessionId}
+            messageId={message.id}
             onAllow={onAllowTool!}
             onAlwaysAllow={onAlwaysAllow}
             disabled={!isInteractive}
