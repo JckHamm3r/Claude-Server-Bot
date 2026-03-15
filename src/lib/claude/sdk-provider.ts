@@ -532,7 +532,7 @@ async function processOutputStream(
           if (block.type === "text" && block.text) {
             accumulatedText = block.text;
             state.emitter.emit("output", {
-              type: isFinal ? "text" : "streaming",
+              type: "streaming",
               content: block.text,
             } as ParsedOutput);
             lastStreamedText = block.text;
@@ -655,11 +655,15 @@ async function processOutputStream(
           } as ParsedOutput);
         }
 
-        // Only emit final text if nothing was streamed for this turn
-        if (resultMsg.result && !lastStreamedText) {
+        // Emit final text to finalize the message (replaces streaming message
+        // on the client). Use lastStreamedText when available since it reflects
+        // the full content from streaming/assistant events; fall back to the
+        // result text for non-streaming responses.
+        const finalText = lastStreamedText || resultMsg.result;
+        if (finalText) {
           state.emitter.emit("output", {
             type: "text",
-            content: resultMsg.result,
+            content: finalText,
           } as ParsedOutput);
         }
 
