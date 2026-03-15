@@ -121,7 +121,7 @@ export interface UseChatSocketReturn {
   handleRetryLast: () => void;
   handleSelectOption: (sessionId: string, choice: string) => void;
   handleConfirm: (sessionId: string, value: boolean) => void;
-  handleAllowTool: (sessionId: string, toolName: string, scope: "session" | "once") => void;
+  handleAllowTool: (sessionId: string, toolName: string, scope: "session" | "once", toolCallId?: string) => void;
   handleAnswerQuestion: (sessionId: string, answer: string) => void;
   handleAlwaysAllow: (sessionId: string, toolName: string, command: string) => void;
   handleEditMessage: (messageId: string, newContent: string) => void;
@@ -918,8 +918,8 @@ export function useChatSocket({
   );
 
   const handleAllowTool = useCallback(
-    (sessionId: string, toolName: string, scope: "session" | "once") => {
-      emit("claude:allow_tool", { sessionId, toolName, scope });
+    (sessionId: string, toolName: string, scope: "session" | "once", toolCallId?: string) => {
+      emit("claude:allow_tool", { sessionId, toolName, scope, toolCallId });
       setPendingInteraction(null);
       setIsRunning(true);
     },

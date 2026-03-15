@@ -251,14 +251,14 @@ export function registerMessageHandlers(ctx: HandlerContext) {
 
   socket.on(
     "claude:allow_tool",
-    ({ sessionId, toolName, scope }: { sessionId: string; toolName: string; scope?: "session" | "once" }) => {
+    ({ sessionId, toolName, scope, toolCallId }: { sessionId: string; toolName: string; scope?: "session" | "once"; toolCallId?: string }) => {
       if (!canAccessSession(sessionId, email)) {
         socket.emit("claude:error", { sessionId, message: "Access denied" });
         return;
       }
       const sp = ctx.getSessionProvider(sessionId);
       ctx.setSessionStatus(sessionId, "running");
-      sp.allowTool(sessionId, toolName, scope ?? "once");
+      sp.allowTool(sessionId, toolName, scope ?? "once", toolCallId);
     },
   );
 

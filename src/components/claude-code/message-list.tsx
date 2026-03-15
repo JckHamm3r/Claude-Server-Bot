@@ -21,7 +21,7 @@ interface MessageListProps {
   sessionId: string;
   onSelectOption: (sessionId: string, choice: string) => void;
   onConfirm: (sessionId: string, value: boolean) => void;
-  onAllowTool?: (sessionId: string, toolName: string, scope: "session" | "once") => void;
+  onAllowTool?: (sessionId: string, toolName: string, scope: "session" | "once", toolCallId?: string) => void;
   onAlwaysAllow?: (sessionId: string, toolName: string, command: string) => void;
   onAnswerQuestion?: (sessionId: string, answer: string) => void;
   onEditMessage?: (messageId: string, newContent: string) => void;

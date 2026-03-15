@@ -20,7 +20,7 @@ interface MessageItemProps {
   message: ChatMessage;
   onSelectOption?: (sessionId: string, choice: string) => void;
   onConfirm?: (sessionId: string, value: boolean) => void;
-  onAllowTool?: (sessionId: string, toolName: string, scope: "session" | "once") => void;
+  onAllowTool?: (sessionId: string, toolName: string, scope: "session" | "once", toolCallId?: string) => void;
   onAlwaysAllow?: (sessionId: string, toolName: string, command: string) => void;
   onAnswerQuestion?: (sessionId: string, answer: string) => void;
   onEdit?: (messageId: string, newContent: string) => void;
@@ -331,6 +331,7 @@ export const MessageItem = memo(function MessageItem({
           <PermissionCard
             toolName={p.toolName}
             toolInput={p.toolInput}
+            toolCallId={p.toolCallId}
             sessionId={sessionId}
             onAllow={onAllowTool!}
             onAlwaysAllow={onAlwaysAllow}

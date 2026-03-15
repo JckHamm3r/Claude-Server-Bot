@@ -7,7 +7,8 @@ import { updateClaudeSessionId } from "../claude-db";
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface PermissionResolver {
-  resolve: (result: { behavior: "allow" | "deny"; message?: string }) => void;
+  resolve: (result: { behavior: "allow" | "deny"; message?: string; updatedInput?: Record<string, unknown> }) => void;
+  toolInput: Record<string, unknown>;
 }
 
 interface QueuedMessage {
@@ -24,7 +25,7 @@ interface SDKSessionState {
   claudeSessionId: string | null;
   lastActivity: number;
   allowedTools: Set<string>;
-  pendingPermission: PermissionResolver | null;
+  pendingPermissions: Map<string, PermissionResolver>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   activeQuery: any | null;
   toolCallCounter: number;
@@ -61,10 +62,10 @@ setInterval(() => {
 function cleanupSession(state: SDKSessionState): void {
   clearTimers(state);
   endStream(state);
-  if (state.pendingPermission) {
-    state.pendingPermission.resolve({ behavior: "deny", message: "Session cleaned up" });
-    state.pendingPermission = null;
+  for (const pending of state.pendingPermissions.values()) {
+    pending.resolve({ behavior: "deny", message: "Session cleaned up" });
   }
+  state.pendingPermissions.clear();
   if (state.activeQuery) {
     try { state.activeQuery.close(); } catch { /* ignore */ }
     state.activeQuery = null;
@@ -129,7 +130,7 @@ function getOrCreate(sessionId: string): SDKSessionState {
       claudeSessionId: null,
       lastActivity: Date.now(),
       allowedTools: new Set(),
-      pendingPermission: null,
+      pendingPermissions: new Map(),
       activeQuery: null,
       toolCallCounter: 0,
       heartbeatTimer: null,
@@ -350,7 +351,7 @@ async function startStreamingSession(
       callOpts: { signal: AbortSignal; toolUseID: string },
     ) => {
       if (state.allowedTools.has(toolName)) {
-        return { behavior: "allow" as const };
+        return { behavior: "allow" as const, updatedInput: toolInput };
       }
 
       state.emitter.emit("output", {
@@ -360,11 +361,11 @@ async function startStreamingSession(
         toolCallId: callOpts.toolUseID,
       } as ParsedOutput);
 
-      return new Promise<{ behavior: "allow" | "deny"; message?: string }>((resolve) => {
-        state.pendingPermission = { resolve };
+      return new Promise<{ behavior: "allow" | "deny"; message?: string; updatedInput?: Record<string, unknown> }>((resolve) => {
+        state.pendingPermissions.set(callOpts.toolUseID, { resolve, toolInput });
 
         const onAbort = () => {
-          state.pendingPermission = null;
+          state.pendingPermissions.delete(callOpts.toolUseID);
           resolve({ behavior: "deny", message: "Request interrupted" });
         };
         callOpts.signal.addEventListener("abort", onAbort, { once: true });
@@ -728,7 +729,10 @@ async function processOutputStream(
     state.running = false;
     state.streamActive = false;
     state.activeQuery = null;
-    state.pendingPermission = null;
+    for (const pending of state.pendingPermissions.values()) {
+      pending.resolve({ behavior: "deny", message: "Stream ended" });
+    }
+    state.pendingPermissions.clear();
     state.lastActivity = Date.now();
     clearTimers(state);
     // Emit done if the stream ended unexpectedly without a result message
@@ -786,7 +790,7 @@ export const sdkProvider: ClaudeCodeProvider = {
     }
   },
 
-  allowTool(sessionId, toolName, scope) {
+  allowTool(sessionId, toolName, scope, toolCallId) {
     const state = sessions.get(sessionId);
     if (!state) return;
 
@@ -794,9 +798,17 @@ export const sdkProvider: ClaudeCodeProvider = {
       state.allowedTools.add(toolName);
     }
 
-    if (state.pendingPermission) {
-      state.pendingPermission.resolve({ behavior: "allow" });
-      state.pendingPermission = null;
+    if (toolCallId && state.pendingPermissions.has(toolCallId)) {
+      const pending = state.pendingPermissions.get(toolCallId)!;
+      state.pendingPermissions.delete(toolCallId);
+      pending.resolve({ behavior: "allow", updatedInput: pending.toolInput });
+    } else {
+      // Fallback: resolve the first pending permission matching toolName
+      for (const [id, pending] of state.pendingPermissions) {
+        state.pendingPermissions.delete(id);
+        pending.resolve({ behavior: "allow", updatedInput: pending.toolInput });
+        break;
+      }
     }
   },
 
@@ -804,9 +816,10 @@ export const sdkProvider: ClaudeCodeProvider = {
     const state = sessions.get(sessionId);
     if (!state) return;
 
-    if (state.pendingPermission) {
-      state.pendingPermission.resolve({ behavior: "deny", message: "Permission denied by user" });
-      state.pendingPermission = null;
+    for (const [id, pending] of state.pendingPermissions) {
+      pending.resolve({ behavior: "deny", message: "Permission denied by user" });
+      state.pendingPermissions.delete(id);
+      break;
     }
   },
 
@@ -815,10 +828,10 @@ export const sdkProvider: ClaudeCodeProvider = {
     if (!state) return;
     state.running = false;
 
-    if (state.pendingPermission) {
-      state.pendingPermission.resolve({ behavior: "deny", message: "Interrupted" });
-      state.pendingPermission = null;
+    for (const pending of state.pendingPermissions.values()) {
+      pending.resolve({ behavior: "deny", message: "Interrupted" });
     }
+    state.pendingPermissions.clear();
 
     clearTimers(state);
 
@@ -840,10 +853,10 @@ export const sdkProvider: ClaudeCodeProvider = {
     const state = sessions.get(sessionId);
     if (!state) return;
 
-    if (state.pendingPermission) {
-      state.pendingPermission.resolve({ behavior: "deny", message: "Session suspended" });
-      state.pendingPermission = null;
+    for (const pending of state.pendingPermissions.values()) {
+      pending.resolve({ behavior: "deny", message: "Session suspended" });
     }
+    state.pendingPermissions.clear();
     clearTimers(state);
     endStream(state);
     if (state.activeQuery) {

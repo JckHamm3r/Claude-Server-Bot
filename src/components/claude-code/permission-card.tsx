@@ -5,8 +5,9 @@ import { cn } from "@/lib/utils";
 interface PermissionCardProps {
   toolName: string;
   toolInput?: unknown;
+  toolCallId?: string;
   sessionId: string;
-  onAllow: (sessionId: string, toolName: string, scope: "session" | "once") => void;
+  onAllow: (sessionId: string, toolName: string, scope: "session" | "once", toolCallId?: string) => void;
   onAlwaysAllow?: (sessionId: string, toolName: string, command: string) => void;
   disabled?: boolean;
   sandboxCategory?: string;
@@ -67,7 +68,7 @@ function ToolInputPreview({ toolName, toolInput }: { toolName: string; toolInput
   );
 }
 
-export function PermissionCard({ toolName, toolInput, sessionId, onAllow, onAlwaysAllow, disabled, sandboxCategory, sandboxReason }: PermissionCardProps) {
+export function PermissionCard({ toolName, toolInput, toolCallId, sessionId, onAllow, onAlwaysAllow, disabled, sandboxCategory, sandboxReason }: PermissionCardProps) {
   const isDangerous = sandboxCategory === "dangerous";
   const isRestricted = sandboxCategory === "restricted";
   const hasSandboxWarning = isDangerous || isRestricted;
@@ -109,7 +110,7 @@ export function PermissionCard({ toolName, toolInput, sessionId, onAllow, onAlwa
       )}
       <div className="flex flex-wrap gap-2">
         <button
-          onClick={() => onAllow(sessionId, toolName, "session")}
+          onClick={() => onAllow(sessionId, toolName, "session", toolCallId)}
           disabled={disabled}
           className={cn(
             "rounded-xl px-4 py-1.5 text-white text-caption font-semibold disabled:opacity-50 transition-all duration-200 active:scale-[0.98]",
@@ -121,7 +122,7 @@ export function PermissionCard({ toolName, toolInput, sessionId, onAllow, onAlwa
           Allow for Session
         </button>
         <button
-          onClick={() => onAllow(sessionId, toolName, "once")}
+          onClick={() => onAllow(sessionId, toolName, "once", toolCallId)}
           disabled={disabled}
           className="rounded-xl px-4 py-1.5 border border-bot-border/40 text-caption font-medium text-bot-muted hover:bg-bot-elevated/40 hover:text-bot-text disabled:opacity-50 transition-all duration-200"
         >

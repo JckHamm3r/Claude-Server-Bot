@@ -51,7 +51,7 @@ export interface ClaudeCodeProvider {
   suspendSession(sessionId: string): void;
   onOutput(sessionId: string, cb: (output: ParsedOutput) => void): void;
   offOutput(sessionId: string): void;
-  allowTool(sessionId: string, toolName: string, scope: "session" | "once"): void;
+  allowTool(sessionId: string, toolName: string, scope: "session" | "once", toolCallId?: string): void;
   denyPermission(sessionId: string): void;
   isRunning(sessionId: string): boolean;
   getClaudeSessionId?(sessionId: string): string | null;
