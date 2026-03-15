@@ -41,6 +41,11 @@ NEXTAUTH_SECRET=""
 SETUP_SERVICE=false
 SETUP_CF_TUNNEL=false
 
+# ─── Network/DNS state (set by screen_configure, used in summary) ─────────
+DNS_RESOLVED=false
+SERVER_IP=""
+SERVER_IP_TYPE=""  # "public" | "private" | ""
+
 # ─── Platform detection results ────────────────────────────────────────────
 PLATFORM=""
 PKG_MGR=""
@@ -821,10 +826,10 @@ screen_configure() {
 
   if [ -n "$DOMAIN" ]; then
     info "Domain: $DOMAIN"
-    local dns_resolved=false
-    command -v dig &>/dev/null && dig +short "$DOMAIN" 2>/dev/null | grep -q '.' && dns_resolved=true
-    command -v host &>/dev/null && ! $dns_resolved && host "$DOMAIN" &>/dev/null && dns_resolved=true
-    ! $dns_resolved && warn "Domain doesn't resolve yet — configure DNS before requesting certs."
+    DNS_RESOLVED=false
+    command -v dig &>/dev/null && dig +short "$DOMAIN" 2>/dev/null | grep -q '.' && DNS_RESOLVED=true
+    command -v host &>/dev/null && ! $DNS_RESOLVED && host "$DOMAIN" &>/dev/null && DNS_RESOLVED=true
+    ! $DNS_RESOLVED && warn "Domain doesn't resolve yet — configure DNS before requesting certs."
 
     if [ -n "$CLI_HTTPS" ]; then
       case "$CLI_HTTPS" in
@@ -857,13 +862,17 @@ screen_configure() {
 
   # Compute BASE_URL
   if [ -n "$DOMAIN" ]; then
-    BASE_URL="https://$DOMAIN"
+    if $SETUP_NGINX || $SETUP_CF_TUNNEL; then
+      BASE_URL="https://$DOMAIN"
+    else
+      BASE_URL="https://$DOMAIN:$PORT"
+    fi
   else
-    local private_ip public_ip server_ip
+    local private_ip public_ip
     private_ip="$(get_local_ip)"
     public_ip="$(get_public_ip)"
     if $UNATTENDED; then
-      server_ip="${public_ip:-$private_ip}"
+      SERVER_IP="${public_ip:-$private_ip}"
     elif [ -n "$public_ip" ] && [ "$public_ip" != "$private_ip" ]; then
       echo ""
       echo -e "  ${BOLD}Which IP for remote access?${NC}"
@@ -872,16 +881,21 @@ screen_configure() {
       echo ""
       if ! prompt_input "Choice" "1"; then NEXT_STEP=1; return; fi
       case "$REPLY" in
-        1) server_ip="$public_ip" ;;
-        2) server_ip="$private_ip" ;;
-        *) server_ip="$public_ip" ;;
+        1) SERVER_IP="$public_ip" ;;
+        2) SERVER_IP="$private_ip" ;;
+        *) SERVER_IP="$public_ip" ;;
       esac
     else
-      server_ip="${public_ip:-$private_ip}"
+      SERVER_IP="${public_ip:-$private_ip}"
+    fi
+    if [ "$SERVER_IP" = "$public_ip" ] && [ -n "$public_ip" ]; then
+      SERVER_IP_TYPE="public"
+    else
+      SERVER_IP_TYPE="private"
     fi
     USE_HTTPS=true
     HTTPS_METHOD="${HTTPS_METHOD:-selfsigned}"
-    BASE_URL="https://${server_ip}:${PORT}"
+    BASE_URL="https://${SERVER_IP}:${PORT}"
   fi
   info "Base URL: $BASE_URL"
 
@@ -1701,6 +1715,51 @@ show_completion_summary() {
 
   echo ""
   echo -e "  ${BOLD}To update:${NC} cd $INSTALL_DIR && ./update.sh"
+
+  # ── Next Steps (DNS, port forwarding, firewall, cert warnings) ──
+  local next_steps=()
+
+  if [ -n "$DOMAIN" ]; then
+    if [ "$HTTPS_METHOD" = "cloudflare" ]; then
+      local tunnel_name
+      tunnel_name="claude-bot-$(echo "$BOT_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')"
+      next_steps+=("Add a DNS CNAME record: ${BOLD}$DOMAIN${NC} → ${BOLD}${tunnel_name}.cfargotunnel.com${NC}")
+    elif ! $DNS_RESOLVED; then
+      next_steps+=("Point a DNS A record for ${BOLD}$DOMAIN${NC} to your server's public IP")
+      if [ "$HTTPS_METHOD" = "letsencrypt" ]; then
+        next_steps+=("${YELLOW}⚠${NC}  Let's Encrypt may have failed — DNS must resolve before certs can be issued. Re-run domain setup from Settings once DNS is active.")
+      fi
+    fi
+    if ! $SETUP_NGINX && ! $SETUP_CF_TUNNEL; then
+      next_steps+=("No reverse proxy was configured — users must access port ${BOLD}$PORT${NC} directly. You can set up nginx + Let's Encrypt later from Settings.")
+    fi
+  fi
+
+  if [ -z "$DOMAIN" ]; then
+    if [ "$SERVER_IP_TYPE" = "private" ]; then
+      local access_port="$PORT"
+      $SETUP_NGINX && access_port="80/443"
+      next_steps+=("Your bot is on a local/private IP (${BOLD}$SERVER_IP${NC}). To access remotely, set up port forwarding on your router for port ${BOLD}$access_port${NC} to this machine.")
+    elif [ "$SERVER_IP_TYPE" = "public" ]; then
+      local access_port="$PORT"
+      $SETUP_NGINX && access_port="443"
+      next_steps+=("Ensure port ${BOLD}$access_port${NC} is open in your cloud provider's security group / firewall.")
+    fi
+  fi
+
+  if [ "$HTTPS_METHOD" = "selfsigned" ]; then
+    next_steps+=("You're using a self-signed certificate — your browser will show a security warning. Accept it to proceed, or set up a domain with Let's Encrypt later from Settings.")
+  fi
+
+  if [ ${#next_steps[@]} -gt 0 ]; then
+    echo ""
+    echo -e "  ${BOLD}${YELLOW}═══ Next Steps ═══${NC}"
+    echo ""
+    for ns in "${next_steps[@]}"; do
+      echo -e "  • $ns"
+    done
+  fi
+
   echo ""
   [ -n "${INSTALL_LOG:-}" ] && [ -f "$INSTALL_LOG" ] && hint "Install log: $INSTALL_LOG"
 
