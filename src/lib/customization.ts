@@ -191,9 +191,14 @@ function getServerEnvironmentContext(): string | null {
       `- NEVER say "I don't have enough information" about the server — you have all the details above. Use them confidently.`,
     );
 
+    // Widget script must always point at the bot's own server (with port) since
+    // /api/w.js is served by the Node process, not nginx. The script itself has
+    // the bot origin baked in so it works from any embedding page.
     const botName = getBotSettings().name;
+    const botDirectUrl = `${scheme}://${hostname}:${port}`;
     lines.push(
-      `- If the user wants to embed the ${botName} chat widget, include: <script src="${publicUrl}/api/w.js"></script>`,
+      `- If the user wants to embed the ${botName} chat widget, include: <script src="${botDirectUrl}/api/w.js"></script>`,
+      `  The widget script automatically connects back to the bot server — it works on any page regardless of port or origin.`,
     );
 
     return lines.join("\n");

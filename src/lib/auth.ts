@@ -155,5 +155,19 @@ export const authOptions: NextAuthOptions = {
     },
   },
 
+  cookies: {
+    sessionToken: {
+      name: (process.env.NEXTAUTH_URL ?? "").startsWith("https")
+        ? "__Secure-next-auth.session-token"
+        : "next-auth.session-token",
+      options: {
+        httpOnly: true,
+        sameSite: "none" as const,
+        path: "/",
+        secure: (process.env.NEXTAUTH_URL ?? "").startsWith("https"),
+      },
+    },
+  },
+
   secret: process.env.NEXTAUTH_SECRET,
 };
