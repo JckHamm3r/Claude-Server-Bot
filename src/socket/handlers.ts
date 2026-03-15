@@ -381,7 +381,9 @@ export function registerHandlers(io: Server) {
       // Capture usage data for later inclusion in saved message
       if (parsed.type === "usage" && parsed.usage) {
         sessionPendingUsage.set(sessionId, parsed.usage);
-        // Forward usage to client for real-time display
+        // Flush any buffered streaming so the client has the latest
+        // content before usage/done finalize the turn.
+        flushStreamingThrottle(sessionId);
         io.to(`session:${sessionId}`).emit("claude:usage", { sessionId, usage: parsed.usage });
         return;
       }

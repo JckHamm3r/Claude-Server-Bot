@@ -452,6 +452,7 @@ async function processOutputStream(
 
       // ── Streaming partial messages ──
       if (msgType === "stream_event") {
+        if (emittedDone) continue;
         const streamMsg = msg as {
           type: "stream_event";
           event: {
@@ -532,13 +533,19 @@ async function processOutputStream(
         for (const block of assistantMsg.message?.content ?? []) {
           if (block.type === "text" && block.text) {
             accumulatedText = block.text;
-            state.emitter.emit("output", {
-              type: "streaming",
-              content: block.text,
-            } as ParsedOutput);
+            // Only emit streaming when deltas haven't already delivered
+            // the content AND the turn hasn't finished.  The assistant
+            // message often arrives after result, and emitting a late
+            // streaming event causes the client to create a duplicate.
+            if (!emittedDone && !lastStreamedText) {
+              state.emitter.emit("output", {
+                type: "streaming",
+                content: block.text,
+              } as ParsedOutput);
+            }
             lastStreamedText = block.text;
           }
-          if (block.type === "tool_use" && block.name) {
+          if (block.type === "tool_use" && block.name && !emittedDone) {
             const callId = block.id ?? `tool_${++state.toolCallCounter}`;
             activeToolCalls.set(callId, block.name);
 

@@ -167,6 +167,7 @@ export function useChatSocket({
   const freshSessionsRef = useRef<Set<string>>(new Set());
   const autoAcceptRef = useRef(false);
   const streamingMsgIdRef = useRef<string | null>(null);
+  const turnDoneRef = useRef(false);
   const pendingQueueRef = useRef<string[]>([]);
   const typingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const doneWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -219,6 +220,7 @@ export function useChatSocket({
   const sendImmediate = useCallback(
     (content: string, sessionId: string, attachments?: string[]) => {
       streamingMsgIdRef.current = null;
+      turnDoneRef.current = false;
       lastUserMsgRef.current = content;
       const msg: ChatMessage = {
         id: crypto.randomUUID(),
@@ -261,6 +263,7 @@ export function useChatSocket({
 
   const resetSessionState = useCallback(() => {
     streamingMsgIdRef.current = null;
+    turnDoneRef.current = false;
     setMessages([]);
     setCurrentActivity(null);
     setCommandRunner(null);
@@ -461,6 +464,7 @@ export function useChatSocket({
         watchdogChecksRef.current = 0;
 
         if (parsed.type === "done") {
+          turnDoneRef.current = true;
           const streamId = streamingMsgIdRef.current;
           streamingMsgIdRef.current = null;
           clearEditRecoveryTimer();
@@ -606,6 +610,7 @@ export function useChatSocket({
         }
 
         if (parsed.type === "streaming") {
+          if (turnDoneRef.current) return;
           setMessages((prev) => {
             const refId = streamingMsgIdRef.current;
             if (refId) {
