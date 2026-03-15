@@ -2,6 +2,7 @@ import { EventEmitter } from "events";
 import * as fs from "fs";
 import * as path from "path";
 import type { ClaudeCodeProvider, ParsedOutput, TokenUsage } from "./provider";
+import { updateClaudeSessionId } from "../claude-db";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -90,10 +91,19 @@ function getApiKey(): string {
   return process.env.ANTHROPIC_API_KEY ?? "";
 }
 
+function isStaleResumeError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  const lower = msg.toLowerCase();
+  return lower.includes("no conversation found") || lower.includes("conversation not found") || lower.includes("session not found");
+}
+
 function classifySDKError(err: unknown): { message: string; retryable: boolean } {
   const msg = err instanceof Error ? err.message : String(err);
   const lower = msg.toLowerCase();
 
+  if (isStaleResumeError(err)) {
+    return { message: "Session expired. Starting a fresh conversation.", retryable: true };
+  }
   if (lower.includes("rate limit") || lower.includes("429") || lower.includes("too many requests")) {
     return { message: "Rate limited by Claude API. Please wait a moment and try again.", retryable: true };
   }
@@ -170,6 +180,8 @@ async function runSDK(
   state: SDKSessionState,
   message: string,
   inputFiles: string[] = [],
+  sessionId?: string,
+  isRetry = false,
 ): Promise<void> {
   if (state.running) return;
   state.running = true;
@@ -587,6 +599,15 @@ async function runSDK(
   } catch (err) {
     if (err instanceof Error && (err.name === "AbortError" || err.message.includes("aborted"))) {
       // Interrupted — don't emit error
+    } else if (!isRetry && isStaleResumeError(err) && state.claudeSessionId) {
+      console.warn(`Stale resume ID detected for session ${sessionId ?? "unknown"}, retrying as fresh conversation`);
+      state.claudeSessionId = null;
+      state.firstMessage = true;
+      if (sessionId) {
+        try { updateClaudeSessionId(sessionId, null); } catch { /* ignore */ }
+      }
+      state.running = false;
+      return runSDK(state, message, inputFiles, sessionId, true);
     } else {
       const classified = classifySDKError(err);
       state.emitter.emit("output", {
@@ -630,7 +651,7 @@ export const sdkProvider: ClaudeCodeProvider = {
     if (skipPermissions !== state.skipPermissions) {
       state.skipPermissions = skipPermissions;
     }
-    runSDK(state, message, opts?.inputFiles ?? []).catch(err => {
+    runSDK(state, message, opts?.inputFiles ?? [], sessionId).catch(err => {
       console.error("SDK error:", err);
       state.emitter.emit("output", { type: "error", message: String(err) } as ParsedOutput);
       state.emitter.emit("output", { type: "done" } as ParsedOutput);

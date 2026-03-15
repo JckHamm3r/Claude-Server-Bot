@@ -144,7 +144,7 @@ export function updateSessionStatus(id: string, status: SessionStatus): void {
   db.prepare("UPDATE sessions SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, id);
 }
 
-export function updateClaudeSessionId(id: string, claudeSessionId: string): void {
+export function updateClaudeSessionId(id: string, claudeSessionId: string | null): void {
   db.prepare("UPDATE sessions SET claude_session_id = ?, updated_at = datetime('now') WHERE id = ?").run(claudeSessionId, id);
 }
 
