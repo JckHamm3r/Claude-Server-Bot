@@ -47,11 +47,24 @@ Visual theming uses CSS variables defined in `globals.css`. Admins can adjust co
 | `bot-amber` | Warning status |
 | `bot-blue` | Info status |
 
+## Server Environment Awareness
+
+The system prompt includes live server environment details at session creation time (computed in `src/lib/customization.ts`). This gives the bot context about:
+
+- **Network context** -- hostname/IP, scheme (HTTP/HTTPS), port, whether the address is public or private, reverse proxy (nginx) status
+- **Port usage** -- which TCP ports are currently in use on the server and suggested available ports (scanned via `ss`, `netstat`, or `lsof`)
+- **Hosting decision guidance** -- when asked to build something new (a page, app, API, etc.), the bot is instructed to ask the user:
+  1. Whether it should be publicly accessible or local-only
+  2. Whether the user wants a specific port or an auto-suggested one (only available ports are offered)
+  3. Whether the service should persist after the session ends
+
+The bot will never use a port that's already in use, and never assume public/private without asking.
+
 ## System Prompt Composition Order
 
 1. Security prompt (guard rails, sandbox rules)
 2. Template prompt (if session uses a template)
-3. Identity + personality prefix
+3. Identity + personality prefix (includes server environment context)
 4. Project CLAUDE.md content
 
 ## Key Files

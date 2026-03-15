@@ -57,6 +57,75 @@ function isPublicHost(hostname: string): boolean {
 }
 
 /**
+ * Scan for ports currently in use on the server by parsing `ss` or `netstat` output.
+ * Returns a sorted list of listening TCP port numbers.
+ */
+function getPortsInUse(): number[] {
+  try {
+    // Try ss first (modern Linux), fall back to netstat, then lsof (macOS)
+    let output = "";
+    try {
+      output = execSync("ss -tlnH 2>/dev/null || netstat -tln 2>/dev/null", {
+        timeout: 3000,
+        stdio: ["pipe", "pipe", "pipe"],
+      }).toString();
+    } catch {
+      try {
+        output = execSync("lsof -iTCP -sTCP:LISTEN -nP 2>/dev/null", {
+          timeout: 3000,
+          stdio: ["pipe", "pipe", "pipe"],
+        }).toString();
+      } catch { return []; }
+    }
+
+    const ports = new Set<number>();
+    for (const line of output.split("\n")) {
+      // ss format: "LISTEN  0  128  0.0.0.0:3000  0.0.0.0:*"
+      // netstat format: "tcp  0  0  0.0.0.0:3000  0.0.0.0:*  LISTEN"
+      // lsof format: "node  1234  user  21u  IPv4  ...  TCP *:3000 (LISTEN)"
+      const matches = line.match(/:(\d+)\b/g);
+      if (matches) {
+        for (const m of matches) {
+          const port = parseInt(m.slice(1), 10);
+          if (port > 0 && port <= 65535) ports.add(port);
+        }
+      }
+    }
+    return Array.from(ports).sort((a, b) => a - b);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Suggest a few available ports in common ranges (3000-9999).
+ * Avoids ports already in use and well-known system ports.
+ */
+function suggestAvailablePorts(portsInUse: number[], count: number = 5): number[] {
+  const candidates = [3001, 4000, 5000, 5173, 5500, 8000, 8080, 8081, 8443, 8888, 9000, 9090];
+  const inUseSet = new Set(portsInUse);
+  const available: number[] = [];
+
+  for (const port of candidates) {
+    if (!inUseSet.has(port)) {
+      available.push(port);
+      if (available.length >= count) break;
+    }
+  }
+
+  // If we didn't find enough, scan 3001-9999 for gaps
+  if (available.length < count) {
+    for (let p = 3001; p <= 9999 && available.length < count; p++) {
+      if (!inUseSet.has(p) && !available.includes(p)) {
+        available.push(p);
+      }
+    }
+  }
+
+  return available;
+}
+
+/**
  * Detect whether nginx is installed and proxying to the app's port.
  * Returns { installed, proxyDomain, proxyPort } or null fields.
  */
@@ -131,6 +200,10 @@ function getServerEnvironmentContext(): string | null {
       publicUrl = `${scheme}://${hostname}:${port}`;
     }
 
+    // Detect ports currently in use on the server
+    const portsInUse = getPortsInUse();
+    const availablePorts = suggestAvailablePorts(portsInUse);
+
     const lines = [
       `SERVER ENVIRONMENT (use this when building, deploying, or serving anything):`,
       `App server address: ${scheme}://${hostname}:${port} (this is the Node.js process)`,
@@ -142,6 +215,14 @@ function getServerEnvironmentContext(): string | null {
       `Public-facing: ${hasPublicAddress ? "yes" : "no"}`,
       `Project root: ${projectRoot}`,
     ];
+
+    // Port usage info
+    if (portsInUse.length > 0) {
+      lines.push(`Ports currently in use: ${portsInUse.join(", ")}`);
+    }
+    if (availablePorts.length > 0) {
+      lines.push(`Suggested available ports: ${availablePorts.join(", ")}`);
+    }
 
     if (hasNginxProxy) {
       lines.push(
@@ -184,8 +265,24 @@ function getServerEnvironmentContext(): string | null {
     }
 
     lines.push(
+      ``,
+      `WHEN ASKED TO BUILD OR CREATE SOMETHING NEW (a page, app, API, dashboard, tool, etc.):`,
+      `You MUST ask the user these questions BEFORE building, unless the answer is already obvious from context:`,
+      `1. ACCESSIBILITY: "Should this be publicly accessible (anyone on the internet can reach it), or only available locally on this server?"`,
+      `   - If public: bind to 0.0.0.0 or the server's public IP. Mention that it will be reachable at ${hasPublicAddress ? hostname : "the server's public IP"}.`,
+      `   - If local only: bind to 127.0.0.1 / localhost so it's only reachable from the server itself.`,
+      `2. PORT: "Do you want this served on a specific port, or should I pick one?" Then:`,
+      `   - ONLY suggest or use ports from the available ports list above (${availablePorts.slice(0, 3).join(", ")}, etc.)`,
+      `   - NEVER use a port that is already in use: ${portsInUse.length > 0 ? portsInUse.join(", ") : "none detected"}`,
+      `   - If the user picks a port, verify it's not in the "in use" list before proceeding.`,
+      `3. PERSISTENCE: If it's a server/service, ask if they want it to keep running after the session ends (e.g. via systemd, pm2, or a background process).`,
+      ``,
+      `Do NOT skip these questions. Do NOT assume public or a random port. Always confirm with the user first.`,
+      `After getting answers, provide the full URL where it will be accessible.`,
+      ``,
+      `SERVING OPTIONS:`,
       `- To serve a standalone HTML file, page, or small app the user creates, you have these options:`,
-      `  1) Start a simple HTTP server (e.g. python3 -m http.server PORT or npx serve -l PORT) and give the user the URL with that port`,
+      `  1) Start a simple HTTP server (e.g. python3 -m http.server PORT or npx serve -l PORT) on an available port`,
       `  2) If nginx is available, add a location block to serve the directory`,
       `  3) Place the file in the project and configure the app to serve it`,
       `- NEVER say "I don't have enough information" about the server — you have all the details above. Use them confidently.`,
