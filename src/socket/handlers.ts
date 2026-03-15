@@ -473,10 +473,6 @@ export function registerHandlers(io: Server) {
         setSessionStatus(sessionId, "needs_attention");
       }
 
-      if (parsed.type === "text" || parsed.type === "done") {
-        console.log(`[stream-debug] handler forwarding type=${parsed.type} (session=${sessionId})`);
-      }
-
       // Throttle streaming events to prevent flooding; send all others immediately
       if (parsed.type === "streaming") {
         let throttle = sessionStreamingThrottles.get(sessionId);

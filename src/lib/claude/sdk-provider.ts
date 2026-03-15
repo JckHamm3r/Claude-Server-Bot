@@ -413,6 +413,7 @@ async function processOutputStream(
   let emittedDone = false;
 
   const activeToolCalls = new Map<string, string>();
+  const emittedToolCallIds = new Set<string>();
 
   state.heartbeatTimer = setInterval(() => {
     if (!state.running) return;
@@ -433,8 +434,8 @@ async function processOutputStream(
       state.lastActivity = Date.now();
       lastOutputTime = Date.now();
       const msgType = (msg as { type: string }).type;
-      if (msgType !== "stream_event") {
-        console.log(`[stream-debug] SDK msg type=${msgType} (session=${sessionId}, emittedDone=${emittedDone})`);
+      if (msgType !== "stream_event" && msgType !== "system") {
+        console.log(`[sdk] ${msgType} (session=${sessionId})`);
       }
 
       // ── System init: capture session ID ──
@@ -455,7 +456,7 @@ async function processOutputStream(
 
       // ── Streaming partial messages ──
       if (msgType === "stream_event") {
-        if (emittedDone) { console.log(`[stream-debug] BLOCKED stream_event after done (session=${sessionId})`); continue; }
+        if (emittedDone) continue;
         const streamMsg = msg as {
           type: "stream_event";
           event: {
@@ -466,6 +467,12 @@ async function processOutputStream(
           };
         };
         const event = streamMsg.event;
+
+        // New text content block — reset accumulator so post-tool text
+        // doesn't concatenate with the previous block's content.
+        if (event.type === "content_block_start" && event.content_block?.type === "text") {
+          accumulatedText = "";
+        }
 
         if (event.type === "content_block_delta" && event.delta?.type === "text_delta" && event.delta.text) {
           accumulatedText += event.delta.text;
@@ -480,6 +487,7 @@ async function processOutputStream(
           const callId = event.content_block.id ?? `tool_${++state.toolCallCounter}`;
           const toolName = event.content_block.name ?? "unknown";
           activeToolCalls.set(callId, toolName);
+          emittedToolCallIds.add(callId);
 
           state.emitter.emit("output", {
             type: "tool_call",
@@ -535,20 +543,10 @@ async function processOutputStream(
 
         for (const block of assistantMsg.message?.content ?? []) {
           if (block.type === "text" && block.text) {
-            // Skip only when this is a redundant echo of content that
-            // streaming deltas already delivered (same text).  When the
-            // text is NEW (e.g. post-tool-use response), emit it.
-            const isRedundant = lastStreamedText === block.text;
+            // Bookkeeping only — stream_event deltas are the authoritative
+            // source for streaming text.  The assistant message is a replay
+            // of the same content and must not re-emit it.
             accumulatedText = block.text;
-            if (!emittedDone && !isRedundant) {
-              console.log(`[stream-debug] assistant text → emit streaming (session=${sessionId}, len=${block.text.length})`);
-              state.emitter.emit("output", {
-                type: "streaming",
-                content: block.text,
-              } as ParsedOutput);
-            } else {
-              console.log(`[stream-debug] assistant text SKIPPED (session=${sessionId}, emittedDone=${emittedDone}, isRedundant=${isRedundant}, len=${block.text.length})`);
-            }
             lastStreamedText = block.text;
           }
           if (block.type === "tool_use" && block.name && !emittedDone) {
@@ -570,6 +568,9 @@ async function processOutputStream(
                 continue;
               }
             }
+
+            // Skip if stream_event already emitted this tool call
+            if (emittedToolCallIds.has(callId)) continue;
 
             state.emitter.emit("output", {
               type: "tool_call",
@@ -670,13 +671,10 @@ async function processOutputStream(
         }
 
         if (!lastStreamedText && resultMsg.result) {
-          console.log(`[stream-debug] result → emit text (no prior streaming, session=${sessionId}, len=${resultMsg.result.length})`);
           state.emitter.emit("output", {
             type: "text",
             content: resultMsg.result,
           } as ParsedOutput);
-        } else {
-          console.log(`[stream-debug] result → text SKIPPED (session=${sessionId}, hadStreaming=${!!lastStreamedText}, hasResult=${!!resultMsg.result})`);
         }
 
         if (resultMsg.usage) {
@@ -709,7 +707,6 @@ async function processOutputStream(
         state.running = false;
         clearTimers(state);
         emittedDone = true;
-        console.log(`[stream-debug] result → emit done (session=${sessionId})`);
         state.emitter.emit("output", { type: "done" } as ParsedOutput);
         continue;
       }
