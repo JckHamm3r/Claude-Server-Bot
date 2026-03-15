@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useMemo, useState } from "react";
-import { Terminal, Code2, FileSearch, MessageSquare, Slash, Sparkles } from "lucide-react";
+import { useEffect, useRef, useMemo, useState, useCallback } from "react";
+import { Terminal, Code2, FileSearch, MessageSquare, Slash, Sparkles, ChevronDown } from "lucide-react";
 import { MessageItem } from "./message-item";
 import { ToolCallGroup } from "./tool-call-group";
 import { apiUrl } from "@/lib/utils";
@@ -176,13 +176,34 @@ export function MessageList({
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const activeElRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
+
+  const SCROLL_THRESHOLD = 80;
+
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD;
+    isNearBottomRef.current = nearBottom;
+    setShowScrollBtn(!nearBottom);
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    isNearBottomRef.current = true;
+    setShowScrollBtn(false);
+  }, []);
 
   useEffect(() => {
     activeElRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [activeHighlight]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (isNearBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [messages, currentActivity, isRunning]);
 
   const segments = useMemo<Segment[]>(() => {
@@ -270,8 +291,8 @@ export function MessageList({
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="flex-1 overflow-y-auto py-4 select-text" role="log" aria-live="polite" aria-label="Chat messages">
+    <div className="flex flex-1 flex-col overflow-hidden relative">
+      <div ref={scrollContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto py-4 select-text" role="log" aria-live="polite" aria-label="Chat messages">
         <div className="mx-auto max-w-3xl px-4 space-y-1">
           {segments.map((seg, segIdx) => {
             if (seg.kind === "tool-group") {
@@ -340,6 +361,16 @@ export function MessageList({
           <div ref={bottomRef} />
         </div>
       </div>
+
+      {showScrollBtn && (
+        <button
+          onClick={scrollToBottom}
+          className="absolute bottom-14 left-1/2 -translate-x-1/2 z-10 flex items-center justify-center h-8 w-8 rounded-full glass border border-bot-border/40 bg-bot-surface/80 text-bot-muted hover:text-bot-text hover:bg-bot-elevated/80 shadow-lg transition-all duration-200"
+          aria-label="Scroll to bottom"
+        >
+          <ChevronDown className="h-4 w-4" />
+        </button>
+      )}
 
       <ActivityStrip activity={currentActivity ?? null} isRunning={isRunning ?? false} runStartTime={runStartTime ?? null} />
     </div>
