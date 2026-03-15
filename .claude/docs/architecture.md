@@ -15,9 +15,14 @@ The app does NOT use the standard Next.js server. `server.ts` creates an HTTP se
 
 ## Claude Provider (`src/lib/claude/`)
 
-Uses the `@anthropic-ai/claude-agent-sdk` package with an Anthropic API key:
+Uses `@anthropic-ai/claude-agent-sdk` (TypeScript) in **streaming input mode**:
 
-- **sdk-provider.ts** — Runs the full agent loop via the SDK. Manages per-session state (claudeSessionId, running flag, allowedTools, waitingForPermission). Supports session resume. Handles permission requests via the `canUseTool` callback.
+- **sdk-provider.ts** — Core provider. Launches a long-lived `query()` per session with an `AsyncGenerator<SDKUserMessage>` as the prompt. Each `sendMessage()` pushes into the generator queue instead of spawning a new subprocess. This keeps conversation context alive naturally across turns without relying on session resume files.
+  - `persistSession: false` — We manage persistence in SQLite, not the SDK's filesystem sessions.
+  - `settingSources: []` — We build system prompts ourselves (via `system-prompt.ts`) to avoid loading `.claude/settings.json` permission rules that could conflict with our `canUseTool` callback.
+  - CLAUDE.md from `CLAUDE_PROJECT_ROOT` is read by `system-prompt.ts` and appended to the system prompt at session creation.
+  - Session lifecycle: `createSession()` initializes state → first `sendMessage()` starts `query()` → subsequent messages yield into the same stream → `suspendSession()` closes the query but preserves `claudeSessionId` for later resume → `closeSession()` destroys everything.
+  - Handles permission requests via `canUseTool`, tool call/result tracking, AskUserQuestion interception, heartbeat/timeout, and rate limit events.
 - **index.ts** — Exports `getClaudeProvider()` and `isSDKAvailable()`. The SDK is the only provider.
 - **provider.ts** — `ClaudeCodeProvider` interface and `ParsedOutput` type definitions.
 

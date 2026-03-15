@@ -19,6 +19,8 @@ interface ChatTabProps {
   isWidget?: boolean;
 }
 
+const ACTIVE_SESSION_KEY = "claude:activeSessionId";
+
 export function ChatTab({ isWidget = false }: ChatTabProps) {
   const { status: sessionStatus } = useSession();
   const [sessions, setSessions] = useState<ClaudeSession[]>([]);
@@ -27,6 +29,15 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(isWidget);
   const [autoAccept, setAutoAccept] = useState(false);
   const [loadingSessions, setLoadingSessions] = useState(true);
+  const pendingRestoreRef = useRef<string | null>(null);
+
+  // Read saved active session ID on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(ACTIVE_SESSION_KEY);
+      if (saved) pendingRestoreRef.current = saved;
+    } catch { /* ignore */ }
+  }, []);
 
   // Search state
   const [showSessionSearch, setShowSessionSearch] = useState(false);
@@ -99,7 +110,22 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
     chat.activeSessionRef.current = session;
     setActiveSession(session);
     chat.emit("claude:set_active_session", { sessionId: session.id });
+    try { localStorage.setItem(ACTIVE_SESSION_KEY, session.id); } catch { /* ignore */ }
   }, [chat]);
+
+  // Auto-restore active session from localStorage after session list loads
+  useEffect(() => {
+    const savedId = pendingRestoreRef.current;
+    if (!savedId || !chat.connected || activeSession || sessions.length === 0) return;
+    const match = sessions.find((s) => s.id === savedId);
+    if (match) {
+      pendingRestoreRef.current = null;
+      chat.initializedSessionsRef.current.add(match.id);
+      handleSelectSession(match);
+    } else {
+      pendingRestoreRef.current = null;
+    }
+  }, [sessions, chat.connected, activeSession, chat.initializedSessionsRef, handleSelectSession]);
 
   const handleCreateSession = useCallback(
     (name: string, skipPermissions: boolean, model?: string, providerType?: string, templateId?: string, personality?: string, personalityCustom?: string) => {
@@ -141,6 +167,7 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
       if (name) {
         chat.emit("claude:rename_session", { sessionId: id, name });
       }
+      try { localStorage.setItem(ACTIVE_SESSION_KEY, id); } catch { /* ignore */ }
     },
     [chat],
   );
@@ -187,6 +214,7 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
         setActiveSession(null);
         chat.resetSessionState();
         chat.setIsRunning(false);
+        try { localStorage.removeItem(ACTIVE_SESSION_KEY); } catch { /* ignore */ }
       }
     },
     [chat],

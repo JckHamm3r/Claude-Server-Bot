@@ -10,6 +10,11 @@ interface PermissionResolver {
   resolve: (result: { behavior: "allow" | "deny"; message?: string }) => void;
 }
 
+interface QueuedMessage {
+  content: string;
+  resolve: () => void;
+}
+
 interface SDKSessionState {
   emitter: EventEmitter;
   running: boolean;
@@ -18,7 +23,6 @@ interface SDKSessionState {
   skipPermissions: boolean;
   claudeSessionId: string | null;
   lastActivity: number;
-  firstMessage: boolean;
   allowedTools: Set<string>;
   pendingPermission: PermissionResolver | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -26,11 +30,15 @@ interface SDKSessionState {
   toolCallCounter: number;
   heartbeatTimer: ReturnType<typeof setInterval> | null;
   timeoutTimer: ReturnType<typeof setTimeout> | null;
+  messageQueue: QueuedMessage[];
+  messageReady: (() => void) | null;
+  streamActive: boolean;
+  streamEnded: boolean;
 }
 
 const sessions = new Map<string, SDKSessionState>();
 
-const SDK_TIMEOUT_MS = parseInt(process.env.CLAUDE_SDK_TIMEOUT_MS ?? "600000", 10); // 10 min default
+const SDK_TIMEOUT_MS = parseInt(process.env.CLAUDE_SDK_TIMEOUT_MS ?? "600000", 10);
 const HEARTBEAT_INTERVAL_MS = 10_000;
 const HEARTBEAT_SILENCE_THRESHOLD_MS = 8_000;
 
@@ -42,11 +50,7 @@ setInterval(() => {
   const now = Date.now();
   for (const [id, state] of sessions) {
     if (!state.running && (now - state.lastActivity) > SDK_IDLE_THRESHOLD) {
-      clearTimers(state);
-      state.emitter.removeAllListeners();
-      if (state.activeQuery) {
-        try { state.activeQuery.close(); } catch { /* ignore */ }
-      }
+      cleanupSession(state);
       sessions.delete(id);
     }
   }
@@ -54,9 +58,66 @@ setInterval(() => {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+function cleanupSession(state: SDKSessionState): void {
+  clearTimers(state);
+  endStream(state);
+  if (state.pendingPermission) {
+    state.pendingPermission.resolve({ behavior: "deny", message: "Session cleaned up" });
+    state.pendingPermission = null;
+  }
+  if (state.activeQuery) {
+    try { state.activeQuery.close(); } catch { /* ignore */ }
+    state.activeQuery = null;
+  }
+  state.emitter.removeAllListeners();
+}
+
 function clearTimers(state: SDKSessionState): void {
   if (state.heartbeatTimer) { clearInterval(state.heartbeatTimer); state.heartbeatTimer = null; }
   if (state.timeoutTimer) { clearTimeout(state.timeoutTimer); state.timeoutTimer = null; }
+}
+
+function endStream(state: SDKSessionState): void {
+  state.streamEnded = true;
+  if (state.messageReady) {
+    state.messageReady();
+    state.messageReady = null;
+  }
+}
+
+function resetTimers(state: SDKSessionState): void {
+  clearTimers(state);
+
+  let lastOutputTime = Date.now();
+
+  state.heartbeatTimer = setInterval(() => {
+    if (!state.running) return;
+    const silenceMs = Date.now() - lastOutputTime;
+    if (silenceMs > HEARTBEAT_SILENCE_THRESHOLD_MS) {
+      state.emitter.emit("output", {
+        type: "progress",
+        message: silenceMs > 30_000 ? "Still processing..." : "Processing...",
+      } as ParsedOutput);
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+
+  state.timeoutTimer = setTimeout(() => {
+    if (!state.running) return;
+    state.emitter.emit("output", {
+      type: "error",
+      message: `Query timed out after ${SDK_TIMEOUT_MS / 1000}s. You can retry.`,
+      retryable: true,
+    } as ParsedOutput);
+    if (state.activeQuery) {
+      try { state.activeQuery.interrupt(); } catch {
+        try { state.activeQuery.close(); } catch { /* ignore */ }
+      }
+    }
+  }, SDK_TIMEOUT_MS);
+
+  // Return a function that output handlers call to reset the timeout
+  const updateOutputTime = () => { lastOutputTime = Date.now(); };
+  return updateOutputTime as unknown as void;
 }
 
 function getOrCreate(sessionId: string): SDKSessionState {
@@ -67,13 +128,16 @@ function getOrCreate(sessionId: string): SDKSessionState {
       skipPermissions: false,
       claudeSessionId: null,
       lastActivity: Date.now(),
-      firstMessage: true,
       allowedTools: new Set(),
       pendingPermission: null,
       activeQuery: null,
       toolCallCounter: 0,
       heartbeatTimer: null,
       timeoutTimer: null,
+      messageQueue: [],
+      messageReady: null,
+      streamActive: false,
+      streamEnded: false,
     });
   }
   const state = sessions.get(sessionId)!;
@@ -102,7 +166,7 @@ function classifySDKError(err: unknown): { message: string; retryable: boolean }
   const lower = msg.toLowerCase();
 
   if (isStaleResumeError(err)) {
-    return { message: "Session expired. Starting a fresh conversation.", retryable: true };
+    return { message: "Reconnecting to conversation...", retryable: true };
   }
   if (lower.includes("rate limit") || lower.includes("429") || lower.includes("too many requests")) {
     return { message: "Rate limited by Claude API. Please wait a moment and try again.", retryable: true };
@@ -128,7 +192,6 @@ function validateFilePath(filePath: string): boolean {
   if (filePath.startsWith("-")) return false;
   const resolved = path.resolve(filePath);
   const root = path.resolve(projectRoot());
-  // Allow paths within project root OR in the data/uploads directory
   const dataDir = path.resolve(process.env.DATA_DIR ?? "./data");
   return resolved.startsWith(root + path.sep) || resolved.startsWith(dataDir + path.sep) || resolved === root;
 }
@@ -174,55 +237,79 @@ function buildPromptWithFiles(message: string, inputFiles: string[]): string {
   return fileParts.join("\n\n") + "\n\n" + message;
 }
 
-// ── Core SDK runner ──────────────────────────────────────────────────────────
+// ── Streaming input generator ───────────────────────────────────────────────
+// Creates an AsyncGenerator that yields SDKUserMessage objects on demand.
+// sendMessage() pushes into the queue; the generator yields when ready.
 
-async function runSDK(
+function createMessageStream(state: SDKSessionState) {
+  async function* generator() {
+    while (!state.streamEnded) {
+      if (state.messageQueue.length > 0) {
+        const queued = state.messageQueue.shift()!;
+        yield {
+          type: "user" as const,
+          message: {
+            role: "user" as const,
+            content: queued.content,
+          },
+        };
+        queued.resolve();
+      } else {
+        await new Promise<void>((resolve) => {
+          state.messageReady = resolve;
+        });
+      }
+    }
+  }
+  return generator();
+}
+
+function pushMessage(state: SDKSessionState, content: string): Promise<void> {
+  return new Promise<void>((resolve) => {
+    state.messageQueue.push({ content, resolve });
+    if (state.messageReady) {
+      state.messageReady();
+      state.messageReady = null;
+    }
+  });
+}
+
+// ── Start streaming session ─────────────────────────────────────────────────
+// Launches a long-lived query() with the async generator as prompt.
+// The output processing loop runs in the background.
+
+async function startStreamingSession(
   state: SDKSessionState,
-  message: string,
-  inputFiles: string[] = [],
-  sessionId?: string,
-  isRetry = false,
+  sessionId: string,
 ): Promise<void> {
-  if (state.running) return;
-  state.running = true;
-  state.lastActivity = Date.now();
+  if (state.streamActive) return;
 
   const apiKey = getApiKey();
   if (!apiKey) {
-    state.running = false;
     state.emitter.emit("output", {
       type: "error",
       message: "No API key configured. Set ANTHROPIC_API_KEY or add one in Settings.",
     } as ParsedOutput);
-    state.emitter.emit("output", { type: "done" } as ParsedOutput);
     return;
   }
 
-  // Ensure API key is in env for the SDK subprocess
   if (!process.env.ANTHROPIC_API_KEY) {
     process.env.ANTHROPIC_API_KEY = apiKey;
   }
 
-  // Dynamic import of ESM SDK
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let queryFn: (params: { prompt: string; options?: any }) => any;
+  let queryFn: (params: { prompt: any; options?: any }) => any;
   try {
     const sdk = await import("@anthropic-ai/claude-agent-sdk");
     queryFn = sdk.query;
   } catch {
-    state.running = false;
     state.emitter.emit("output", {
       type: "error",
       message: "Claude Agent SDK not installed. Run: npm install @anthropic-ai/claude-agent-sdk",
     } as ParsedOutput);
-    state.emitter.emit("output", { type: "done" } as ParsedOutput);
     return;
   }
 
-  // Build prompt with file contents inlined
-  const fullPrompt = buildPromptWithFiles(message, inputFiles);
-
-  // Build SDK options
   const allowedToolsList = Array.from(state.allowedTools);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -231,24 +318,23 @@ async function runSDK(
     maxTurns: 30,
     includePartialMessages: true,
     cwd: projectRoot(),
+    persistSession: false,
+    settingSources: [],
   };
 
-  // System prompt: use SDK's systemPrompt option (not prepended to message)
-  if (state.systemPrompt && state.firstMessage) {
+  if (state.systemPrompt) {
     options.systemPrompt = {
       type: "preset",
       preset: "claude_code",
       append: state.systemPrompt,
     };
   }
-  state.firstMessage = false;
 
-  // Session resume
+  // Resume from a previous SDK session if available
   if (state.claudeSessionId) {
     options.resume = state.claudeSessionId;
   }
 
-  // Permission handling
   if (state.skipPermissions) {
     options.permissionMode = "bypassPermissions";
     options.allowDangerouslySkipPermissions = true;
@@ -286,9 +372,6 @@ async function runSDK(
     };
   }
 
-  options.persistSession = false;
-  options.settingSources = [];
-
   options.env = {
     ...process.env,
     ANTHROPIC_API_KEY: apiKey,
@@ -296,15 +379,39 @@ async function runSDK(
   };
   delete options.env.CLAUDECODE;
 
+  state.streamActive = true;
+  state.streamEnded = false;
+  state.messageQueue = [];
+  state.messageReady = null;
+
+  const messageStream = createMessageStream(state);
+
+  // Start output processing in background
+  processOutputStream(state, queryFn, messageStream, options, sessionId).catch((err) => {
+    console.error(`[sdk] Stream processing error for session ${sessionId}:`, err);
+    state.emitter.emit("output", { type: "error", message: String(err) } as ParsedOutput);
+    state.emitter.emit("output", { type: "done" } as ParsedOutput);
+  });
+}
+
+// ── Output processing loop ──────────────────────────────────────────────────
+
+async function processOutputStream(
+  state: SDKSessionState,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  queryFn: (params: { prompt: any; options?: any }) => any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  messageStream: AsyncGenerator<any>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  options: Record<string, any>,
+  sessionId: string,
+): Promise<void> {
   let accumulatedText = "";
   let lastStreamedText = "";
   let lastOutputTime = Date.now();
-  let emittedDone = false;
 
-  // Track active tool calls for tool_result emission
-  const activeToolCalls = new Map<string, string>(); // toolUseId -> toolName
+  const activeToolCalls = new Map<string, string>();
 
-  // ── Heartbeat: emit progress when output is silent ──
   state.heartbeatTimer = setInterval(() => {
     if (!state.running) return;
     const silenceMs = Date.now() - lastOutputTime;
@@ -316,21 +423,8 @@ async function runSDK(
     }
   }, HEARTBEAT_INTERVAL_MS);
 
-  // ── Timeout: prevent infinite hangs ──
-  state.timeoutTimer = setTimeout(() => {
-    if (!state.running) return;
-    state.emitter.emit("output", {
-      type: "error",
-      message: `Query timed out after ${SDK_TIMEOUT_MS / 1000}s. You can retry.`,
-      retryable: true,
-    } as ParsedOutput);
-    if (state.activeQuery) {
-      try { state.activeQuery.close(); } catch { /* ignore */ }
-    }
-  }, SDK_TIMEOUT_MS);
-
   try {
-    const queryInstance = queryFn({ prompt: fullPrompt, options });
+    const queryInstance = queryFn({ prompt: messageStream, options });
     state.activeQuery = queryInstance;
 
     for await (const msg of queryInstance) {
@@ -340,9 +434,12 @@ async function runSDK(
 
       // ── System init: capture session ID ──
       if (msgType === "system") {
-        const sysMsg = msg as { type: "system"; subtype: string; session_id?: string; model?: string };
+        const sysMsg = msg as { type: "system"; subtype: string; session_id?: string };
         if (sysMsg.subtype === "init" && sysMsg.session_id) {
           state.claudeSessionId = sysMsg.session_id;
+          if (sessionId) {
+            try { updateClaudeSessionId(sessionId, sysMsg.session_id); } catch { /* ignore */ }
+          }
           state.emitter.emit("output", {
             type: "session_id",
             claudeSessionId: sysMsg.session_id,
@@ -410,6 +507,9 @@ async function runSDK(
 
         if (!state.claudeSessionId && assistantMsg.session_id) {
           state.claudeSessionId = assistantMsg.session_id;
+          if (sessionId) {
+            try { updateClaudeSessionId(sessionId, assistantMsg.session_id); } catch { /* ignore */ }
+          }
           state.emitter.emit("output", {
             type: "session_id",
             claudeSessionId: assistantMsg.session_id,
@@ -440,7 +540,6 @@ async function runSDK(
             const callId = block.id ?? `tool_${++state.toolCallCounter}`;
             activeToolCalls.set(callId, block.name);
 
-            // Intercept AskUserQuestion tool
             if (block.name === "AskUserQuestion") {
               const input = block.input as { question?: string; options?: { label: string; description?: string }[] } | undefined;
               if (input?.question) {
@@ -472,6 +571,14 @@ async function runSDK(
             } as ParsedOutput);
           }
         }
+
+        // When stop_reason is set, this turn is complete -- emit done
+        if (isFinal) {
+          accumulatedText = "";
+          state.running = false;
+          clearTimers(state);
+          state.emitter.emit("output", { type: "done" } as ParsedOutput);
+        }
         continue;
       }
 
@@ -481,10 +588,8 @@ async function runSDK(
           type: "user";
           message: { content?: unknown };
           parent_tool_use_id: string | null;
-          tool_use_result?: unknown;
         };
 
-        // Extract tool results from the message content
         const content = userMsg.message?.content;
         if (Array.isArray(content)) {
           for (const block of content) {
@@ -542,13 +647,15 @@ async function runSDK(
 
         if (!state.claudeSessionId && resultMsg.session_id) {
           state.claudeSessionId = resultMsg.session_id;
+          if (sessionId) {
+            try { updateClaudeSessionId(sessionId, resultMsg.session_id); } catch { /* ignore */ }
+          }
           state.emitter.emit("output", {
             type: "session_id",
             claudeSessionId: resultMsg.session_id,
           } as ParsedOutput);
         }
 
-        // Emit final text if result provides it and differs from streamed
         if (resultMsg.result && resultMsg.result !== lastStreamedText) {
           state.emitter.emit("output", {
             type: "text",
@@ -556,7 +663,6 @@ async function runSDK(
           } as ParsedOutput);
         }
 
-        // Emit usage
         if (resultMsg.usage) {
           const usage: TokenUsage = {
             input_tokens: resultMsg.usage.input_tokens,
@@ -580,6 +686,12 @@ async function runSDK(
             } as ParsedOutput);
           }
         }
+
+        // Result means this turn is done
+        accumulatedText = "";
+        state.running = false;
+        clearTimers(state);
+        state.emitter.emit("output", { type: "done" } as ParsedOutput);
         continue;
       }
 
@@ -599,15 +711,11 @@ async function runSDK(
   } catch (err) {
     if (err instanceof Error && (err.name === "AbortError" || err.message.includes("aborted"))) {
       // Interrupted — don't emit error
-    } else if (!isRetry && isStaleResumeError(err) && state.claudeSessionId) {
-      console.warn(`Stale resume ID detected for session ${sessionId ?? "unknown"}, retrying as fresh conversation`);
+    } else if (isStaleResumeError(err) && state.claudeSessionId) {
+      // Stale resume — clear the ID and let the next message start fresh
+      console.warn(`Stale resume ID detected for session ${sessionId}, clearing for fresh start`);
       state.claudeSessionId = null;
-      state.firstMessage = true;
-      if (sessionId) {
-        try { updateClaudeSessionId(sessionId, null); } catch { /* ignore */ }
-      }
-      state.running = false;
-      return runSDK(state, message, inputFiles, sessionId, true);
+      try { updateClaudeSessionId(sessionId, null); } catch { /* ignore */ }
     } else {
       const classified = classifySDKError(err);
       state.emitter.emit("output", {
@@ -618,14 +726,13 @@ async function runSDK(
     }
   } finally {
     state.running = false;
+    state.streamActive = false;
     state.activeQuery = null;
     state.pendingPermission = null;
     state.lastActivity = Date.now();
     clearTimers(state);
-    if (!emittedDone) {
-      emittedDone = true;
-      state.emitter.emit("output", { type: "done" } as ParsedOutput);
-    }
+    // Emit done if the stream ended unexpectedly without a result message
+    state.emitter.emit("output", { type: "done" } as ParsedOutput);
   }
 }
 
@@ -651,11 +758,32 @@ export const sdkProvider: ClaudeCodeProvider = {
     if (skipPermissions !== state.skipPermissions) {
       state.skipPermissions = skipPermissions;
     }
-    runSDK(state, message, opts?.inputFiles ?? [], sessionId).catch(err => {
-      console.error("SDK error:", err);
-      state.emitter.emit("output", { type: "error", message: String(err) } as ParsedOutput);
-      state.emitter.emit("output", { type: "done" } as ParsedOutput);
-    });
+
+    state.running = true;
+
+    const fullPrompt = buildPromptWithFiles(message, opts?.inputFiles ?? []);
+
+    if (state.streamActive) {
+      // Stream is alive — push message into the generator
+      resetTimers(state);
+      pushMessage(state, fullPrompt).catch((err) => {
+        console.error("SDK push error:", err);
+        state.running = false;
+        state.emitter.emit("output", { type: "error", message: String(err) } as ParsedOutput);
+        state.emitter.emit("output", { type: "done" } as ParsedOutput);
+      });
+    } else {
+      // Stream not yet started — start it, then push the first message
+      startStreamingSession(state, sessionId).then(() => {
+        resetTimers(state);
+        return pushMessage(state, fullPrompt);
+      }).catch((err) => {
+        console.error("SDK stream start error:", err);
+        state.running = false;
+        state.emitter.emit("output", { type: "error", message: String(err) } as ParsedOutput);
+        state.emitter.emit("output", { type: "done" } as ParsedOutput);
+      });
+    }
   },
 
   allowTool(sessionId, toolName, scope) {
@@ -695,24 +823,16 @@ export const sdkProvider: ClaudeCodeProvider = {
     clearTimers(state);
 
     if (state.activeQuery) {
-      try { state.activeQuery.close(); } catch { /* ignore */ }
-      state.activeQuery = null;
+      try { state.activeQuery.interrupt(); } catch {
+        try { state.activeQuery.close(); } catch { /* ignore */ }
+      }
     }
   },
 
   closeSession(sessionId) {
     const state = sessions.get(sessionId);
     if (!state) return;
-
-    if (state.pendingPermission) {
-      state.pendingPermission.resolve({ behavior: "deny", message: "Session closed" });
-      state.pendingPermission = null;
-    }
-    clearTimers(state);
-    if (state.activeQuery) {
-      try { state.activeQuery.close(); } catch { /* ignore */ }
-    }
-    state.emitter.removeAllListeners();
+    cleanupSession(state);
     sessions.delete(sessionId);
   },
 
@@ -725,11 +845,13 @@ export const sdkProvider: ClaudeCodeProvider = {
       state.pendingPermission = null;
     }
     clearTimers(state);
+    endStream(state);
     if (state.activeQuery) {
       try { state.activeQuery.close(); } catch { /* ignore */ }
       state.activeQuery = null;
     }
     state.running = false;
+    state.streamActive = false;
     state.emitter.removeAllListeners("output");
   },
 

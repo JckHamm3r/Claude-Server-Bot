@@ -1,3 +1,5 @@
+import * as fs from "fs";
+import * as path from "path";
 import { getAppSetting, getPersonalityPrefix } from "./app-settings";
 import { getCustomizationSystemPrompt, getBotSelfIdentityPrompt } from "./customization";
 import { getSecuritySystemPrompt } from "./security-guard";
@@ -12,8 +14,29 @@ interface BuildSystemPromptOpts {
 }
 
 /**
+ * Read CLAUDE.md from the project root if it exists.
+ * Checks CLAUDE.md and .claude/CLAUDE.md (same precedence as the SDK).
+ * We read this ourselves instead of using settingSources: ['project']
+ * to avoid loading .claude/settings.json permission rules.
+ */
+function readProjectClaudeMd(): string | undefined {
+  const root = process.env.CLAUDE_PROJECT_ROOT ?? process.cwd();
+  const candidates = [
+    path.join(root, "CLAUDE.md"),
+    path.join(root, ".claude", "CLAUDE.md"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      const content = fs.readFileSync(candidate, "utf-8").trim();
+      if (content) return content;
+    } catch { /* file doesn't exist or unreadable */ }
+  }
+  return undefined;
+}
+
+/**
  * Single source of truth for composing the system prompt sent to Claude.
- * Composition order: security → template → identity + personality
+ * Composition order: security → template → project CLAUDE.md → identity + personality
  */
 export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promise<string | undefined> {
   const {
@@ -42,6 +65,16 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
     systemPrompt = systemPrompt
       ? templateSystemPrompt + "\n\n" + systemPrompt
       : templateSystemPrompt;
+  }
+
+  // Append CLAUDE.md from project root (if present) so the SDK agent
+  // gets project-level context without enabling settingSources.
+  const claudeMd = readProjectClaudeMd();
+  if (claudeMd) {
+    const claudeSection = `<project-instructions>\n${claudeMd}\n</project-instructions>`;
+    systemPrompt = systemPrompt
+      ? systemPrompt + "\n\n" + claudeSection
+      : claudeSection;
   }
 
   const guardEnabled = getAppSetting("guard_rails_enabled", "true") === "true";

@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Next.js 14 App Router + custom Socket.IO server + SQLite. Installed via curl one-liner; users run it on their own servers.
+Next.js 14 App Router + custom Socket.IO server + SQLite. Claude interactions powered by `@anthropic-ai/claude-agent-sdk` (TypeScript) in streaming input mode. Installed via curl one-liner; users run it on their own servers.
 
 ## Quick Reference
 
@@ -15,8 +15,10 @@ Next.js 14 App Router + custom Socket.IO server + SQLite. Installed via curl one
 
 - `@/*` maps to `./src/*`
 - All Claude interactions go through Socket.IO, not REST
+- SDK provider uses streaming input mode — one long-lived `query()` per session with messages fed via AsyncGenerator. Do not call `query()` per message.
+- `persistSession: false` and `settingSources: []` — we manage persistence in SQLite. CLAUDE.md from `CLAUDE_PROJECT_ROOT` is read and appended to the system prompt manually.
 - Personality is set per-session at creation time (in the New Session dialog), not in global settings; "Command Sandbox" toggle lives only in Security > Command Sandbox sub-tab
-- System prompt composition order: security → template → identity + server context → personality
+- System prompt composition order: security → template → identity + personality → project CLAUDE.md
 
 ## Detailed Docs (read on demand — not auto-ingested)
 

@@ -5,7 +5,7 @@ alwaysApply: true
 
 # CLAUDE.md Structure Policy
 
-CLAUDE.md is auto-ingested by the Claude CLI on every conversation turn, consuming context window. To keep it lean:
+CLAUDE.md is auto-ingested by AI tools on every conversation turn, consuming context window. To keep it lean:
 
 ## Rules
 
