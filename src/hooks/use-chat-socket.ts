@@ -443,6 +443,8 @@ export function useChatSocket({
           const expanded = expandToolCallsFromMetadata(msgs);
           setMessages(expanded);
           setLoadingMessages(false);
+          streamingMsgIdRef.current = null;
+          turnDoneRef.current = false;
 
           // Restore pending interactions for unresolved permissions/questions after reconnect
           const restored = new Map<string, string>();
@@ -547,16 +549,21 @@ export function useChatSocket({
             toolInput: parsed.toolInput,
             count: 0,
           });
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: parsed.toolCallId ?? crypto.randomUUID(),
-              sender_type: "claude",
-              parsed,
-              content: "",
-              timestamp: new Date().toISOString(),
-            },
-          ]);
+          setMessages((prev) => {
+            if (parsed.toolCallId && prev.some((m) => m.id === parsed.toolCallId || m.parsed?.toolCallId === parsed.toolCallId)) {
+              return prev;
+            }
+            return [
+              ...prev,
+              {
+                id: parsed.toolCallId ?? crypto.randomUUID(),
+                sender_type: "claude",
+                parsed,
+                content: "",
+                timestamp: new Date().toISOString(),
+              },
+            ];
+          });
           setIsRunning(true);
           return;
         }
