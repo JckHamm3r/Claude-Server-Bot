@@ -154,6 +154,27 @@ export function registerSessionHandlers(ctx: HandlerContext) {
       }
       const messages = getMessages(sessionId);
       socket.emit("claude:messages", { sessionId, messages });
+
+      const sp = ctx.getSessionProvider(sessionId);
+      const running = sp.isRunning(sessionId);
+      if (running) {
+        const eventBuffer = ctx.sessionEventBuffers.get(sessionId);
+        if (eventBuffer && eventBuffer.length > 0) {
+          for (const evt of eventBuffer) {
+            socket.emit("claude:output", evt);
+          }
+        } else {
+          const currentContent = ctx.sessionStreamingContent.get(sessionId);
+          if (currentContent) {
+            socket.emit("claude:output", {
+              sessionId,
+              parsed: { type: "streaming", content: currentContent },
+              submittedBy: ctx.sessionCommandSubmitter.get(sessionId),
+            });
+          }
+        }
+      }
+      socket.emit("claude:session_state", { sessionId, running });
     } catch {
       socket.emit("claude:error", { sessionId, message: "Failed to load messages" });
     }
