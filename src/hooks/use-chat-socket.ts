@@ -5,7 +5,7 @@ import { getSocket, connectSocket } from "@/lib/socket";
 import type { ParsedOutput } from "@/lib/claude/provider";
 import type { ClaudeSession } from "@/lib/claude-db";
 import { DEFAULT_MODEL } from "@/lib/models";
-import type { ChatMessage, SessionUsage, BudgetLimits } from "@/types/chat";
+import type { ChatMessage, SessionUsage, BudgetLimits, ContextUsage } from "@/types/chat";
 import type { ActivityState } from "@/components/claude-code/message-list";
 import type { ChatInputHandle } from "@/components/claude-code/chat-input";
 
@@ -94,6 +94,8 @@ export interface UseChatSocketReturn {
   commandRunner: string | null;
   sessionUsage: SessionUsage | null;
   budgetLimits: BudgetLimits | null;
+  contextUsage: ContextUsage | null;
+  isCompacting: boolean;
   sessionModel: string;
   hasError: boolean;
   pendingInteraction: { type: string; messageId: string } | null;
@@ -151,6 +153,8 @@ export function useChatSocket({
   const [sessionModel, setSessionModel] = useState(DEFAULT_MODEL);
   const [sessionUsage, setSessionUsage] = useState<SessionUsage | null>(null);
   const [budgetLimits, setBudgetLimits] = useState<BudgetLimits | null>(null);
+  const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
+  const [isCompacting, setIsCompacting] = useState(false);
   const [pendingInteraction, setPendingInteraction] = useState<{ type: string; messageId: string } | null>(null);
   const [hasError, setHasError] = useState(false);
   const [runStartTime, setRunStartTime] = useState<number | null>(null);
@@ -174,6 +178,8 @@ export function useChatSocket({
   const watchdogChecksRef = useRef(0);
   const editRecoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingInteractionRef = useRef<{ type: string; messageId: string } | null>(null);
+  const isCompactingRef = useRef(false);
+  const autoCompactFiredRef = useRef(false);
 
   // ── Sync refs ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -667,7 +673,7 @@ export function useChatSocket({
       },
     );
 
-    socket.on("claude:usage", ({ sessionId, usage }: { sessionId: string; usage: { input_tokens: number; output_tokens: number; cost_usd?: number } }) => {
+    socket.on("claude:usage", ({ sessionId, usage }: { sessionId: string; usage: { input_tokens: number; output_tokens: number; cost_usd?: number; context_window?: number; context_input_tokens?: number } }) => {
       if (activeSessionRef.current?.id !== sessionId) return;
       setMessages((prev) => {
         const updated = [...prev];
@@ -684,12 +690,52 @@ export function useChatSocket({
         total_output_tokens: (prev?.total_output_tokens ?? 0) + (usage.output_tokens ?? 0),
         total_cost_usd: (prev?.total_cost_usd ?? 0) + (usage.cost_usd ?? 0),
       }));
+
+      if (usage.context_window && usage.context_input_tokens) {
+        const pct = Math.min(100, Math.round((usage.context_input_tokens / usage.context_window) * 100));
+        setContextUsage({ inputTokens: usage.context_input_tokens, contextWindow: usage.context_window, percentage: pct });
+
+        if (pct >= 93 && !isCompactingRef.current && !autoCompactFiredRef.current) {
+          autoCompactFiredRef.current = true;
+          isCompactingRef.current = true;
+          setIsCompacting(true);
+          socket.emit("claude:message", { sessionId, content: "/compact" });
+        }
+
+        if (pct < 80) {
+          autoCompactFiredRef.current = false;
+        }
+      }
     });
 
     socket.on("claude:session_usage", ({ sessionId, usage, budgetLimits: bl }: { sessionId: string; usage: SessionUsage; budgetLimits?: BudgetLimits }) => {
       if (activeSessionRef.current?.id === sessionId) {
         setSessionUsage(usage);
         if (bl) setBudgetLimits(bl);
+      }
+    });
+
+    socket.on("claude:compacting", ({ sessionId: compactSessionId }: { sessionId: string }) => {
+      if (activeSessionRef.current?.id === compactSessionId) {
+        isCompactingRef.current = true;
+        setIsCompacting(true);
+      }
+    });
+
+    socket.on("claude:compact_done", ({ sessionId: compactSessionId }: { sessionId: string }) => {
+      if (activeSessionRef.current?.id === compactSessionId) {
+        isCompactingRef.current = false;
+        setIsCompacting(false);
+        socket.emit("claude:get_usage", { sessionId: compactSessionId });
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: "compact-" + Date.now(),
+            sender_type: "claude",
+            content: "Context window compacted. Summary of previous conversation has been preserved.",
+            timestamp: new Date().toISOString(),
+          },
+        ]);
       }
     });
 
@@ -836,6 +882,8 @@ export function useChatSocket({
       socket.off("claude:model_changed");
       socket.off("claude:messages_updated");
       socket.off("claude:message_deleted");
+      socket.off("claude:compacting");
+      socket.off("claude:compact_done");
       socket.off("security:warn");
       socket.off("claude:session_status");
       clearEditRecoveryTimer();
@@ -849,6 +897,10 @@ export function useChatSocket({
     setSessionModel(activeSession.model ?? DEFAULT_MODEL);
     setSessionUsage(null);
     setBudgetLimits(null);
+    setContextUsage(null);
+    setIsCompacting(false);
+    isCompactingRef.current = false;
+    autoCompactFiredRef.current = false;
     if (!freshSessionsRef.current.has(activeSession.id)) {
       emit("claude:get_messages", { sessionId: activeSession.id });
       emit("claude:get_usage", { sessionId: activeSession.id });
@@ -1014,6 +1066,7 @@ export function useChatSocket({
   return {
     messages, isRunning, currentActivity, connected, reconnecting,
     presenceUsers, typingUsers, commandRunner, sessionUsage, budgetLimits,
+    contextUsage, isCompacting,
     sessionModel, hasError, pendingInteraction, runStartTime, pendingCount,
     pendingQueue, loadingMessages,
     setMessages, setSessionModel, setSessionUsage, setIsRunning,

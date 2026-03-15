@@ -9,6 +9,8 @@ export interface TokenUsage {
   cache_creation_input_tokens?: number;
   cache_read_input_tokens?: number;
   cost_usd?: number;
+  context_window?: number;
+  context_input_tokens?: number;
 }
 
 export interface UserQuestion {
@@ -19,7 +21,7 @@ export interface UserQuestion {
 }
 
 export interface ParsedOutput {
-  type: "text" | "streaming" | "options" | "confirm" | "diff" | "progress" | "done" | "error" | "permission_request" | "security_warn" | "usage" | "tool_call" | "tool_result" | "user_question" | "session_id";
+  type: "text" | "streaming" | "options" | "confirm" | "diff" | "progress" | "done" | "error" | "permission_request" | "security_warn" | "usage" | "tool_call" | "tool_result" | "user_question" | "session_id" | "compacting" | "compact_done";
   content?: string;
   choices?: string[];       // for 'options'
   prompt?: string;          // for 'confirm'

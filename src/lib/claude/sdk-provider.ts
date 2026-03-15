@@ -438,9 +438,9 @@ async function processOutputStream(
         console.log(`[sdk] ${msgType} (session=${sessionId})`);
       }
 
-      // ── System init: capture session ID ──
+      // ── System messages: init, status, compact_boundary ──
       if (msgType === "system") {
-        const sysMsg = msg as { type: "system"; subtype: string; session_id?: string };
+        const sysMsg = msg as { type: "system"; subtype: string; session_id?: string; status?: string; compact_metadata?: { pre_tokens: number } };
         if (sysMsg.subtype === "init" && sysMsg.session_id) {
           state.claudeSessionId = sysMsg.session_id;
           if (sessionId) {
@@ -450,6 +450,12 @@ async function processOutputStream(
             type: "session_id",
             claudeSessionId: sysMsg.session_id,
           } as ParsedOutput);
+        }
+        if (sysMsg.subtype === "status" && sysMsg.status === "compacting") {
+          state.emitter.emit("output", { type: "compacting" } as ParsedOutput);
+        }
+        if (sysMsg.subtype === "compact_boundary") {
+          state.emitter.emit("output", { type: "compact_done" } as ParsedOutput);
         }
         continue;
       }
@@ -654,6 +660,7 @@ async function processOutputStream(
           result?: string;
           usage?: { input_tokens: number; output_tokens: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number };
           total_cost_usd?: number;
+          modelUsage?: Record<string, { inputTokens: number; outputTokens: number; contextWindow: number; maxOutputTokens: number }>;
           session_id: string;
           permission_denials?: { tool_name: string; tool_use_id: string; tool_input: Record<string, unknown> }[];
           errors?: string[];
@@ -686,6 +693,14 @@ async function processOutputStream(
           };
           if (resultMsg.total_cost_usd !== undefined) {
             usage.cost_usd = resultMsg.total_cost_usd;
+          }
+          if (resultMsg.modelUsage) {
+            const modelKey = Object.keys(resultMsg.modelUsage)[0];
+            if (modelKey) {
+              const mu = resultMsg.modelUsage[modelKey];
+              usage.context_window = mu.contextWindow;
+              usage.context_input_tokens = mu.inputTokens;
+            }
           }
           state.emitter.emit("output", { type: "usage", usage } as ParsedOutput);
         }

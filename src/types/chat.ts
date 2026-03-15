@@ -30,3 +30,9 @@ export interface BudgetLimits {
   daily_usd: number;
   monthly_usd: number;
 }
+
+export interface ContextUsage {
+  inputTokens: number;
+  contextWindow: number;
+  percentage: number;
+}

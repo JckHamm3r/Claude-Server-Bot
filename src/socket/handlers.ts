@@ -388,6 +388,16 @@ export function registerHandlers(io: Server) {
         return;
       }
 
+      if (parsed.type === "compacting") {
+        io.to(`session:${sessionId}`).emit("claude:compacting", { sessionId });
+        return;
+      }
+
+      if (parsed.type === "compact_done") {
+        io.to(`session:${sessionId}`).emit("claude:compact_done", { sessionId });
+        return;
+      }
+
       // Track tool calls for metadata
       if (parsed.type === "tool_call" && parsed.toolCallId) {
         toolCalls.push({

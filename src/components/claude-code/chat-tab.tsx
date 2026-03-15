@@ -263,6 +263,11 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
     });
   }, [activeSession, chat]);
 
+  const handleCompact = useCallback(() => {
+    if (!activeSession || chat.isRunning) return;
+    chat.handleSend("/compact");
+  }, [activeSession, chat]);
+
   return (
     <div className="flex h-full overflow-hidden">
       <SessionSidebar
@@ -320,6 +325,9 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
           onModelChange={activeSession ? handleModelChange : undefined}
           sessionUsage={chat.sessionUsage}
           budgetLimits={chat.budgetLimits}
+          contextUsage={chat.contextUsage}
+          isCompacting={chat.isCompacting}
+          onCompact={handleCompact}
           onSearch={activeSession ? () => setShowSessionSearch(true) : undefined}
           onGlobalSearch={() => setShowGlobalSearch(true)}
           sessionId={activeSession?.id}

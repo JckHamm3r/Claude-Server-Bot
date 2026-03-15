@@ -73,6 +73,15 @@ Export session messages as JSON from the toolbar.
 
 Token count and cost are displayed in the toolbar per session. Budget warnings appear when approaching configured limits.
 
+## Context Window Management
+
+A circular context usage indicator in the toolbar shows the current context window consumption as a percentage.
+
+- **Indicator** -- A ring that fills proportionally. Color changes from neutral (< 50%) to amber (50-80%) to warning (80-93%) to red (93%+).
+- **Auto-compaction** -- When context usage reaches 93%, the system automatically sends `/compact` to the SDK, which summarizes earlier conversation history and resets the context. A system message confirms when compaction completes.
+- **Manual compact** -- Click the ring indicator or type `/compact` in the chat input to trigger compaction at any time.
+- **Data source** -- The SDK's `modelUsage` on each result message provides the authoritative `contextWindow` size and cumulative `inputTokens`. These flow through `claude:usage` socket events to the client.
+
 ## Key Files
 
 | File | Purpose |
@@ -96,4 +105,4 @@ Token count and cost are displayed in the toolbar per session. Budget warnings a
 
 **Client to server:** `claude:create_session`, `claude:set_active_session`, `claude:list_sessions`, `claude:get_messages`, `claude:rename_session`, `claude:delete_session`, `claude:update_session_tags`, `claude:close_session`, `claude:set_model`, `claude:get_session_state`, `claude:rejoin_session`, `claude:invite_to_session`, `claude:remove_from_session`, `claude:list_session_participants`, `claude:send_message`, `claude:interrupt`, `claude:allow_tool`, `claude:deny_tool`, `claude:allow_all_tools`, `claude:edit_message`, `claude:delete_message`, `claude:confirm`
 
-**Server to client:** `claude:sessions`, `claude:session_status`, `claude:presence_update`, `claude:typing`, `claude:command_started`, `claude:command_done`, `claude:output`, `claude:usage`, `claude:session_usage`, `claude:model_changed`, `claude:messages_updated`, `claude:message_deleted`, `claude:session_state`, `claude:error`, `claude:rate_limited`, `claude:budget_exceeded`, `claude:budget_warning`
+**Server to client:** `claude:sessions`, `claude:session_status`, `claude:presence_update`, `claude:typing`, `claude:command_started`, `claude:command_done`, `claude:output`, `claude:usage`, `claude:session_usage`, `claude:model_changed`, `claude:messages_updated`, `claude:message_deleted`, `claude:session_state`, `claude:error`, `claude:rate_limited`, `claude:budget_exceeded`, `claude:budget_warning`, `claude:compacting`, `claude:compact_done`

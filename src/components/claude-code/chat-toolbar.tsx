@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Square, RotateCcw, Trash2, Zap, Search, Download, ChevronDown, ClipboardCopy, Check } from "lucide-react";
 import { cn, apiUrl } from "@/lib/utils";
 import { ModelSelector } from "./model-selector";
-import type { ChatMessage, SessionUsage, BudgetLimits } from "@/types/chat";
+import type { ChatMessage, SessionUsage, BudgetLimits, ContextUsage } from "@/types/chat";
 
 interface ChatToolbarProps {
   onInterrupt: () => void;
@@ -21,6 +21,9 @@ interface ChatToolbarProps {
   sessionId?: string;
   budgetLimits?: BudgetLimits | null;
   messages?: ChatMessage[];
+  contextUsage?: ContextUsage | null;
+  isCompacting?: boolean;
+  onCompact?: () => void;
 }
 
 function formatTokenCount(n: number): string {
@@ -104,6 +107,53 @@ function CopyAllButton({ messages }: { messages: ChatMessage[] }) {
   );
 }
 
+function ContextRing({ usage, compacting, onCompact }: { usage: ContextUsage; compacting?: boolean; onCompact?: () => void }) {
+  const pct = usage.percentage;
+  const radius = 9;
+  const stroke = 2.5;
+  const circumference = 2 * Math.PI * radius;
+  const dashOffset = circumference - (circumference * Math.min(pct, 100)) / 100;
+
+  const color =
+    pct >= 93 ? "stroke-bot-red" :
+    pct >= 80 ? "stroke-bot-amber" :
+    pct >= 50 ? "stroke-bot-amber/70" :
+    "stroke-bot-muted/40";
+
+  const textColor =
+    pct >= 93 ? "text-bot-red" :
+    pct >= 80 ? "text-bot-amber" :
+    "text-bot-muted/60";
+
+  const tooltip = `Context: ${formatTokenCount(usage.inputTokens)} / ${formatTokenCount(usage.contextWindow)} tokens (${pct}%)${compacting ? " — Compacting..." : ""}`;
+
+  return (
+    <button
+      onClick={onCompact}
+      disabled={compacting}
+      className={cn("relative flex items-center gap-1.5 rounded-lg px-1.5 py-1 mr-1 transition-all duration-200 hover:bg-bot-elevated/50 disabled:cursor-wait", compacting && "animate-pulse")}
+      title={tooltip}
+    >
+      <svg width="22" height="22" viewBox="0 0 22 22" className={cn("transition-transform", compacting && "animate-spin")} style={compacting ? { animationDuration: "3s" } : undefined}>
+        <circle cx="11" cy="11" r={radius} fill="none" className="stroke-bot-border/20" strokeWidth={stroke} />
+        <circle
+          cx="11" cy="11" r={radius}
+          fill="none"
+          className={cn(color, "transition-all duration-700")}
+          strokeWidth={stroke}
+          strokeDasharray={circumference}
+          strokeDashoffset={dashOffset}
+          strokeLinecap="round"
+          transform="rotate(-90 11 11)"
+        />
+      </svg>
+      <span className={cn("text-[10px] font-mono tabular-nums", textColor)}>
+        {pct}%
+      </span>
+    </button>
+  );
+}
+
 export function ChatToolbar({
   onInterrupt,
   onClearContext,
@@ -119,6 +169,9 @@ export function ChatToolbar({
   sessionId,
   budgetLimits,
   messages = [],
+  contextUsage,
+  isCompacting,
+  onCompact,
 }: ChatToolbarProps) {
   return (
     <div className="flex items-center gap-1 border-b border-bot-border/30 bg-bot-surface/60 backdrop-blur-md px-3 py-1.5">
@@ -162,6 +215,10 @@ export function ChatToolbar({
             </span>
           );
         })()}
+
+        {contextUsage && contextUsage.percentage > 0 && (
+          <ContextRing usage={contextUsage} compacting={isCompacting} onCompact={onCompact} />
+        )}
 
         {onSearch && (
           <button
