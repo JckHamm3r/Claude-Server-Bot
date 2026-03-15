@@ -45,7 +45,7 @@ export function ToolCallGroup({ messages, searchHighlights, activeHighlight }: T
           )}
           <Layers className="h-3 w-3 text-bot-muted" />
           <span className="text-[11px] font-mono text-bot-muted">
-            {expanded ? `${messages.length} tool calls` : `${hiddenCount} more tool call${hiddenCount > 1 ? "s" : ""} · ${lastMsg.parsed?.toolName ?? "tool"}`}
+            {expanded ? `${messages.length} tool calls` : `${hiddenCount} more tool call${hiddenCount > 1 ? "s" : ""} · ${lastMsg.parsed?.toolName && lastMsg.parsed.toolName !== "unknown" ? lastMsg.parsed.toolName : "tool"}`}
           </span>
           {hasRunning && <Loader2 className="h-3 w-3 animate-spin text-bot-accent" />}
           {hasError && !hasRunning && <AlertTriangle className="h-3 w-3 text-bot-amber" />}

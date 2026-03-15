@@ -394,6 +394,26 @@ async function startStreamingSession(
   });
 }
 
+// ── Tool result sanitisation ─────────────────────────────────────────────────
+
+const ABORT_PATTERN = /^Error: Request was aborted\./;
+const STACK_TRACE_PATTERN = /\n\s+at\s+/;
+
+function cleanToolResultText(text: string): string {
+  if (!text) return text;
+
+  if (ABORT_PATTERN.test(text)) {
+    return "Interrupted";
+  }
+
+  if (STACK_TRACE_PATTERN.test(text)) {
+    const firstLine = text.split("\n")[0];
+    return firstLine || text;
+  }
+
+  return text;
+}
+
 // ── Output processing loop ──────────────────────────────────────────────────
 
 async function processOutputStream(
@@ -410,6 +430,7 @@ async function processOutputStream(
   let emittedDone = false;
 
   const activeToolCalls = new Map<string, string>();
+  const toolIdToName = new Map<string, string>();
   const emittedToolCallIds = new Set<string>();
   const resetTurnState = () => {
     accumulatedText = "";
@@ -499,6 +520,7 @@ async function processOutputStream(
           const callId = event.content_block.id ?? `tool_${++state.toolCallCounter}`;
           const toolName = event.content_block.name ?? "unknown";
           activeToolCalls.set(callId, toolName);
+          toolIdToName.set(callId, toolName);
           emittedToolCallIds.add(callId);
 
           state.emitter.emit("output", {
@@ -564,6 +586,7 @@ async function processOutputStream(
           if (block.type === "tool_use" && block.name && !emittedDone) {
             const callId = block.id ?? `tool_${++state.toolCallCounter}`;
             activeToolCalls.set(callId, block.name);
+            toolIdToName.set(callId, block.name);
 
             if (block.name === "AskUserQuestion") {
               const input = block.input as { question?: string; options?: { label: string; description?: string }[] } | undefined;
@@ -621,7 +644,9 @@ async function processOutputStream(
           for (const block of content) {
             const tb = block as { type?: string; tool_use_id?: string; content?: unknown; is_error?: boolean };
             if (tb.type === "tool_result" && tb.tool_use_id) {
-              const toolName = activeToolCalls.get(tb.tool_use_id) ?? "unknown";
+              const toolName = activeToolCalls.get(tb.tool_use_id)
+                ?? toolIdToName.get(tb.tool_use_id)
+                ?? "unknown";
               let resultText = "";
               if (typeof tb.content === "string") {
                 resultText = tb.content;
@@ -631,6 +656,8 @@ async function processOutputStream(
                   .map(c => c.text)
                   .join("\n");
               }
+
+              resultText = cleanToolResultText(resultText);
 
               state.emitter.emit("output", {
                 type: "tool_result",

@@ -21,6 +21,24 @@ function formatMcpToolName(name: string): string {
   return parts.join(" > ");
 }
 
+function inferToolName(input: Record<string, unknown> | undefined): string | null {
+  if (!input) return null;
+  if ("command" in input) return "Bash";
+  if ("pattern" in input && ("path" in input || "glob" in input)) return "Grep";
+  if ("glob_pattern" in input) return "Glob";
+  if ("old_string" in input && "new_string" in input) return "Edit";
+  if ("file_path" in input && "content" in input) return "Write";
+  if ("file_path" in input) return "Read";
+  return null;
+}
+
+function resolveToolName(parsed: ParsedOutput): string {
+  const name = parsed.toolName;
+  if (name && name !== "unknown") return name;
+  const input = parsed.toolInput as Record<string, unknown> | undefined;
+  return inferToolName(input) ?? "Tool";
+}
+
 function getToolIcon(name: string) {
   if (isMcpTool(name)) return <Plug className="h-3.5 w-3.5" />;
   switch (name) {
@@ -44,8 +62,21 @@ function StatusBadge({ status }: { status?: string }) {
   return <Check className="h-3.5 w-3.5 text-bot-green" />;
 }
 
+const SDK_CONFIRMATION_RE = /^The file .+ has been (updated|created|written) successfully\.?$/;
+const STACK_TRACE_RE = /\n\s+at\s+\S/;
+
+function sanitizeResult(result: string | undefined): string | null {
+  if (!result) return null;
+  if (SDK_CONFIRMATION_RE.test(result.trim())) return null;
+  if (result.trim() === "Interrupted") return null;
+  if (STACK_TRACE_RE.test(result)) {
+    return result.split("\n")[0] || result;
+  }
+  return result;
+}
+
 function ToolDetail({ parsed }: { parsed: ParsedOutput }) {
-  const toolName = parsed.toolName ?? "";
+  const toolName = resolveToolName(parsed);
   const input = parsed.toolInput as Record<string, unknown> | undefined;
   const result = parsed.toolResult;
   const exitCode = parsed.exitCode;
@@ -79,11 +110,13 @@ function ToolDetail({ parsed }: { parsed: ParsedOutput }) {
     );
   }
 
-  if (result) {
+  const cleanResult = sanitizeResult(result);
+
+  if (cleanResult) {
     return (
       <div className="p-3 bg-bot-bg/40 rounded-lg">
         <pre className="text-caption font-mono text-bot-text whitespace-pre-wrap break-words max-h-60 overflow-y-auto">
-          {result}
+          {cleanResult}
         </pre>
       </div>
     );
@@ -113,9 +146,9 @@ export const ToolCallBlock = memo(function ToolCallBlock({ parsed }: ToolCallBlo
     prevStatus.current = parsed.toolStatus;
   }, [parsed.toolStatus]);
 
-  const rawToolName = parsed.toolName ?? "Tool";
+  const rawToolName = resolveToolName(parsed);
   const toolName = isMcpTool(rawToolName) ? formatMcpToolName(rawToolName) : rawToolName;
-  const hasDetail = parsed.toolResult || parsed.toolInput;
+  const hasDetail = !!(sanitizeResult(parsed.toolResult) || parsed.toolInput);
 
   return (
     <div className="my-1 rounded-xl border border-bot-border/20 bg-bot-elevated/30 backdrop-blur-sm overflow-hidden transition-all duration-200 hover:border-bot-border/40">
