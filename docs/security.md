@@ -61,6 +61,15 @@ This prevents a basePath/slug information leak: without the firewall, Next.js se
 
 The firewall rules are applied using `ufw` (preferred) or `iptables` (fallback). If neither is available, the installer prints a warning.
 
+## nginx Hardening
+
+When nginx is the front door (domain setup), the generated config includes:
+
+- **`server_tokens off`** -- hides the nginx version from response headers (`Server: nginx` instead of `Server: nginx/1.24.0 (Ubuntu)`).
+- **`/api/w` proxy block** -- routes widget endpoints (`/api/w.js` and `/api/w/init`) through nginx to the app on localhost. This allows the widget to work through port 443 so that port 3000 can be firewalled without breaking the embeddable chat widget.
+
+These directives are written by both `install.sh` (during initial nginx setup) and `scripts/setup-domain.sh` (when configuring a domain via the Settings UI).
+
 ## Security Log
 
 The Security section in Settings includes a log viewer that shows security events such as blocked commands, guard rail violations, and IP blocks.

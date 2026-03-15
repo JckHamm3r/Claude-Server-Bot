@@ -88,6 +88,16 @@ cat > "$nginx_conf" <<NGINX
 server {
     listen 80;
     server_name $DOMAIN;
+    server_tokens off;
+
+    location /api/w {
+        proxy_pass ${UPSTREAM_SCHEME}://127.0.0.1:$PORT;${PROXY_SSL_EXTRA}
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
 
     location ~ ^${LOCATION_PATH}(api|socket\.io|_next)/ {
         proxy_pass ${UPSTREAM_SCHEME}://127.0.0.1:$PORT;${PROXY_SSL_EXTRA}
