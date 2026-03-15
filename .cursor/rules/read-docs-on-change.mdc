@@ -1,0 +1,23 @@
+---
+description: Always read feature docs before implementing changes
+alwaysApply: true
+---
+
+# Read Feature Docs Before Changes
+
+Before implementing any fix, change, or new feature, **always read `docs/README.md` first**. This is the primary documentation index for the platform.
+
+## Workflow
+
+1. **Read `docs/README.md`** — It contains a Feature Index table with one-line descriptions and links to individual feature docs.
+2. **Identify relevant sub-docs** — Based on the change you're about to make, find which feature docs apply (e.g., if touching sessions, read `docs/sessions-and-chat.md`; if touching security, read `docs/security.md`).
+3. **Read those sub-docs** — They contain detailed behavior descriptions, key file paths, database tables, socket events, and configuration options.
+4. **Implement the change** — Now that you understand the documented behavior, make the change.
+5. **Update the docs** — If your change alters documented behavior, update the relevant `docs/*.md` file(s) to reflect the new state. If you add an entirely new feature that doesn't fit an existing doc, create a new doc in `docs/` and add it to the Feature Index in `docs/README.md`.
+
+## Rules
+
+- Do not guess about how a feature works — look it up in the docs first.
+- The `docs/` folder is the canonical feature reference. `.claude/docs/` is a separate internal AI reference and serves a different purpose.
+- Keep individual docs focused on one feature area.
+- When adding a new doc, follow the same structure as existing ones (overview, capabilities, key files, database tables, socket events).
