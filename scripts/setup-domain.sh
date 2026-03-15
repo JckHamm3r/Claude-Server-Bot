@@ -177,4 +177,20 @@ if command -v ufw &>/dev/null && ufw status | grep -q "active"; then
   ufw allow 443/tcp >/dev/null 2>&1 || true
 fi
 
+# Block external access to the app port — nginx is now the only entry point.
+# This prevents the Next.js 404 page from leaking the basePath/slug to anyone
+# who hits the app port directly.
+if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
+  ufw delete allow "$PORT/tcp" >/dev/null 2>&1 || true
+  ufw deny in on any to any port "$PORT" proto tcp >/dev/null 2>&1 || true
+  ufw allow in on lo to any port "$PORT" proto tcp >/dev/null 2>&1 || true
+elif command -v iptables &>/dev/null; then
+  iptables -D INPUT -p tcp --dport "$PORT" -j ACCEPT 2>/dev/null || true
+  iptables -C INPUT -i lo -p tcp --dport "$PORT" -j ACCEPT 2>/dev/null || \
+    iptables -I INPUT -i lo -p tcp --dport "$PORT" -j ACCEPT 2>/dev/null || true
+  iptables -C INPUT -p tcp --dport "$PORT" -j DROP 2>/dev/null || \
+    iptables -A INPUT -p tcp --dport "$PORT" -j DROP 2>/dev/null || true
+  command -v iptables-save &>/dev/null && sh -c 'iptables-save > /etc/iptables/rules.v4' 2>/dev/null || true
+fi
+
 json_ok

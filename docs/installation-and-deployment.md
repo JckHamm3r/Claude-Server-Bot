@@ -49,6 +49,7 @@ Configures a custom domain with SSL:
 1. Installs and configures nginx as a reverse proxy
 2. Sets up certbot for Let's Encrypt SSL certificates
 3. Updates the application's `NEXTAUTH_URL` to use the new domain
+4. Blocks external access to the app port (only localhost allowed) to prevent basePath/slug leakage via the Next.js 404 page
 
 ## Environment Variables
 

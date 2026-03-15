@@ -53,6 +53,14 @@ Tracks failed login attempts per IP address and automatically blocks IPs that ex
 
 Admins can view blocked IPs and manually unblock them from the Security section in Settings.
 
+## App Port Firewall
+
+When nginx is configured (either during installation or via the domain setup script), the app's direct port (default 3000) is automatically blocked from external access. Only localhost (`127.0.0.1`) can reach the app port; all external traffic must go through nginx on ports 80/443.
+
+This prevents a basePath/slug information leak: without the firewall, Next.js serves a 404 page on any request to the app port, and that 404 page embeds the full `assetPrefix` (which contains the secret URL slug) in every `<script>` and `<link>` tag. Blocking external access to the port eliminates this vector.
+
+The firewall rules are applied using `ufw` (preferred) or `iptables` (fallback). If neither is available, the installer prints a warning.
+
 ## Security Log
 
 The Security section in Settings includes a log viewer that shows security events such as blocked commands, guard rail violations, and IP blocks.

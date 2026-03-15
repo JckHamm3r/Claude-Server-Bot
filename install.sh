@@ -1147,6 +1147,28 @@ generate_selfsigned_cert() {
   info "Self-signed cert generated (365 days)"
 }
 
+restrict_app_port() {
+  local port="$1"
+  if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
+    sudo ufw delete allow "$port/tcp" > /dev/null 2>&1 || true
+    sudo ufw deny in on any to any port "$port" proto tcp > /dev/null 2>&1 || true
+    sudo ufw allow in on lo to any port "$port" proto tcp > /dev/null 2>&1 || true
+    info "Firewall: port $port blocked externally (localhost only)"
+  elif command -v iptables &>/dev/null; then
+    sudo iptables -D INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null || true
+    sudo iptables -C INPUT -i lo -p tcp --dport "$port" -j ACCEPT 2>/dev/null || \
+      sudo iptables -I INPUT -i lo -p tcp --dport "$port" -j ACCEPT 2>/dev/null || true
+    sudo iptables -C INPUT -p tcp --dport "$port" -j DROP 2>/dev/null || \
+      sudo iptables -A INPUT -p tcp --dport "$port" -j DROP 2>/dev/null || true
+    if command -v iptables-save &>/dev/null; then
+      sudo sh -c 'iptables-save > /etc/iptables/rules.v4' 2>/dev/null || true
+    fi
+    info "Firewall: port $port blocked externally (localhost only)"
+  else
+    warn "No firewall tool found — port $port is exposed. Consider installing ufw."
+  fi
+}
+
 setup_nginx() {
   if ! command -v nginx &>/dev/null; then install_pkg nginx; fi
   local nginx_conf nginx_link=""
@@ -1232,6 +1254,11 @@ fs.writeFileSync(envPath, env);
     sudo ufw allow 443/tcp > /dev/null 2>&1 || true
     info "UFW rules added"
   fi
+
+  # Block external access to the app port — nginx is now the only entry point.
+  # This prevents the Next.js 404 page from leaking the basePath/slug to anyone
+  # who hits the app port directly.
+  restrict_app_port "$PORT"
 }
 
 setup_cloudflare_tunnel() {
