@@ -656,15 +656,15 @@ async function processOutputStream(
           } as ParsedOutput);
         }
 
-        // Emit final text to finalize the message (replaces streaming message
-        // on the client). Use lastStreamedText when available since it reflects
-        // the full content from streaming/assistant events; fall back to the
-        // result text for non-streaming responses.
-        const finalText = lastStreamedText || resultMsg.result;
-        if (finalText) {
+        // Only emit a text event when there was no streaming — the client
+        // already has the content from streaming events and will finalize
+        // the message when "done" arrives.  Emitting a duplicate text event
+        // when streaming already delivered the content causes the client to
+        // render two copies of the response.
+        if (!lastStreamedText && resultMsg.result) {
           state.emitter.emit("output", {
             type: "text",
-            content: finalText,
+            content: resultMsg.result,
           } as ParsedOutput);
         }
 

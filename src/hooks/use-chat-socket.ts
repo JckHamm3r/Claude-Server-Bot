@@ -461,6 +461,7 @@ export function useChatSocket({
         watchdogChecksRef.current = 0;
 
         if (parsed.type === "done") {
+          const streamId = streamingMsgIdRef.current;
           streamingMsgIdRef.current = null;
           clearEditRecoveryTimer();
           setCurrentActivity(null);
@@ -475,7 +476,6 @@ export function useChatSocket({
           });
 
           if (waitingOnUser) {
-            // Don't mark done or drain queue — user still needs to approve/answer
             return;
           }
 
@@ -486,7 +486,16 @@ export function useChatSocket({
             if (last?.parsed?.type === "error" && last.parsed.retryable) {
               return finalizeRunningTools(prev);
             }
-            const resolved = finalizeRunningTools(prev);
+            // Finalize any streaming message into a "text" type so it
+            // gets the usage badge and timestamp footer in the UI.
+            let resolved = finalizeRunningTools(prev);
+            if (streamId) {
+              resolved = resolved.map((m) =>
+                m.id === streamId && m.parsed?.type === "streaming"
+                  ? { ...m, parsed: { ...m.parsed, type: "text" } }
+                  : m,
+              );
+            }
             return [
               ...resolved,
               {
@@ -625,7 +634,18 @@ export function useChatSocket({
 
         setMessages((prev) => {
           const refId = streamingMsgIdRef.current;
-          const idx = refId ? prev.findIndex((m) => m.id === refId) : -1;
+          let idx = refId ? prev.findIndex((m) => m.id === refId) : -1;
+          // Fallback: find the last streaming/text message with matching content
+          // to prevent duplicate entries when the ref was already cleared.
+          if (idx < 0 && parsed.type === "text" && parsed.content) {
+            for (let i = prev.length - 1; i >= 0; i--) {
+              const m = prev[i];
+              if (m.sender_type === "claude" && (m.parsed?.type === "streaming" || m.parsed?.type === "text") && m.content === parsed.content) {
+                idx = i;
+                break;
+              }
+            }
+          }
           const finalMsg: ChatMessage = {
             id: idx >= 0 ? prev[idx].id : crypto.randomUUID(),
             sender_type: "claude",
