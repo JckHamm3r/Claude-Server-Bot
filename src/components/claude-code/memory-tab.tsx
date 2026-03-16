@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { apiUrl } from "@/lib/utils";
+import { MonacoEditor } from "./monaco-editor";
+import { Loader2 } from "lucide-react";
 
 const FRIENDLY_NAMES: Record<string, string> = {
   "CLAUDE.md": "Project Instructions (CLAUDE.md)",
@@ -177,29 +179,29 @@ export function MemoryTab() {
             </div>
           )}
 
-          <div className="flex-1 min-h-0 overflow-hidden relative">
+          <div className="flex-1 min-h-0 overflow-hidden relative" style={{ background: "#0a0a10" }}>
             {loadingFile && (
-              <div className="absolute inset-0 flex items-center justify-center bg-bot-bg/80 backdrop-blur-sm z-10">
-                <div className="flex items-center gap-2 text-caption text-bot-muted">
-                  <span className="h-2 w-2 rounded-full bg-bot-accent animate-bounce [animation-delay:0ms]" />
-                  <span className="h-2 w-2 rounded-full bg-bot-accent/70 animate-bounce [animation-delay:150ms]" />
-                  <span className="h-2 w-2 rounded-full bg-bot-accent/40 animate-bounce [animation-delay:300ms]" />
-                </div>
+              <div className="absolute inset-0 flex items-center justify-center bg-[#0a0a10]/90 backdrop-blur-sm z-10">
+                <Loader2 className="h-5 w-5 animate-spin text-bot-muted" />
               </div>
             )}
-            <textarea
-              className="w-full h-full resize-none bg-transparent text-bot-text font-mono text-caption p-4 outline-none border-none leading-relaxed"
-              value={content}
-              onChange={(e) => {
-                if (!isAdmin) return;
-                setContent(e.target.value);
-                if (saveState === "saved" || saveState === "error") setSaveState("idle");
-              }}
-              spellCheck={false}
-              disabled={loadingFile || !activeFile}
-              readOnly={!isAdmin}
-              placeholder={activeFile ? "File is empty." : "Select a file from the sidebar."}
-            />
+            {!activeFile ? (
+              <div className="flex items-center justify-center h-full text-caption text-bot-muted italic">
+                Select a file from the sidebar.
+              </div>
+            ) : (
+              <MonacoEditor
+                value={content}
+                onChange={(v) => {
+                  if (!isAdmin) return;
+                  setContent(v);
+                  if (saveState === "saved" || saveState === "error") setSaveState("idle");
+                }}
+                filePath={activeFile}
+                readOnly={!isAdmin}
+                onSave={isAdmin ? handleSave : undefined}
+              />
+            )}
           </div>
         </div>
       </div>

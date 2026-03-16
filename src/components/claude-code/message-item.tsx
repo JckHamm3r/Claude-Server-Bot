@@ -375,7 +375,9 @@ export const MessageItem = memo(function MessageItem({
 
   const isStreaming = message.parsed?.type === "streaming" && isLatest;
   const content = message.content ?? message.parsed?.content ?? "";
-  const displayContent = isStreaming ? content + "\u258C" : content;
+  // Don't append cursor to the markdown string — it can corrupt code fences mid-stream.
+  // Render it as a separate element after ReactMarkdown instead.
+  const displayContent = content;
   const canEdit = isUser && onEdit && !isRunning;
   const canDelete = onDelete && !isRunning;
 
@@ -498,10 +500,11 @@ export const MessageItem = memo(function MessageItem({
                 ))}
               </div>
             )}
-            <div className="whitespace-pre-wrap break-words [&_p]:mb-1 [&_p:last-child]:mb-0">
+            <div className="break-words [&_p]:mb-1 [&_p:last-child]:mb-0">
               <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={sharedMarkdownComponents}>
                 {displayContent}
               </ReactMarkdown>
+              {isStreaming && <span className="inline-block text-bot-accent animate-pulse ml-0.5">{"\u258C"}</span>}
             </div>
           </div>
           <div className="mt-0.5 text-right opacity-0 group-hover:opacity-100 transition-all duration-200">
@@ -528,6 +531,7 @@ export const MessageItem = memo(function MessageItem({
           <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={sharedMarkdownComponents}>
             {displayContent}
           </ReactMarkdown>
+          {isStreaming && <span className="inline-block text-bot-accent animate-pulse ml-0.5">{"\u258C"}</span>}
           {message.parsed?.type === "text" && (
             <div className="mt-2 flex items-center justify-between pt-1.5 border-t border-bot-border/15">
               <TokenBadge metadata={message.metadata} />
