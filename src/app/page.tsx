@@ -9,17 +9,21 @@ import { PlanModeTab } from "@/components/claude-code/plan-mode-tab";
 import { MemoryTab } from "@/components/claude-code/memory-tab";
 import { SettingsPanel } from "@/components/claude-code/settings-panel";
 import { TerminalTab } from "@/components/claude-code/terminal-tab";
-import { MessageSquare, Bot, ListChecks, Brain, Settings, TerminalSquare } from "lucide-react";
+import { FilesTab } from "@/components/claude-code/files-tab";
+import { MessageSquare, Bot, ListChecks, Brain, Settings, TerminalSquare, FolderTree } from "lucide-react";
 import { motion } from "framer-motion";
 import { NotificationBell } from "@/components/claude-code/notification-bell";
+import { useUserProfile } from "@/hooks/use-user-profile";
+import { LEVEL_VISIBLE_TABS } from "@/lib/user-profile-constants";
 
-type TabKey = "chat" | "agents" | "plan" | "memory" | "settings" | "terminal";
+type TabKey = "chat" | "agents" | "plan" | "memory" | "settings" | "terminal" | "files";
 
-const BASE_TABS: { key: TabKey; label: string; icon: typeof MessageSquare; adminOnly?: boolean }[] = [
+const ALL_TABS: { key: TabKey; label: string; icon: typeof MessageSquare; adminOnly?: boolean }[] = [
   { key: "chat", label: "Chat", icon: MessageSquare },
   { key: "agents", label: "Agents", icon: Bot },
   { key: "plan", label: "Plan Mode", icon: ListChecks },
   { key: "memory", label: "Memory", icon: Brain },
+  { key: "files", label: "Files", icon: FolderTree, adminOnly: true },
   { key: "settings", label: "Settings", icon: Settings },
   { key: "terminal", label: "Terminal", icon: TerminalSquare, adminOnly: true },
 ];
@@ -27,7 +31,14 @@ const BASE_TABS: { key: TabKey; label: string; icon: typeof MessageSquare; admin
 export default function DashboardPage() {
   const { data: session } = useSession();
   const isAdmin = Boolean((session?.user as { isAdmin?: boolean })?.isAdmin);
-  const TABS = BASE_TABS.filter((t) => !t.adminOnly || isAdmin);
+  const profile = useUserProfile();
+  const levelKey = profile.experience_level as keyof typeof LEVEL_VISIBLE_TABS;
+  const allowedTabKeys = LEVEL_VISIBLE_TABS[levelKey] ?? LEVEL_VISIBLE_TABS.expert;
+
+  const TABS = ALL_TABS.filter((t) => {
+    if (t.adminOnly && !isAdmin) return false;
+    return allowedTabKeys.includes(t.key);
+  });
 
   const [activeTab, setActiveTab] = useState<TabKey>("chat");
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -91,6 +102,7 @@ export default function DashboardPage() {
         {activeTab === "plan" && <PlanModeTab />}
         {activeTab === "memory" && <MemoryTab />}
         {activeTab === "settings" && <SettingsPanel />}
+        {activeTab === "files" && <FilesTab />}
         {activeTab === "terminal" && <TerminalTab isAdmin={isAdmin} />}
       </div>
     </div>

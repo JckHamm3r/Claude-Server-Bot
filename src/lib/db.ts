@@ -105,6 +105,11 @@ db.exec(`
       custom_default_context TEXT,
       auto_naming_enabled INTEGER NOT NULL DEFAULT 1,
       setup_complete INTEGER NOT NULL DEFAULT 0,
+      experience_level TEXT NOT NULL DEFAULT 'expert',
+      server_purposes TEXT NOT NULL DEFAULT '[]',
+      project_type TEXT NOT NULL DEFAULT '',
+      auto_summary INTEGER NOT NULL DEFAULT 1,
+      profile_wizard_complete INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -115,6 +120,17 @@ db.exec(`
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+
+// Add user profile columns for existing databases (safe no-ops if already present)
+for (const migration of [
+  "ALTER TABLE user_settings ADD COLUMN experience_level TEXT NOT NULL DEFAULT 'expert'",
+  "ALTER TABLE user_settings ADD COLUMN server_purposes TEXT NOT NULL DEFAULT '[]'",
+  "ALTER TABLE user_settings ADD COLUMN project_type TEXT NOT NULL DEFAULT ''",
+  "ALTER TABLE user_settings ADD COLUMN auto_summary INTEGER NOT NULL DEFAULT 1",
+  "ALTER TABLE user_settings ADD COLUMN profile_wizard_complete INTEGER NOT NULL DEFAULT 0",
+]) {
+  try { db.exec(migration); } catch { /* column already exists */ }
+}
 
 // New Phase-2 tables
 db.exec(`

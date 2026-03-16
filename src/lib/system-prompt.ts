@@ -11,6 +11,41 @@ interface BuildSystemPromptOpts {
   personality?: string;
   personalityCustom?: string;
   templateSystemPrompt?: string;
+  experienceLevel?: string;
+  autoSummary?: boolean;
+}
+
+function getExperienceLevelInstruction(level: string, autoSummary: boolean): string {
+  const summaryNote = autoSummary
+    ? "After completing any task or group of actions, always provide a brief summary of what was done."
+    : "";
+
+  switch (level) {
+    case "beginner":
+      return [
+        "COMMUNICATION STYLE: Beginner user. Always use plain, everyday language.",
+        "- Never use technical jargon (nginx, reverse proxy, environment variable, daemon, cron, etc.) without explaining it first.",
+        "- Explain what you're about to do BEFORE doing it, in simple terms.",
+        "- Compare technical things to familiar real-world concepts when helpful.",
+        "- Prefer simple, proven solutions over complex ones.",
+        summaryNote,
+      ].filter(Boolean).join("\n");
+
+    case "intermediate":
+      return [
+        "COMMUNICATION STYLE: Intermediate user. Mix technical clarity with context.",
+        "- Use technical terms for common concepts (git, npm, etc.), but explain unfamiliar infrastructure/server concepts.",
+        "- Explain the reasoning behind non-obvious architectural decisions.",
+        summaryNote,
+      ].filter(Boolean).join("\n");
+
+    default: // expert
+      return [
+        "COMMUNICATION STYLE: Expert user. Be concise and fully technical.",
+        "- No explanations needed for standard concepts. Skip hand-holding.",
+        summaryNote,
+      ].filter(Boolean).join("\n");
+  }
 }
 
 /**
@@ -77,6 +112,8 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
     personality,
     personalityCustom,
     templateSystemPrompt,
+    experienceLevel = "expert",
+    autoSummary = true,
   } = opts;
 
   let systemPrompt: string | undefined;
@@ -91,6 +128,8 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
     if (selfIdentity) parts.push(selfIdentity);
     const personalityPrefix = getPersonalityPrefix(personality ?? "professional", personalityCustom);
     if (personalityPrefix) parts.push(personalityPrefix);
+    const levelInstruction = getExperienceLevelInstruction(experienceLevel, autoSummary);
+    if (levelInstruction) parts.push(levelInstruction);
     systemPrompt = parts.length > 0 ? parts.join("\n\n") : undefined;
   }
 
