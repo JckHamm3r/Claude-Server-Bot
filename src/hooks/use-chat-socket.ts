@@ -125,7 +125,7 @@ export interface UseChatSocketReturn {
   handleConfirm: (sessionId: string, value: boolean) => void;
   handleAllowTool: (sessionId: string, toolName: string, scope: "session" | "once", toolCallId?: string, messageId?: string) => void;
   handleAnswerQuestion: (sessionId: string, answer: string) => void;
-  handleAlwaysAllow: (sessionId: string, toolName: string, command: string, toolCallId?: string) => void;
+  handleAlwaysAllow: (sessionId: string, toolName: string, command: string, toolCallId?: string, messageId?: string) => void;
   handleEditMessage: (messageId: string, newContent: string) => void;
   handleDeleteMessage: (messageId: string) => void;
   handleEditQueueItem: (index: number, newContent: string) => void;
@@ -753,6 +753,7 @@ export function useChatSocket({
             id: "compact-" + Date.now(),
             sender_type: "claude",
             content: "Context window compacted. Summary of previous conversation has been preserved.",
+            parsed: { type: "text", content: "Context window compacted. Summary of previous conversation has been preserved." },
             timestamp: new Date().toISOString(),
           },
         ]);
@@ -850,6 +851,7 @@ export function useChatSocket({
         id: "budget-warning-" + Date.now(),
         sender_type: "claude",
         content,
+        parsed: { type: "text", content },
         timestamp: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, msg]);
@@ -1046,16 +1048,20 @@ export function useChatSocket({
   );
 
   const handleAlwaysAllow = useCallback(
-    (sessionId: string, _toolName: string, command: string, toolCallId?: string) => {
+    (sessionId: string, _toolName: string, command: string, toolCallId?: string, messageId?: string) => {
       emit("claude:always_allow_command", { pattern: command.trim().split(/\s+/)[0] });
       emit("claude:allow_tool", { sessionId, toolName: "Bash", scope: "once", toolCallId });
       setPendingInteractions((prev) => {
         const next = new Map(prev);
-        // Remove the entry for this permission card
-        for (const [msgId, type] of next) {
-          if (type === "permission_request") {
-            next.delete(msgId);
-            break;
+        if (messageId) {
+          next.delete(messageId);
+        } else {
+          // Fallback: remove the first permission_request found
+          for (const [msgId, type] of next) {
+            if (type === "permission_request") {
+              next.delete(msgId);
+              break;
+            }
           }
         }
         if (next.size === 0) {
@@ -1070,6 +1076,7 @@ export function useChatSocket({
   const handleEditMessage = useCallback(
     (messageId: string, newContent: string) => {
       if (!activeSession) return;
+      lastUserMsgRef.current = newContent;
       emit("claude:edit_message", { sessionId: activeSession.id, messageId, newContent });
     },
     [activeSession, emit],

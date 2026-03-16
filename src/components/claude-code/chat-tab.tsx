@@ -260,6 +260,7 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
       skipPermissions: activeSession.skip_permissions,
       model: activeSession.model,
       provider_type: activeSession.provider_type,
+      personality: activeSession.personality ?? "professional",
     });
   }, [activeSession, chat]);
 

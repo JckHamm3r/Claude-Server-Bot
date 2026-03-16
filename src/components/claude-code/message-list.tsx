@@ -375,7 +375,11 @@ export function MessageList({
         </button>
       )}
 
-      <ActivityStrip activity={currentActivity ?? null} isRunning={isRunning ?? false} runStartTime={runStartTime ?? null} />
+      <ActivityStrip
+        activity={currentActivity ?? null}
+        isRunning={(isRunning ?? false) && messages[messages.length - 1]?.parsed?.type !== "streaming"}
+        runStartTime={runStartTime ?? null}
+      />
     </div>
   );
 }
