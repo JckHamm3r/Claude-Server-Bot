@@ -4,7 +4,9 @@ Admin-only terminal access to the server via Socket.IO. Provides a direct shell 
 
 ## Access
 
-Only users with the `is_admin` flag can open and use the PTY terminal. Non-admin users do not see the terminal option.
+The Terminal tab appears in the main navigation bar only for admin users. Non-admin users do not see the tab.
+
+Only users with the `is_admin` flag can open and use the PTY terminal.
 
 ## How It Works
 

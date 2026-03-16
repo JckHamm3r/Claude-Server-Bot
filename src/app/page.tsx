@@ -1,27 +1,34 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useSession } from "next-auth/react";
 import { cn } from "@/lib/utils";
 import { ChatTab } from "@/components/claude-code/chat-tab";
 import { AgentsTab } from "@/components/claude-code/agents-tab";
 import { PlanModeTab } from "@/components/claude-code/plan-mode-tab";
 import { MemoryTab } from "@/components/claude-code/memory-tab";
 import { SettingsPanel } from "@/components/claude-code/settings-panel";
-import { MessageSquare, Bot, ListChecks, Brain, Settings } from "lucide-react";
+import { TerminalTab } from "@/components/claude-code/terminal-tab";
+import { MessageSquare, Bot, ListChecks, Brain, Settings, TerminalSquare } from "lucide-react";
 import { motion } from "framer-motion";
 import { NotificationBell } from "@/components/claude-code/notification-bell";
 
-type TabKey = "chat" | "agents" | "plan" | "memory" | "settings";
+type TabKey = "chat" | "agents" | "plan" | "memory" | "settings" | "terminal";
 
-const TABS: { key: TabKey; label: string; icon: typeof MessageSquare }[] = [
+const BASE_TABS: { key: TabKey; label: string; icon: typeof MessageSquare; adminOnly?: boolean }[] = [
   { key: "chat", label: "Chat", icon: MessageSquare },
   { key: "agents", label: "Agents", icon: Bot },
   { key: "plan", label: "Plan Mode", icon: ListChecks },
   { key: "memory", label: "Memory", icon: Brain },
   { key: "settings", label: "Settings", icon: Settings },
+  { key: "terminal", label: "Terminal", icon: TerminalSquare, adminOnly: true },
 ];
 
 export default function DashboardPage() {
+  const { data: session } = useSession();
+  const isAdmin = Boolean((session?.user as { isAdmin?: boolean })?.isAdmin);
+  const TABS = BASE_TABS.filter((t) => !t.adminOnly || isAdmin);
+
   const [activeTab, setActiveTab] = useState<TabKey>("chat");
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [indicatorStyle, setIndicatorStyle] = useState({ left: 0, width: 0 });
@@ -84,6 +91,7 @@ export default function DashboardPage() {
         {activeTab === "plan" && <PlanModeTab />}
         {activeTab === "memory" && <MemoryTab />}
         {activeTab === "settings" && <SettingsPanel />}
+        {activeTab === "terminal" && <TerminalTab isAdmin={isAdmin} />}
       </div>
     </div>
   );
