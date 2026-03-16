@@ -51,7 +51,15 @@ export async function middleware(request: NextRequest) {
 
     const setupComplete = token.setupComplete === true ||
       request.cookies.get("bot_setup_complete")?.value === "1";
-    if (!setupComplete && pathname !== "/setup" && !pathname.startsWith("/api/settings/project") && !pathname.startsWith("/api/claude-code/test") && !pathname.startsWith("/api/setup/")) {
+    if (
+      !setupComplete &&
+      pathname !== "/setup" &&
+      !pathname.startsWith("/api/settings/project") &&
+      !pathname.startsWith("/api/claude-code/test") &&
+      !pathname.startsWith("/api/setup/") &&
+      !pathname.startsWith("/api/app-settings") &&
+      !pathname.startsWith("/api/users/profile")
+    ) {
       const setupUrl = new URL(`${basePath}/setup`, origin);
       return NextResponse.redirect(setupUrl);
     }

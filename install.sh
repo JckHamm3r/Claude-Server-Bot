@@ -841,29 +841,10 @@ screen_configure() {
   fi
   info "Base URL: $BASE_URL"
 
-  # Anthropic API key
-  echo ""
+  # API key is optional at install time — pass --api-key for automated installs;
+  # otherwise the web setup wizard will prompt for it on first login.
   if [ -n "$CLI_API_KEY" ]; then
-    info "Anthropic API key provided"
-  elif ! $UNATTENDED; then
-    echo -e "  ${BOLD}Enter your Anthropic API key${NC}"
-    echo -e "  ${DIM}Get one at: https://console.anthropic.com/settings/keys${NC}"
-    echo ""
-    if [ "$CURRENT_SCREEN" -gt 1 ] && [ "$CURRENT_SCREEN" -le "$MAX_COLLECTION_STEP" ]; then
-      hint "Type 'b' to go back"
-    fi
-    read -r -p "  API key (sk-ant-...): " api_key_input
-    if [[ "$api_key_input" == "b" || "$api_key_input" == "B" ]]; then
-      NEXT_STEP=1; return
-    fi
-    if [ -n "$api_key_input" ]; then
-      CLI_API_KEY="$api_key_input"
-      info "API key accepted"
-    else
-      warn "No API key entered — the bot cannot chat with Claude until one is added in Settings."
-    fi
-  else
-    warn "No --api-key provided. Add one in Settings after install."
+    info "Anthropic API key provided via --api-key (will be written to .env)"
   fi
 
   NEXT_STEP=3
@@ -1638,8 +1619,8 @@ show_completion_summary() {
     copy_to_clipboard "$ADMIN_PASSWORD" && echo -e "  ${DIM}│${NC}  ${GREEN}✓${NC} Password copied to clipboard"
     echo -e "  ${DIM}│${NC}  ${RED}${BOLD}Save this password — it won't be shown again${NC}"
     echo -e "  ${DIM}│${NC}                                                ${DIM}│${NC}"
-    echo -e "  ${DIM}│${NC}  ${DIM}Log in to finish setup (name your bot, API key,${NC}  ${DIM}│${NC}"
-    echo -e "  ${DIM}│${NC}  ${DIM}experience level) in the web interface.${NC}         ${DIM}│${NC}"
+    echo -e "  ${DIM}│${NC}  ${DIM}Log in to finish setup — the web wizard will${NC}    ${DIM}│${NC}"
+    echo -e "  ${DIM}│${NC}  ${DIM}ask for your API key, bot name & preferences.${NC}  ${DIM}│${NC}"
     echo -e "  ${DIM}└────────────────────────────────────────────────┘${NC}"
     echo ""
   } > "$_cred_out"
