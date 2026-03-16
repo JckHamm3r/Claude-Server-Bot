@@ -79,7 +79,7 @@ confirm() {
 }
 
 has_sudo() {
-  command -v sudo &>/dev/null
+  command -v sudo &>/dev/null && sudo -n true 2>/dev/null
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -175,6 +175,13 @@ if command -v ufw &>/dev/null && has_sudo; then
   else
     echo -e "  ${DIM}No UFW rules found for ports 80/443${NC}"
   fi
+  # Also remove port-blocking deny rule for the app port
+  APP_PORT="3000"
+  if [ -f "$INSTALL_DIR/.env" ]; then
+    APP_PORT="$(grep -E '^PORT=' "$INSTALL_DIR/.env" 2>/dev/null | cut -d= -f2 || echo "3000")"
+  fi
+  sudo ufw delete deny in on any to any port "$APP_PORT" proto tcp 2>/dev/null || true
+  sudo ufw delete allow in on lo to any port "$APP_PORT" proto tcp 2>/dev/null || true
 else
   echo -e "  ${DIM}UFW not present or no sudo${NC}"
 fi
@@ -187,6 +194,16 @@ if [ -f "$SUDOERS_FILE" ] && has_sudo; then
   info "sudoers entry removed"
 else
   echo -e "  ${DIM}No sudoers entry found${NC}"
+fi
+
+# ─── Remove setup-domain.sh from system bin ───────────────────────────────
+SETUP_DOMAIN_BIN="/usr/local/bin/setup-domain.sh"
+if [ -f "$SETUP_DOMAIN_BIN" ] && has_sudo; then
+  echo "  Removing $SETUP_DOMAIN_BIN..."
+  sudo rm -f "$SETUP_DOMAIN_BIN"
+  info "setup-domain.sh removed from system"
+else
+  echo -e "  ${DIM}No system setup-domain.sh found${NC}"
 fi
 
 # ─── Remove Cloudflare tunnel config ─────────────────────────────────────
@@ -220,15 +237,18 @@ fi
 
 # ─── Handle data directory ────────────────────────────────────────────────
 DATA_PATH="$INSTALL_DIR/data"
+KEEP_DATA_EFFECTIVELY=false
 if [ -d "$DATA_PATH" ]; then
   if $KEEP_DATA; then
     warn "Keeping data directory: $DATA_PATH"
+    KEEP_DATA_EFFECTIVELY=true
   elif confirm "Remove data directory? (database, sessions, uploads)" "n"; then
     echo "  Removing data directory..."
     rm -rf "$DATA_PATH"
     info "Data directory removed"
   else
     warn "Keeping data directory: $DATA_PATH"
+    KEEP_DATA_EFFECTIVELY=true
   fi
 else
   echo -e "  ${DIM}No data directory found${NC}"
@@ -240,6 +260,13 @@ if confirm "Remove the entire install directory ($INSTALL_DIR)?" "n"; then
   if [ -z "$INSTALL_DIR" ] || [ "$INSTALL_DIR" = "/" ] || [ "$INSTALL_DIR" = "$HOME" ]; then
     error "Refusing to delete '$INSTALL_DIR' — safety check failed"
     exit 1
+  fi
+  if $KEEP_DATA_EFFECTIVELY && [ -d "$DATA_PATH" ]; then
+    # Move data out before removing the install dir
+    local_data_backup="$(dirname "$INSTALL_DIR")/claude-server-bot-data-backup-$(date +%Y%m%d-%H%M%S)"
+    echo "  Moving data to $local_data_backup before removing install dir..."
+    mv "$DATA_PATH" "$local_data_backup"
+    warn "Data preserved at: $local_data_backup"
   fi
   echo "  Removing install directory..."
   # If we're inside the directory, move out first
