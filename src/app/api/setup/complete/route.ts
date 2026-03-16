@@ -16,9 +16,12 @@ export async function POST(_req: NextRequest) {
   }
 
   const requester = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(session.user.email) as { is_admin: number } | undefined;
-  if (!requester?.is_admin) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+
+  // The full setup wizard (API key, bot name, project dir) is admin-only.
+  // Non-admin users should never reach this via the wizard, but if they somehow
+  // do (e.g. direct URL navigation), mark them as complete so they aren't stuck.
+  // Only admin users get the cookie that gates the global setup state.
+  const isAdmin = Boolean(requester?.is_admin);
 
   try {
     await updateUserSettings(session.user.email, { setup_complete: true });
@@ -27,14 +30,18 @@ export async function POST(_req: NextRequest) {
     return NextResponse.json({ error: "Setup completion failed" }, { status: 500 });
   }
 
-  // Return response with cookie to signal setup is done
   const response = NextResponse.json({ ok: true });
-  response.cookies.set("bot_setup_complete", "1", {
-    httpOnly: true,
-    path: "/",
-    maxAge: 60 * 60 * 24 * 365, // 1 year
-    sameSite: "lax",
-    secure: isHttps(),
-  });
+
+  // Set the long-lived cookie only for admins (it signals the global setup is done)
+  if (isAdmin) {
+    response.cookies.set("bot_setup_complete", "1", {
+      httpOnly: true,
+      path: "/",
+      maxAge: 60 * 60 * 24 * 365, // 1 year
+      sameSite: "lax",
+      secure: isHttps(),
+    });
+  }
+
   return response;
 }

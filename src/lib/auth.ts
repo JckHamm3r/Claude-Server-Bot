@@ -138,10 +138,22 @@ export const authOptions: NextAuthOptions = {
           if (row) {
             token.isAdmin = Boolean(row.is_admin);
           }
-          const settings = db.prepare("SELECT setup_complete FROM user_settings WHERE email = ?").get(token.email as string) as
-            | { setup_complete: number }
-            | undefined;
-          token.setupComplete = settings ? Boolean(settings.setup_complete) : false;
+
+          // Non-admin users don't go through the setup wizard.
+          // Auto-mark their setup_complete on first encounter so the middleware
+          // never redirects them to /setup.
+          if (!token.isAdmin) {
+            token.setupComplete = true;
+            // Persist the flag so it survives JWT refreshes
+            db.prepare("INSERT OR IGNORE INTO user_settings (email) VALUES (?)").run(token.email as string);
+            db.prepare("UPDATE user_settings SET setup_complete = 1 WHERE email = ?").run(token.email as string);
+          } else {
+            const settings = db.prepare("SELECT setup_complete FROM user_settings WHERE email = ?").get(token.email as string) as
+              | { setup_complete: number }
+              | undefined;
+            token.setupComplete = settings ? Boolean(settings.setup_complete) : false;
+          }
+
           token.lastRefresh = Date.now();
         } catch {
           // DB unavailable in edge runtime — keep existing value

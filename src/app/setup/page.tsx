@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { CheckCircle2, XCircle, Loader2, Key, Sparkles, ChevronRight, Server } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -53,6 +55,8 @@ function recommendLevel(answers: (boolean | null)[]): ExperienceLevel {
 
 export default function SetupPage() {
   const bp = getBasePath();
+  const { data: session, status } = useSession();
+  const router = useRouter();
   const [step, setStep] = useState<Step>(1);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -104,6 +108,13 @@ export default function SetupPage() {
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Guard: non-admin users should never see this page — redirect to dashboard
+  useEffect(() => {
+    if (status === "authenticated" && !(session?.user as { isAdmin?: boolean })?.isAdmin) {
+      router.replace(bp || "/");
+    }
+  }, [status, session, router, bp]);
 
   async function checkProject(path: string) {
     if (!path) return;
@@ -238,6 +249,11 @@ export default function SetupPage() {
   }, [bp, level, selectedPurposes, customPurpose, projectType]);
 
   const progressPercent = ((step - 1) / (STEPS.length - 1)) * 100;
+
+  // Show blank while checking admin status (avoids a flash of the wizard for non-admin users)
+  if (status === "loading" || (status === "authenticated" && !(session?.user as { isAdmin?: boolean })?.isAdmin)) {
+    return null;
+  }
 
   return (
     <main className="min-h-screen gradient-mesh-bg flex flex-col items-center justify-center px-4 py-12 relative overflow-hidden">
