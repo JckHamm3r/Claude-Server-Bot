@@ -16,6 +16,9 @@ import {
   Brain,
   ChevronDown,
   ChevronRight,
+  BookOpen,
+  Sparkles,
+  RotateCcw,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -60,7 +63,7 @@ function formatDate(iso: string): string {
   }
 }
 
-// ── Memory Item Card ──────────────────────────────────────────────────────────
+// ── Memory Item ───────────────────────────────────────────────────────────────
 
 interface MemoryItemProps {
   memory: Memory;
@@ -71,57 +74,63 @@ interface MemoryItemProps {
   onDelete: (id: string) => void;
 }
 
-function MemoryItemCard({ memory, isAdmin, isExpanded, onToggle, onEdit, onDelete }: MemoryItemProps) {
+function MemoryItem({ memory, isAdmin, isExpanded, onToggle, onEdit, onDelete }: MemoryItemProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   return (
-    <div className="border border-bot-border/30 rounded-xl bg-bot-surface/40 hover:bg-bot-surface/60 transition-all duration-200 overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2.5 cursor-pointer select-none" onClick={onToggle}>
-        <button
-          className="text-bot-muted hover:text-bot-text transition-colors shrink-0"
-          onClick={(e) => { e.stopPropagation(); onToggle(); }}
-          aria-label={isExpanded ? "Collapse" : "Expand"}
-        >
+    <div className="group border border-bot-border/25 rounded-lg bg-bot-surface/30 hover:bg-bot-surface/50 hover:border-bot-border/40 transition-all duration-150 overflow-hidden">
+      <div
+        className="flex items-center gap-2.5 px-3.5 py-2.5 cursor-pointer select-none"
+        onClick={onToggle}
+      >
+        <span className="text-bot-muted/50 group-hover:text-bot-muted transition-colors shrink-0">
           {isExpanded ? (
             <ChevronDown className="h-3.5 w-3.5" />
           ) : (
             <ChevronRight className="h-3.5 w-3.5" />
           )}
-        </button>
-        <Brain className="h-3.5 w-3.5 text-bot-accent/70 shrink-0" />
-        <span className="flex-1 text-caption font-medium text-bot-text truncate">{memory.title}</span>
-        <span className="text-[11px] text-bot-muted/60 shrink-0 hidden sm:block">{formatDate(memory.updated_at)}</span>
+        </span>
+        <Brain className="h-3.5 w-3.5 text-bot-accent/60 shrink-0" />
+        <span className="flex-1 text-[13px] font-medium text-bot-text truncate leading-snug">
+          {memory.title}
+        </span>
+        <span className="text-[11px] text-bot-muted/50 shrink-0 hidden sm:block">
+          {formatDate(memory.updated_at)}
+        </span>
         {isAdmin && (
-          <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+            onClick={(e) => e.stopPropagation()}
+          >
             <button
               onClick={() => onEdit(memory)}
-              className="p-1 rounded text-bot-muted hover:text-bot-accent hover:bg-bot-accent/10 transition-all"
-              title="Edit memory"
+              className="p-1 rounded-md text-bot-muted hover:text-bot-accent hover:bg-bot-accent/10 transition-all"
+              title="Edit"
             >
               <Pencil className="h-3 w-3" />
             </button>
             {confirmDelete ? (
-              <div className="flex items-center gap-1">
+              <>
                 <button
                   onClick={() => onDelete(memory.id)}
-                  className="p-1 rounded text-bot-red hover:bg-bot-red/10 transition-all"
+                  className="p-1 rounded-md text-bot-red hover:bg-bot-red/10 transition-all"
                   title="Confirm delete"
                 >
                   <Check className="h-3 w-3" />
                 </button>
                 <button
                   onClick={() => setConfirmDelete(false)}
-                  className="p-1 rounded text-bot-muted hover:bg-bot-elevated/40 transition-all"
+                  className="p-1 rounded-md text-bot-muted hover:bg-bot-elevated/40 transition-all"
                   title="Cancel"
                 >
                   <X className="h-3 w-3" />
                 </button>
-              </div>
+              </>
             ) : (
               <button
                 onClick={() => setConfirmDelete(true)}
-                className="p-1 rounded text-bot-muted hover:text-bot-red hover:bg-bot-red/10 transition-all"
-                title="Delete memory"
+                className="p-1 rounded-md text-bot-muted hover:text-bot-red hover:bg-bot-red/10 transition-all"
+                title="Delete"
               >
                 <Trash2 className="h-3 w-3" />
               </button>
@@ -130,8 +139,8 @@ function MemoryItemCard({ memory, isAdmin, isExpanded, onToggle, onEdit, onDelet
         )}
       </div>
       {isExpanded && (
-        <div className="px-4 pb-3 border-t border-bot-border/20 mt-0.5 pt-2.5">
-          <pre className="text-caption text-bot-text/80 whitespace-pre-wrap font-sans leading-relaxed">
+        <div className="px-4 pb-3.5 pt-2 border-t border-bot-border/15 bg-bot-bg/30">
+          <pre className="text-[12.5px] text-bot-text/75 whitespace-pre-wrap font-sans leading-relaxed">
             {memory.content}
           </pre>
         </div>
@@ -147,15 +156,26 @@ interface MemoryEditModalProps {
   onSave: (title: string, content: string) => void;
   onClose: () => void;
   saving: boolean;
+  error: string | null;
 }
 
-function MemoryEditModal({ memory, onSave, onClose, saving }: MemoryEditModalProps) {
+function MemoryEditModal({ memory, onSave, onClose, saving, error }: MemoryEditModalProps) {
   const [title, setTitle] = useState(memory?.title ?? "");
   const [content, setContent] = useState(memory?.content ?? "");
   const titleRef = useRef<HTMLInputElement>(null);
 
+  // Refactor state
+  const [refactoring, setRefactoring] = useState(false);
+  const [refactorError, setRefactorError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ title: string; content: string } | null>(null);
+  const [botName, setBotName] = useState("AI");
+
   useEffect(() => {
     titleRef.current?.focus();
+    fetch(apiUrl("/api/bot-identity"))
+      .then((r) => r.json())
+      .then((d: { name?: string }) => { if (d.name) setBotName(d.name); })
+      .catch(() => { /* keep default */ });
   }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -164,57 +184,191 @@ function MemoryEditModal({ memory, onSave, onClose, saving }: MemoryEditModalPro
     onSave(title.trim(), content);
   };
 
+  const handleRefactor = async () => {
+    if (!title.trim() && !content.trim()) return;
+    setRefactoring(true);
+    setRefactorError(null);
+    setPreview(null);
+    try {
+      const res = await fetch(apiUrl("/api/claude-code/memories/refactor"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, content }),
+      });
+      const data = await res.json() as { title?: string; content?: string; error?: string };
+      if (!res.ok || data.error) {
+        setRefactorError(data.error ?? "Refactor failed.");
+        return;
+      }
+      if (data.title && data.content) {
+        setPreview({ title: data.title, content: data.content });
+      }
+    } catch {
+      setRefactorError("Network error. Please try again.");
+    } finally {
+      setRefactoring(false);
+    }
+  };
+
+  const applyPreview = () => {
+    if (!preview) return;
+    setTitle(preview.title);
+    setContent(preview.content);
+    setPreview(null);
+  };
+
+  const dismissPreview = () => setPreview(null);
+
+  const hasContent = title.trim() || content.trim();
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-2xl bg-bot-surface border border-bot-border/40 rounded-2xl shadow-2xl flex flex-col max-h-[85vh]">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-bot-border/30">
-          <h2 className="text-body font-semibold text-bot-text">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+      <div className="w-full max-w-xl bg-bot-surface border border-bot-border/40 rounded-2xl shadow-2xl flex flex-col max-h-[88vh]">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-bot-border/30">
+          <h2 className="text-[14px] font-semibold text-bot-text">
             {memory ? "Edit Memory" : "New Memory"}
           </h2>
-          <button onClick={onClose} className="p-1.5 rounded-lg text-bot-muted hover:text-bot-text hover:bg-bot-elevated/40 transition-all">
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-bot-muted hover:text-bot-text hover:bg-bot-elevated/40 transition-all"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
+
         <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
-          <div className="px-5 py-3 border-b border-bot-border/20">
-            <label className="block text-[11px] uppercase tracking-wider text-bot-muted font-semibold mb-1.5">
-              Title
-            </label>
-            <input
-              ref={titleRef}
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Short descriptive title…"
-              className="w-full px-3 py-2 rounded-lg bg-bot-bg border border-bot-border/30 text-body text-bot-text placeholder:text-bot-muted/50 focus:outline-none focus:border-bot-accent/50 focus:ring-1 focus:ring-bot-accent/20 transition-all"
-            />
+          <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
+            {/* Title */}
+            <div className="px-5 pt-4 pb-3">
+              <input
+                ref={titleRef}
+                value={title}
+                onChange={(e) => { setTitle(e.target.value); setPreview(null); }}
+                placeholder="Title — short and descriptive"
+                className="w-full px-3 py-2 rounded-lg bg-bot-bg border border-bot-border/30 text-[13px] text-bot-text placeholder:text-bot-muted/40 focus:outline-none focus:border-bot-accent/50 focus:ring-1 focus:ring-bot-accent/20 transition-all"
+              />
+            </div>
+
+            {/* Content */}
+            <div className="flex flex-col px-5 pb-3">
+              <textarea
+                value={content}
+                onChange={(e) => { setContent(e.target.value); setPreview(null); }}
+                placeholder="Memory content…"
+                className="min-h-[140px] w-full px-3 py-2.5 rounded-lg bg-bot-bg border border-bot-border/30 text-[12.5px] text-bot-text placeholder:text-bot-muted/40 focus:outline-none focus:border-bot-accent/50 focus:ring-1 focus:ring-bot-accent/20 transition-all resize-none font-mono leading-relaxed"
+              />
+            </div>
+
+            {/* AI Refactor preview */}
+            {preview && (
+              <div className="mx-5 mb-3 rounded-xl border border-bot-accent/25 bg-bot-accent/5 overflow-hidden">
+                <div className="flex items-center justify-between px-3.5 py-2 border-b border-bot-accent/15">
+                  <div className="flex items-center gap-1.5">
+                    <Sparkles className="h-3.5 w-3.5 text-bot-accent" />
+                    <span className="text-[11.5px] font-semibold text-bot-accent">{botName} suggestion</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={dismissPreview}
+                    className="p-1 rounded text-bot-muted/60 hover:text-bot-muted transition-colors"
+                    title="Dismiss"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+                <div className="px-3.5 py-3 space-y-2">
+                  <div>
+                    <p className="text-[10.5px] uppercase tracking-wider text-bot-muted/50 font-semibold mb-0.5">Title</p>
+                    <p className="text-[12.5px] font-medium text-bot-text">{preview.title}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10.5px] uppercase tracking-wider text-bot-muted/50 font-semibold mb-0.5">Content</p>
+                    <pre className="text-[12px] text-bot-text/80 whitespace-pre-wrap font-sans leading-relaxed">
+                      {preview.content}
+                    </pre>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 px-3.5 py-2.5 border-t border-bot-accent/15">
+                  <button
+                    type="button"
+                    onClick={applyPreview}
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-[12px] font-semibold gradient-accent text-white shadow-glow-sm hover:brightness-110 active:scale-[0.98] transition-all"
+                  >
+                    <Check className="h-3 w-3" />
+                    Apply
+                  </button>
+                  <button
+                    type="button"
+                    onClick={dismissPreview}
+                    className="px-3 py-1 rounded-lg text-[12px] text-bot-muted hover:text-bot-text hover:bg-bot-elevated/30 transition-all"
+                  >
+                    Keep mine
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Errors */}
+            {(error || refactorError) && (
+              <div className="mx-5 mb-3 px-3 py-2 rounded-lg bg-bot-red/10 border border-bot-red/20 text-bot-red text-[12px]">
+                {error ?? refactorError}
+              </div>
+            )}
           </div>
-          <div className="flex flex-col flex-1 min-h-0 px-5 py-3">
-            <label className="block text-[11px] uppercase tracking-wider text-bot-muted font-semibold mb-1.5">
-              Content
-            </label>
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="Enter the memory content…"
-              className="flex-1 min-h-[200px] w-full px-3 py-2 rounded-lg bg-bot-bg border border-bot-border/30 text-caption text-bot-text placeholder:text-bot-muted/50 focus:outline-none focus:border-bot-accent/50 focus:ring-1 focus:ring-bot-accent/20 transition-all resize-none font-mono leading-relaxed"
-            />
-          </div>
-          <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-bot-border/30">
+
+          {/* Footer */}
+          <div className="flex items-center justify-between gap-2 px-5 py-3.5 border-t border-bot-border/25 shrink-0">
+            {/* Refactor button — left side */}
             <button
               type="button"
-              onClick={onClose}
-              className="px-4 py-2 rounded-lg text-caption text-bot-muted hover:text-bot-text hover:bg-bot-elevated/40 transition-all"
+              onClick={handleRefactor}
+              disabled={!hasContent || refactoring || saving}
+              title={`Ask ${botName} to rewrite this memory for clarity and precision`}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] text-bot-muted hover:text-bot-accent hover:bg-bot-accent/8 border border-bot-border/25 hover:border-bot-accent/30 disabled:opacity-40 transition-all duration-150"
             >
-              Cancel
+              {refactoring ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Refactoring…
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Refactor with {botName}
+                </>
+              )}
             </button>
-            <button
-              type="submit"
-              disabled={!title.trim() || saving}
-              className="px-4 py-2 rounded-lg text-caption font-semibold gradient-accent text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] disabled:opacity-50 transition-all duration-200 flex items-center gap-2"
-            >
-              {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              {memory ? "Save Changes" : "Create Memory"}
-            </button>
+
+            {/* Cancel / Save — right side */}
+            <div className="flex items-center gap-2">
+              {preview && (
+                <button
+                  type="button"
+                  onClick={handleRefactor}
+                  disabled={refactoring || saving}
+                  title="Re-run refactor"
+                  className="p-1.5 rounded-lg text-bot-muted/60 hover:text-bot-muted hover:bg-bot-elevated/30 transition-all"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-1.5 rounded-lg text-[12.5px] text-bot-muted hover:text-bot-text hover:bg-bot-elevated/40 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!title.trim() || saving}
+                className="px-4 py-1.5 rounded-lg text-[12.5px] font-semibold gradient-accent text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] disabled:opacity-50 transition-all duration-200 flex items-center gap-1.5"
+              >
+                {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {memory ? "Save" : "Create"}
+              </button>
+            </div>
           </div>
         </form>
       </div>
@@ -237,9 +391,7 @@ function ImportModal({ onImport, onClose, importing, importError }: ImportModalP
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = (file: File) => {
-    if (!file.name.endsWith(".md") && !file.type.includes("text")) {
-      return;
-    }
+    if (!file.name.endsWith(".md") && !file.type.includes("text")) return;
     const reader = new FileReader();
     reader.onload = (e) => setText(e.target?.result as string ?? "");
     reader.readAsText(file);
@@ -253,37 +405,40 @@ function ImportModal({ onImport, onClose, importing, importError }: ImportModalP
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-2xl bg-bot-surface border border-bot-border/40 rounded-2xl shadow-2xl flex flex-col max-h-[85vh]">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-bot-border/30">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+      <div className="w-full max-w-xl bg-bot-surface border border-bot-border/40 rounded-2xl shadow-2xl flex flex-col max-h-[80vh]">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-bot-border/30">
           <div>
-            <h2 className="text-body font-semibold text-bot-text">Import from Markdown</h2>
-            <p className="text-[11px] text-bot-muted mt-0.5">
-              AI will analyze your .md file and extract individual memories automatically.
+            <h2 className="text-[14px] font-semibold text-bot-text">Import from Markdown</h2>
+            <p className="text-[11px] text-bot-muted/70 mt-0.5">
+              AI extracts individual memory items from your file automatically.
             </p>
           </div>
-          <button onClick={onClose} disabled={importing} className="p-1.5 rounded-lg text-bot-muted hover:text-bot-text hover:bg-bot-elevated/40 transition-all">
+          <button
+            onClick={onClose}
+            disabled={importing}
+            className="p-1.5 rounded-lg text-bot-muted hover:text-bot-text hover:bg-bot-elevated/40 transition-all"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="flex flex-col flex-1 min-h-0 p-5 gap-4 overflow-y-auto">
-          {/* Drop zone */}
+        <div className="flex flex-col flex-1 min-h-0 p-5 gap-3.5 overflow-y-auto">
           <div
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
             onDrop={handleDrop}
             onClick={() => fileInputRef.current?.click()}
             className={[
-              "border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all duration-200",
+              "border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-all duration-200",
               dragOver
                 ? "border-bot-accent bg-bot-accent/5"
-                : "border-bot-border/40 hover:border-bot-accent/40 hover:bg-bot-elevated/20",
+                : "border-bot-border/30 hover:border-bot-accent/40 hover:bg-bot-elevated/10",
             ].join(" ")}
           >
-            <Upload className="h-6 w-6 mx-auto mb-2 text-bot-muted" />
-            <p className="text-caption text-bot-muted">
-              Drop a <span className="text-bot-accent">.md file</span> here, or click to browse
+            <Upload className="h-5 w-5 mx-auto mb-1.5 text-bot-muted/60" />
+            <p className="text-[12.5px] text-bot-muted/70">
+              Drop a <span className="text-bot-accent font-medium">.md file</span> here, or click to browse
             </p>
             <input
               ref={fileInputRef}
@@ -294,50 +449,42 @@ function ImportModal({ onImport, onClose, importing, importError }: ImportModalP
             />
           </div>
 
-          {/* Manual text area */}
           <div>
-            <label className="block text-[11px] uppercase tracking-wider text-bot-muted font-semibold mb-1.5">
-              Or paste markdown content
+            <label className="block text-[11px] uppercase tracking-wider text-bot-muted/70 font-semibold mb-1.5">
+              Or paste markdown
             </label>
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder="# My Notes&#10;&#10;## Section 1&#10;Some important context…"
-              className="w-full h-48 px-3 py-2 rounded-lg bg-bot-bg border border-bot-border/30 text-caption text-bot-text placeholder:text-bot-muted/40 focus:outline-none focus:border-bot-accent/50 focus:ring-1 focus:ring-bot-accent/20 transition-all resize-none font-mono"
+              placeholder={"# My Notes\n\n## Section 1\nSome important context…"}
+              className="w-full h-40 px-3 py-2.5 rounded-lg bg-bot-bg border border-bot-border/30 text-[12px] text-bot-text placeholder:text-bot-muted/30 focus:outline-none focus:border-bot-accent/50 focus:ring-1 focus:ring-bot-accent/20 transition-all resize-none font-mono"
             />
           </div>
 
           {importError && (
-            <div className="px-3 py-2 rounded-lg bg-bot-red/10 border border-bot-red/20 text-bot-red text-caption">
+            <div className="px-3 py-2 rounded-lg bg-bot-red/10 border border-bot-red/20 text-bot-red text-[12px]">
               {importError}
             </div>
           )}
-
-          <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-bot-accent/5 border border-bot-accent/10">
-            <Brain className="h-4 w-4 text-bot-accent shrink-0 mt-0.5" />
-            <p className="text-[11px] text-bot-muted/80 leading-relaxed">
-              Claude will read your document and intelligently extract individual memory items, giving each one a descriptive title. It handles any format: headers, lists, paragraphs, or mixed content.
-            </p>
-          </div>
         </div>
 
-        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-bot-border/30">
+        <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-bot-border/25">
           <button
             onClick={onClose}
             disabled={importing}
-            className="px-4 py-2 rounded-lg text-caption text-bot-muted hover:text-bot-text hover:bg-bot-elevated/40 transition-all disabled:opacity-50"
+            className="px-4 py-1.5 rounded-lg text-[12.5px] text-bot-muted hover:text-bot-text hover:bg-bot-elevated/40 transition-all disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             onClick={() => onImport(text)}
             disabled={!text.trim() || importing}
-            className="px-4 py-2 rounded-lg text-caption font-semibold gradient-accent text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] disabled:opacity-50 transition-all duration-200 flex items-center gap-2"
+            className="px-4 py-1.5 rounded-lg text-[12.5px] font-semibold gradient-accent text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] disabled:opacity-50 transition-all duration-200 flex items-center gap-1.5"
           >
             {importing ? (
               <>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Analyzing with AI…
+                Analyzing…
               </>
             ) : (
               <>
@@ -375,7 +522,7 @@ export function MemoryTab() {
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
 
-  // File browser state (secondary tab)
+  // File browser state
   const [mainTab, setMainTab] = useState<MainTab>("memories");
   const [files, setFiles] = useState<string[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
@@ -408,7 +555,7 @@ export function MemoryTab() {
     void loadMemories();
   }, [loadMemories]);
 
-  // ── Load files (for the Files tab) ───────────────────────────────────────
+  // ── Load files ────────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (mainTab !== "files") return;
@@ -462,15 +609,13 @@ export function MemoryTab() {
           setTimeout(() => setFileSaveState("idle"), 2500);
         } else {
           setFileSaveState("error");
-          if (r.status === 403) {
-            setFileLoadError("Save requires admin access.");
-          }
+          if (r.status === 403) setFileLoadError("Save requires admin access.");
         }
       })
       .catch(() => setFileSaveState("error"));
   }, [activeFile, fileContent]);
 
-  // ── Memory CRUD ──────────────────────────────────────────────────────────
+  // ── Memory CRUD ───────────────────────────────────────────────────────────
 
   const handleSaveMemory = useCallback(async (title: string, content: string) => {
     setEditSaving(true);
@@ -513,9 +658,7 @@ export function MemoryTab() {
         setMemories((prev) => prev.filter((m) => m.id !== id));
         setExpandedIds((prev) => { const s = new Set(prev); s.delete(id); return s; });
       }
-    } catch {
-      // silent
-    }
+    } catch { /* silent */ }
   }, []);
 
   const toggleExpand = useCallback((id: string) => {
@@ -527,7 +670,7 @@ export function MemoryTab() {
     });
   }, []);
 
-  // ── Import ───────────────────────────────────────────────────────────────
+  // ── Import ────────────────────────────────────────────────────────────────
 
   const handleImport = useCallback(async (content: string) => {
     if (!content.trim()) return;
@@ -547,7 +690,7 @@ export function MemoryTab() {
       }
       if (data.memories && data.memories.length > 0) {
         setMemories((prev) => [...data.memories!, ...prev]);
-        setImportSuccess(`Imported ${data.count} ${data.count === 1 ? "memory" : "memories"} successfully.`);
+        setImportSuccess(`Imported ${data.count} ${data.count === 1 ? "memory" : "memories"}.`);
         setShowImport(false);
         setTimeout(() => setImportSuccess(null), 4000);
       }
@@ -558,32 +701,25 @@ export function MemoryTab() {
     }
   }, []);
 
-  // ── Render ───────────────────────────────────────────────────────────────
-
-  const fileSaveBtnClass =
-    fileSaveState === "error"
-      ? "px-4 py-1.5 rounded-lg text-caption font-semibold bg-bot-red text-white"
-      : fileSaveState === "saved"
-        ? "px-4 py-1.5 rounded-lg text-caption font-semibold bg-bot-green text-white shadow-[0_0_12px_2px_rgb(var(--bot-green)/0.2)]"
-        : "px-4 py-1.5 rounded-lg text-caption font-semibold gradient-accent text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] disabled:opacity-50 transition-all duration-200";
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* Tab selector */}
-      <div className="flex items-center gap-1 px-4 py-2.5 border-b border-bot-border/30 bg-bot-surface/50 shrink-0">
+    <div className="flex flex-col h-full overflow-hidden bg-bot-bg">
+      {/* Top navigation */}
+      <div className="flex items-center gap-0.5 px-3 py-2 border-b border-bot-border/25 bg-bot-surface/40 shrink-0">
         <button
           onClick={() => setMainTab("memories")}
           className={[
-            "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-caption font-medium transition-all duration-200",
+            "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-medium transition-all duration-150",
             mainTab === "memories"
-              ? "bg-bot-accent/10 text-bot-accent shadow-glow-sm"
+              ? "bg-bot-accent/10 text-bot-accent"
               : "text-bot-muted hover:text-bot-text hover:bg-bot-elevated/30",
           ].join(" ")}
         >
           <Brain className="h-3.5 w-3.5" />
           Memories
           {memories.length > 0 && (
-            <span className="text-[10px] bg-bot-accent/20 text-bot-accent rounded-full px-1.5 py-0.5 font-semibold">
+            <span className="ml-0.5 text-[10px] bg-bot-accent/15 text-bot-accent rounded-full px-1.5 py-0.5 font-semibold leading-none">
               {memories.length}
             </span>
           )}
@@ -591,9 +727,9 @@ export function MemoryTab() {
         <button
           onClick={() => setMainTab("files")}
           className={[
-            "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-caption font-medium transition-all duration-200",
+            "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-medium transition-all duration-150",
             mainTab === "files"
-              ? "bg-bot-accent/10 text-bot-accent shadow-glow-sm"
+              ? "bg-bot-accent/10 text-bot-accent"
               : "text-bot-muted hover:text-bot-text hover:bg-bot-elevated/30",
           ].join(" ")}
         >
@@ -602,86 +738,86 @@ export function MemoryTab() {
         </button>
       </div>
 
-      {/* ── Memories Tab ─────────────────────────────────────────────────── */}
+      {/* ── Memories Tab ─────────────────────────────────────────────────────── */}
       {mainTab === "memories" && (
         <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-          {/* Header bar */}
-          <div className="flex items-center justify-between px-4 py-2.5 border-b border-bot-border/30 bg-bot-surface/30 shrink-0">
-            <div>
-              <span className="text-caption text-bot-muted/80">
-                Individual memory items used as project context for Claude.
-              </span>
-            </div>
+          {/* Toolbar */}
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-bot-border/20 shrink-0">
+            <p className="text-[12px] text-bot-muted/60 leading-snug">
+              Injected into every session&apos;s system prompt as ground truth.
+            </p>
             {isAdmin && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 <button
                   onClick={() => { setShowImport(true); setImportError(null); }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-caption text-bot-muted hover:text-bot-accent hover:bg-bot-accent/10 border border-bot-border/30 hover:border-bot-accent/30 transition-all duration-200"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] text-bot-muted hover:text-bot-text hover:bg-bot-elevated/30 border border-bot-border/25 hover:border-bot-border/40 transition-all duration-150"
                 >
-                  <Upload className="h-3.5 w-3.5" />
-                  Import .md
+                  <Upload className="h-3 w-3" />
+                  Import
                 </button>
                 <button
                   onClick={() => { setEditModal({ open: true, memory: null }); setEditError(null); }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-caption font-semibold gradient-accent text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] transition-all duration-200"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] font-semibold gradient-accent text-white shadow-glow-sm hover:brightness-110 active:scale-[0.98] transition-all duration-150"
                 >
-                  <Plus className="h-3.5 w-3.5" />
-                  Add Memory
+                  <Plus className="h-3 w-3" />
+                  New
                 </button>
               </div>
             )}
           </div>
 
-          {/* Import success banner */}
+          {/* Success banner */}
           {importSuccess && (
-            <div className="flex items-center gap-2 px-4 py-2 bg-bot-green/10 border-b border-bot-green/20 text-bot-green text-caption shrink-0">
-              <Check className="h-3.5 w-3.5" />
+            <div className="flex items-center gap-2 px-4 py-2 bg-bot-green/8 border-b border-bot-green/15 text-bot-green text-[12px] shrink-0">
+              <Check className="h-3.5 w-3.5 shrink-0" />
               {importSuccess}
             </div>
           )}
 
-          {/* Memories list */}
-          <div className="flex-1 overflow-y-auto p-4">
+          {/* List */}
+          <div className="flex-1 overflow-y-auto">
             {memoriesLoading ? (
               <div className="flex items-center justify-center h-32">
-                <Loader2 className="h-5 w-5 animate-spin text-bot-muted" />
+                <Loader2 className="h-5 w-5 animate-spin text-bot-muted/40" />
               </div>
             ) : memoriesError ? (
-              <div className="text-center py-8 text-bot-red text-caption">{memoriesError}</div>
+              <div className="text-center py-10 text-bot-red text-[12.5px]">{memoriesError}</div>
             ) : memories.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-48 gap-3 text-center">
-                <Brain className="h-10 w-10 text-bot-muted/30" />
+              <div className="flex flex-col items-center justify-center h-full min-h-[200px] gap-3 px-6 text-center">
+                <div className="p-3 rounded-xl bg-bot-elevated/20 border border-bot-border/20">
+                  <BookOpen className="h-7 w-7 text-bot-muted/30" />
+                </div>
                 <div>
-                  <p className="text-body text-bot-muted font-medium">No memories yet</p>
-                  <p className="text-caption text-bot-muted/60 mt-1">
+                  <p className="text-[13px] font-medium text-bot-muted/60">No memories yet</p>
+                  <p className="text-[11.5px] text-bot-muted/40 mt-0.5">
                     {isAdmin
-                      ? "Add individual memories or import from a .md file."
+                      ? "Add memories to give Claude persistent project knowledge."
                       : "No memories have been added yet."}
                   </p>
                 </div>
                 {isAdmin && (
-                  <div className="flex items-center gap-2 mt-2">
+                  <div className="flex items-center gap-2 mt-1">
                     <button
                       onClick={() => setShowImport(true)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-caption text-bot-muted hover:text-bot-accent hover:bg-bot-accent/10 border border-bot-border/30 hover:border-bot-accent/30 transition-all"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] text-bot-muted hover:text-bot-text hover:bg-bot-elevated/30 border border-bot-border/25 transition-all"
                     >
-                      <Upload className="h-3.5 w-3.5" />
+                      <Upload className="h-3 w-3" />
                       Import .md
                     </button>
                     <button
                       onClick={() => setEditModal({ open: true, memory: null })}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-caption font-semibold gradient-accent text-white shadow-glow-sm hover:brightness-110 transition-all"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold gradient-accent text-white shadow-glow-sm hover:brightness-110 transition-all"
                     >
-                      <Plus className="h-3.5 w-3.5" />
+                      <Plus className="h-3 w-3" />
                       Add Memory
                     </button>
                   </div>
                 )}
               </div>
             ) : (
-              <div className="flex flex-col gap-2">
+              <div className="p-3 flex flex-col gap-1.5">
                 {memories.map((memory) => (
-                  <MemoryItemCard
+                  <MemoryItem
                     key={memory.id}
                     memory={memory}
                     isAdmin={isAdmin}
@@ -697,21 +833,22 @@ export function MemoryTab() {
         </div>
       )}
 
-      {/* ── Context Files Tab ─────────────────────────────────────────────── */}
+      {/* ── Context Files Tab ─────────────────────────────────────────────────── */}
       {mainTab === "files" && (
         <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-2.5 bg-bot-amber/5 border-b border-bot-border/30 shrink-0">
-            <span className="text-bot-amber font-bold text-body">⚠</span>
-            <span className="text-caption text-bot-amber/80">
-              These files guide Claude&apos;s behavior. Edit carefully.
+          <div className="flex items-center gap-2 px-4 py-2 border-b border-bot-border/20 shrink-0">
+            <span className="text-[11px] font-semibold text-bot-amber/70 uppercase tracking-wider">Caution</span>
+            <span className="text-[11.5px] text-bot-muted/50">
+              These files directly influence Claude&apos;s behavior.
             </span>
           </div>
           <div className="flex flex-1 min-h-0 overflow-hidden">
-            <aside className="w-60 shrink-0 flex flex-col border-r border-bot-border/30 bg-bot-surface/60 backdrop-blur-sm overflow-y-auto">
-              <div className="px-3 py-2.5 border-b border-bot-border/30">
-                <span className="text-caption text-bot-muted uppercase tracking-wider font-semibold">Files</span>
+            {/* Sidebar */}
+            <aside className="w-52 shrink-0 flex flex-col border-r border-bot-border/20 bg-bot-surface/30 overflow-y-auto">
+              <div className="px-3 pt-3 pb-1.5">
+                <span className="text-[10.5px] text-bot-muted/50 uppercase tracking-wider font-semibold">Files</span>
               </div>
-              <ul className="flex-1 py-1">
+              <ul className="flex-1 px-1.5 pb-2">
                 {files.map((file) => {
                   const isActive = file === activeFile;
                   return (
@@ -719,10 +856,10 @@ export function MemoryTab() {
                       <button
                         onClick={() => setActiveFile(file)}
                         className={[
-                          "w-full text-left px-3 py-2.5 mx-1 rounded-lg text-caption transition-all duration-200",
+                          "w-full text-left px-2.5 py-2 rounded-lg text-[12px] transition-all duration-150 truncate",
                           isActive
-                            ? "bg-bot-accent/10 text-bot-accent font-medium shadow-glow-sm"
-                            : "text-bot-text hover:bg-bot-elevated/40",
+                            ? "bg-bot-accent/10 text-bot-accent font-medium"
+                            : "text-bot-text/70 hover:text-bot-text hover:bg-bot-elevated/30",
                         ].join(" ")}
                       >
                         {friendlyName(file)}
@@ -731,42 +868,53 @@ export function MemoryTab() {
                   );
                 })}
                 {files.length === 0 && (
-                  <li className="px-3 py-4 text-caption text-bot-muted italic text-center">
+                  <li className="px-3 py-4 text-[12px] text-bot-muted/40 italic text-center">
                     No files found.
                   </li>
                 )}
               </ul>
             </aside>
-            <div className="flex flex-col flex-1 min-w-0 bg-bot-bg overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-2.5 border-b border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm shrink-0">
-                <span className="text-body text-bot-text font-semibold truncate">
+
+            {/* Editor area */}
+            <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-2.5 border-b border-bot-border/20 bg-bot-surface/20 shrink-0">
+                <span className="text-[13px] font-medium text-bot-text truncate">
                   {activeFile ? friendlyName(activeFile) : "No file selected"}
                 </span>
                 {isAdmin ? (
                   <button
                     onClick={handleFileSave}
                     disabled={!activeFile || fileSaveState === "saving" || loadingFile}
-                    className={fileSaveBtnClass}
+                    className={[
+                      "px-3 py-1 rounded-lg text-[12px] font-semibold transition-all disabled:opacity-40",
+                      fileSaveState === "error"
+                        ? "bg-bot-red text-white"
+                        : fileSaveState === "saved"
+                          ? "bg-bot-green text-white"
+                          : "gradient-accent text-white shadow-glow-sm hover:brightness-110 active:scale-[0.98]",
+                    ].join(" ")}
                   >
                     {{ idle: "Save", saving: "Saving…", saved: "Saved ✓", error: "Error" }[fileSaveState]}
                   </button>
                 ) : (
-                  <span className="text-caption text-bot-muted/60 italic">Read-only</span>
+                  <span className="text-[11px] text-bot-muted/40 italic">Read-only</span>
                 )}
               </div>
+
               {fileLoadError && (
-                <div className="px-4 py-2 bg-bot-red/5 border-b border-bot-border/30 text-bot-red text-caption shrink-0">
+                <div className="px-4 py-2 bg-bot-red/5 border-b border-bot-border/20 text-bot-red text-[12px] shrink-0">
                   {fileLoadError}
                 </div>
               )}
+
               <div className="flex-1 min-h-0 overflow-hidden relative" style={{ background: "#0a0a10" }}>
                 {loadingFile && (
                   <div className="absolute inset-0 flex items-center justify-center bg-[#0a0a10]/90 backdrop-blur-sm z-10">
-                    <Loader2 className="h-5 w-5 animate-spin text-bot-muted" />
+                    <Loader2 className="h-5 w-5 animate-spin text-bot-muted/40" />
                   </div>
                 )}
                 {!activeFile ? (
-                  <div className="flex items-center justify-center h-full text-caption text-bot-muted italic">
+                  <div className="flex items-center justify-center h-full text-[12.5px] text-bot-muted/30 italic">
                     Select a file from the sidebar.
                   </div>
                 ) : (
@@ -788,19 +936,15 @@ export function MemoryTab() {
         </div>
       )}
 
-      {/* ── Modals ────────────────────────────────────────────────────────── */}
+      {/* ── Modals ────────────────────────────────────────────────────────────── */}
       {editModal.open && (
         <MemoryEditModal
           memory={editModal.memory}
           onSave={handleSaveMemory}
           onClose={() => setEditModal({ open: false, memory: null })}
           saving={editSaving}
+          error={editError}
         />
-      )}
-      {editError && (
-        <div className="fixed bottom-4 right-4 z-50 px-4 py-3 rounded-xl bg-bot-red/10 border border-bot-red/20 text-bot-red text-caption shadow-lg">
-          {editError}
-        </div>
       )}
 
       {showImport && (
