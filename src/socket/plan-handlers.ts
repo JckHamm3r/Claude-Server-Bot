@@ -10,13 +10,12 @@ import {
   getPlan,
   getSession,
   updatePlanStatus,
-  listPlans,
+  listPlansForUser,
   addPlanStep,
   getPlanSteps,
   updatePlanStep,
   deletePlanSteps,
   deletePlan,
-  canAccessSession,
   isUserAdmin,
 } from "../lib/claude-db";
 import { logActivity } from "../lib/activity-log";
@@ -170,10 +169,12 @@ Return only the JSON object, no markdown, no explanation.`;
     "claude:generate_plan",
     async ({ sessionId, goal }: { sessionId: string; goal: string }) => {
       try {
-        if (!canAccessSession(sessionId, email)) {
-          socket.emit("claude:error", { sessionId, message: "Access denied" });
+        if (!goal?.trim()) {
+          socket.emit("claude:error", { message: "Goal is required" });
           return;
         }
+        // Plans are user-owned; no session access check needed.
+        // sessionId is a stable per-user grouping key, not a real chat session.
         const plan = createPlan(sessionId, goal, email);
         logActivity("plan_created", email, { planId: plan.id, goal });
         const planSessionId = "plan-gen-" + plan.id;
@@ -241,14 +242,15 @@ Be specific. Each step should be atomic and independently executable. Return onl
     },
   );
 
-  socket.on("claude:list_plans", ({ sessionId }: { sessionId: string }) => {
+  socket.on("claude:list_plans", ({ sessionId }: { sessionId?: string }) => {
     try {
-      const plans = listPlans(sessionId);
+      // List ALL plans for this user so they persist across page refreshes.
+      const plans = listPlansForUser(email);
       const plansWithSteps = plans.map((p) => {
         const steps = getPlanSteps(p.id);
         return { ...p, steps };
       });
-      socket.emit("claude:plans", { sessionId, plans: plansWithSteps });
+      socket.emit("claude:plans", { sessionId: sessionId ?? "", plans: plansWithSteps });
     } catch (err) {
       socket.emit("claude:error", { message: String(err) });
     }
