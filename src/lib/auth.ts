@@ -132,11 +132,13 @@ export const authOptions: NextAuthOptions = {
         try {
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           const db = (require("./db") as { default: import("better-sqlite3").Database }).default;
-          const row = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(token.email as string) as
-            | { is_admin: number }
+          const row = db.prepare("SELECT is_admin, first_name, last_name FROM users WHERE email = ?").get(token.email as string) as
+            | { is_admin: number; first_name: string; last_name: string }
             | undefined;
           if (row) {
             token.isAdmin = Boolean(row.is_admin);
+            token.firstName = row.first_name ?? "";
+            token.lastName = row.last_name ?? "";
           }
 
           // Non-admin users don't go through the setup wizard.
@@ -167,6 +169,8 @@ export const authOptions: NextAuthOptions = {
       if (session.user) {
         session.user.email = token.email as string;
         (session.user as { isAdmin: boolean }).isAdmin = Boolean(token.isAdmin);
+        (session.user as { firstName: string }).firstName = (token.firstName as string) ?? "";
+        (session.user as { lastName: string }).lastName = (token.lastName as string) ?? "";
       }
       return session;
     },
