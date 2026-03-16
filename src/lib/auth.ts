@@ -12,6 +12,11 @@ import {
 } from "./ip-protection";
 
 export const authOptions: NextAuthOptions = {
+  basePath: (() => {
+    const slug = process.env.NEXT_PUBLIC_CLAUDE_BOT_SLUG ?? "";
+    const prefix = process.env.NEXT_PUBLIC_CLAUDE_BOT_PATH_PREFIX ?? "c";
+    return slug ? `/${prefix}/${slug}/api/auth` : "/api/auth";
+  })(),
   providers: [
     CredentialsProvider({
       name: "credentials",
@@ -111,7 +116,12 @@ export const authOptions: NextAuthOptions = {
   },
 
   pages: {
-    signIn: "/login",
+    signIn: (() => {
+      const slug = process.env.NEXT_PUBLIC_CLAUDE_BOT_SLUG ?? "";
+      const prefix = process.env.NEXT_PUBLIC_CLAUDE_BOT_PATH_PREFIX ?? "c";
+      const basePath = slug ? `/${prefix}/${slug}` : "";
+      return `${basePath}/login`;
+    })(),
   },
 
   callbacks: {
@@ -157,6 +167,23 @@ export const authOptions: NextAuthOptions = {
         (session.user as { isAdmin: boolean }).isAdmin = Boolean(token.isAdmin);
       }
       return session;
+    },
+    async redirect({ url, baseUrl }) {
+      // Preserve the base path (prefix + slug) in redirects
+      const slug = process.env.NEXT_PUBLIC_CLAUDE_BOT_SLUG ?? "";
+      const prefix = process.env.NEXT_PUBLIC_CLAUDE_BOT_PATH_PREFIX ?? "c";
+      const basePath = slug ? `/${prefix}/${slug}` : "";
+      
+      // If url is relative, prepend basePath
+      if (url.startsWith("/")) {
+        return `${baseUrl}${basePath}${url}`;
+      }
+      // If url already contains the full base URL, use it as-is
+      if (url.startsWith(baseUrl)) {
+        return url;
+      }
+      // Default to base path root
+      return `${baseUrl}${basePath}`;
     },
   },
 
