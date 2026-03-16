@@ -104,6 +104,7 @@ export interface UseChatSocketReturn {
   pendingCount: number;
   pendingQueue: string[];
   loadingMessages: boolean;
+  runtimeLimited: boolean;
 
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   setSessionModel: React.Dispatch<React.SetStateAction<string>>;
@@ -131,6 +132,7 @@ export interface UseChatSocketReturn {
   handleDeleteMessage: (messageId: string) => void;
   handleEditQueueItem: (index: number, newContent: string) => void;
   handleDeleteQueueItem: (index: number) => void;
+  handleResetRuntime: () => void;
 }
 
 export { type PresenceUser };
@@ -163,6 +165,7 @@ export function useChatSocket({
   const [pendingCount, setPendingCount] = useState(0);
   const [pendingQueue, setPendingQueue] = useState<string[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [runtimeLimited, setRuntimeLimited] = useState(false);
 
   // ── Refs ───────────────────────────────────────────────────────────────
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
@@ -839,6 +842,10 @@ export function useChatSocket({
 
     socket.on("claude:rate_limited", ({ reason }: { reason?: string }) => {
       const text = reason ?? "You are being rate limited. Please wait before sending more messages.";
+      const isRuntimeLimit = !!reason && reason.toLowerCase().includes("runtime");
+      if (isRuntimeLimit) {
+        setRuntimeLimited(true);
+      }
       const msg: ChatMessage = {
         id: "rate-limited-" + Date.now(),
         sender_type: "claude",
@@ -848,6 +855,10 @@ export function useChatSocket({
       };
       setMessages((prev) => [...prev, msg]);
       setIsRunning(false);
+    });
+
+    socket.on("claude:runtime_reset", () => {
+      setRuntimeLimited(false);
     });
 
     socket.on("claude:budget_exceeded", ({ message, type }: { message?: string; type?: string }) => {
@@ -907,6 +918,7 @@ export function useChatSocket({
       socket.off("claude:output");
       socket.off("claude:error");
       socket.off("claude:rate_limited");
+      socket.off("claude:runtime_reset");
       socket.off("claude:budget_exceeded");
       socket.off("claude:budget_warning");
       socket.off("claude:session_state");
@@ -1129,17 +1141,24 @@ export function useChatSocket({
     [syncQueue],
   );
 
+  const handleResetRuntime = useCallback(() => {
+    const session = activeSessionRef.current;
+    if (!session) return;
+    emit("claude:reset_runtime", { sessionId: session.id });
+  }, [emit]);
+
   return {
     messages, isRunning, currentActivity, connected, reconnecting,
     presenceUsers, typingUsers, commandRunner, sessionUsage, budgetLimits,
     contextUsage, isCompacting,
     sessionModel, hasError, pendingInteractions, runStartTime, pendingCount,
-    pendingQueue, loadingMessages,
+    pendingQueue, loadingMessages, runtimeLimited,
     setMessages, setSessionModel, setSessionUsage, setIsRunning,
     setCurrentActivity, setLoadingMessages,
     activeSessionRef, initializedSessionsRef, freshSessionsRef, chatInputRef,
     emit, resetSessionState, handleSend, handleInterrupt, handleRetryLast, handleSelectOption,
     handleConfirm, handleAllowTool, handleAnswerQuestion, handleAlwaysAllow,
     handleEditMessage, handleDeleteMessage, handleEditQueueItem, handleDeleteQueueItem,
+    handleResetRuntime,
   };
 }

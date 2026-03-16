@@ -36,6 +36,7 @@ interface MessageListProps {
   loadingMessages?: boolean;
   botAvatarUrl?: string | null;
   onSendStarter?: (message: string) => void;
+  onFillStarter?: (message: string) => void;
   runStartTime?: number | null;
 }
 
@@ -44,10 +45,10 @@ type Segment =
   | { kind: "tool-group"; messages: ChatMessage[] };
 
 const STARTER_PROMPTS = [
-  { icon: Terminal, label: "Run a command", prompt: "Run `git status` and summarize the current state of the repo", color: "text-bot-green" },
-  { icon: Code2, label: "Write code", prompt: "Help me write a function that ", color: "text-bot-accent" },
-  { icon: FileSearch, label: "Explore codebase", prompt: "Give me an overview of this project's architecture", color: "text-bot-blue" },
-  { icon: MessageSquare, label: "Explain something", prompt: "Explain how ", color: "text-bot-amber" },
+  { icon: Terminal, label: "Run a command", prompt: "Run `git status` and summarize the current state of the repo", color: "text-bot-green", partial: false },
+  { icon: Code2, label: "Write code", prompt: "Help me write a function that ", color: "text-bot-accent", partial: true },
+  { icon: FileSearch, label: "Explore codebase", prompt: "Give me an overview of this project's architecture", color: "text-bot-blue", partial: false },
+  { icon: MessageSquare, label: "Explain something", prompt: "Explain how ", color: "text-bot-amber", partial: true },
 ];
 
 function ThinkingBubble({ botAvatarUrl, runStartTime }: { botAvatarUrl?: string | null; runStartTime?: number | null }) {
@@ -173,6 +174,7 @@ export function MessageList({
   loadingMessages,
   botAvatarUrl,
   onSendStarter,
+  onFillStarter,
   runStartTime,
 }: MessageListProps) {
   const userProfile = useUserProfile();
@@ -266,7 +268,7 @@ export function MessageList({
             {STARTER_PROMPTS.map((s) => (
               <button
                 key={s.label}
-                onClick={() => onSendStarter?.(s.prompt)}
+                onClick={() => s.partial ? onFillStarter?.(s.prompt) : onSendStarter?.(s.prompt)}
                 className="flex items-center gap-3 rounded-xl border border-bot-border/40 bg-bot-surface/60 px-4 py-3.5 text-left text-caption text-bot-text hover:bg-bot-elevated/60 hover:border-bot-accent/30 hover:shadow-glow-sm transition-all duration-200 group"
               >
                 <div className={`p-1.5 rounded-lg bg-bot-elevated/60 ${s.color} group-hover:scale-110 transition-transform duration-200`}>
