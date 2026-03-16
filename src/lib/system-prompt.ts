@@ -3,6 +3,7 @@ import * as path from "path";
 import { getAppSetting, getPersonalityPrefix } from "./app-settings";
 import { getCustomizationSystemPrompt, getBotSelfIdentityPrompt } from "./customization";
 import { getSecuritySystemPrompt } from "./security-guard";
+import { getMemories } from "./claude-db";
 
 export type InterfaceType = "ui_chat" | "customization_interface" | "system_agent";
 
@@ -147,6 +148,19 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
     systemPrompt = systemPrompt
       ? systemPrompt + "\n\n" + claudeSection
       : claudeSection;
+  }
+
+  // Append saved memories from the database so Claude has access to
+  // project-level knowledge items curated by admins.
+  const memories = getMemories();
+  if (memories.length > 0) {
+    const memoriesText = memories
+      .map((m) => `### ${m.title}\n${m.content}`)
+      .join("\n\n");
+    const memoriesSection = `<memories>\nThe following are important memory items for this project. Treat them as ground truth.\n\n${memoriesText}\n</memories>`;
+    systemPrompt = systemPrompt
+      ? systemPrompt + "\n\n" + memoriesSection
+      : memoriesSection;
   }
 
   // Append .context/_index.md (or bootstrap instruction) so the agent

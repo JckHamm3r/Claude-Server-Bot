@@ -812,3 +812,20 @@ export function listSessionParticipants(sessionId: string): Array<{ user_email: 
     "SELECT user_email, role, invited_at FROM session_participants WHERE session_id = ?"
   ).all(sessionId) as Array<{ user_email: string; role: string; invited_at: string }>;
 }
+
+// ==================== MEMORIES ====================
+
+export interface Memory {
+  id: string;
+  title: string;
+  content: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export function getMemories(): Memory[] {
+  return db.prepare(
+    "SELECT id, title, content, created_by, created_at, updated_at FROM memories ORDER BY created_at ASC"
+  ).all() as Memory[];
+}
