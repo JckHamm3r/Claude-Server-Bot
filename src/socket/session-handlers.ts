@@ -187,6 +187,17 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         renameSession(sessionId, name);
         // Broadcast rename to all collaborators in the session room
         io.to(`session:${sessionId}`).emit("claude:session_renamed", { sessionId, name });
+        // Also push updated session list to all participants' sockets
+        // (covers participants who have the session in sidebar but not actively open)
+        const participants = listSessionParticipants(sessionId);
+        for (const p of participants) {
+          for (const [socketId, info] of ctx.connectedUsers.entries()) {
+            if (info.email === p.user_email) {
+              const pSessions = listSessions(p.user_email);
+              io.to(socketId).emit("claude:sessions", { sessions: pSessions });
+            }
+          }
+        }
       } catch (err: unknown) {
         console.error("[db] rename_session failed:", err);
         socket.emit("claude:error", { message: "Failed to rename session." });
@@ -529,6 +540,18 @@ export function registerSessionHandlers(ctx: HandlerContext) {
 
   // ── Session sharing ────────────────────────────────────────────────────
 
+  /** Emit updated session list to all currently-connected sockets for a given user email. */
+  function pushSessionsToUser(targetEmail: string) {
+    try {
+      const updatedSessions = listSessions(targetEmail);
+      for (const [socketId, info] of ctx.connectedUsers.entries()) {
+        if (info.email === targetEmail) {
+          io.to(socketId).emit("claude:sessions", { sessions: updatedSessions });
+        }
+      }
+    } catch { /* best-effort */ }
+  }
+
   socket.on("claude:invite_to_session", ({ sessionId, inviteEmail }: { sessionId: string; inviteEmail: string }) => {
     try {
       if (!canModifySession(sessionId, email)) {
@@ -536,7 +559,10 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         return;
       }
       addSessionParticipant(sessionId, inviteEmail);
-      socket.emit("claude:session_participants", { sessionId, participants: listSessionParticipants(sessionId) });
+      const participants = listSessionParticipants(sessionId);
+      socket.emit("claude:session_participants", { sessionId, participants });
+      // Push real-time update to the invited user's connected sockets
+      pushSessionsToUser(inviteEmail);
     } catch {
       socket.emit("claude:error", { sessionId, message: "Failed to invite user" });
     }
@@ -544,12 +570,21 @@ export function registerSessionHandlers(ctx: HandlerContext) {
 
   socket.on("claude:remove_from_session", ({ sessionId, removeEmail }: { sessionId: string; removeEmail: string }) => {
     try {
-      if (!canModifySession(sessionId, email)) {
+      if (!canModifySession(sessionId, email) && removeEmail !== email) {
         socket.emit("claude:error", { sessionId, message: "Only session owner or admin can remove" });
         return;
       }
       removeSessionParticipant(sessionId, removeEmail);
-      socket.emit("claude:session_participants", { sessionId, participants: listSessionParticipants(sessionId) });
+      const participants = listSessionParticipants(sessionId);
+      socket.emit("claude:session_participants", { sessionId, participants });
+      // Push real-time removal to the removed user's connected sockets
+      pushSessionsToUser(removeEmail);
+      // Also tell the removed user to deactivate the session if they have it open
+      for (const [socketId, info] of ctx.connectedUsers.entries()) {
+        if (info.email === removeEmail && info.activeSession === sessionId) {
+          io.to(socketId).emit("claude:session_removed", { sessionId });
+        }
+      }
     } catch {
       socket.emit("claude:error", { sessionId, message: "Failed to remove user" });
     }

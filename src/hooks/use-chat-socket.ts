@@ -81,6 +81,7 @@ interface UseChatSocketOptions {
   autoAccept: boolean;
   setSessions: React.Dispatch<React.SetStateAction<ClaudeSession[]>>;
   setLoadingSessions: React.Dispatch<React.SetStateAction<boolean>>;
+  onSessionRemoved?: (sessionId: string) => void;
 }
 
 export interface UseChatSocketReturn {
@@ -140,6 +141,7 @@ export function useChatSocket({
   autoAccept,
   setSessions,
   setLoadingSessions,
+  onSessionRemoved,
 }: UseChatSocketOptions): UseChatSocketReturn {
   // ── State ─────────────────────────────────────────────────────────────
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -175,6 +177,7 @@ export function useChatSocket({
   const pendingQueueRef = useRef<string[]>([]);
   const typingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const doneWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onSessionRemovedRef = useRef(onSessionRemoved);
   const watchdogChecksRef = useRef(0);
   const editRecoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingInteractionsRef = useRef<Map<string, string>>(new Map());
@@ -185,6 +188,10 @@ export function useChatSocket({
   useEffect(() => {
     autoAcceptRef.current = autoAccept;
   }, [autoAccept]);
+
+  useEffect(() => {
+    onSessionRemovedRef.current = onSessionRemoved;
+  }, [onSessionRemoved]);
 
   useEffect(() => {
     pendingInteractionsRef.current = pendingInteractions;
@@ -400,6 +407,17 @@ export function useChatSocket({
       if (activeSessionRef.current?.id === sessionId) {
         activeSessionRef.current = { ...activeSessionRef.current, name };
       }
+    });
+
+    socket.on("claude:session_removed", ({ sessionId }: { sessionId: string }) => {
+      // Server pushed that this user was removed from a shared session
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      if (activeSessionRef.current?.id === sessionId) {
+        activeSessionRef.current = null;
+        resetSessionState();
+        setIsRunning(false);
+      }
+      if (onSessionRemovedRef.current) onSessionRemovedRef.current(sessionId);
     });
 
     socket.on("claude:presence_update", ({ presence }: { presence: PresenceUser[] }) => {
@@ -906,6 +924,7 @@ export function useChatSocket({
       socket.off("security:warn");
       socket.off("claude:session_status");
       socket.off("claude:session_renamed");
+      socket.off("claude:session_removed");
       clearEditRecoveryTimer();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

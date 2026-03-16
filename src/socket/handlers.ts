@@ -12,6 +12,7 @@ import {
   setNotificationEmitter,
   type InAppNotification,
 } from "../lib/notifications";
+import { setBroadcaster } from "../lib/broadcast";
 import { checkProtectedPath } from "../lib/security-guard";
 import { classifyCommand, isSandboxEnabled } from "../lib/command-sandbox";
 import { cleanupExpiredBlocks } from "../lib/ip-protection";
@@ -313,6 +314,11 @@ export function registerHandlers(io: Server) {
         io.to(socketId).emit("notification:count", { unread: getUnreadCount(email) });
       }
     }
+  });
+
+  // Wire broadcaster so REST API routes can push real-time events to all clients
+  setBroadcaster((event: string, data: unknown) => {
+    io.emit(event, data);
   });
 
   // Session status helper: updates DB and broadcasts to all sockets

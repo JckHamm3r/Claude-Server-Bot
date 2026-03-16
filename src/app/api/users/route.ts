@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import db from "@/lib/db";
+import { getUserSettings, updateUserSettings } from "@/lib/claude-db";
 
 function generatePassword(): string {
   const len = Math.floor(Math.random() * 47) + 80; // 80–126 chars
@@ -24,8 +25,13 @@ export async function GET() {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const users = db.prepare("SELECT email, is_admin, first_name, last_name, created_at FROM users ORDER BY created_at ASC").all();
-  return NextResponse.json({ users });
+  const users = db.prepare("SELECT email, is_admin, first_name, last_name, created_at FROM users ORDER BY created_at ASC").all() as Array<{ email: string; is_admin: number; first_name: string; last_name: string; created_at: string }>;
+  // Attach experience_level from user_settings for each user
+  const usersWithLevel = users.map((u) => {
+    const settings = getUserSettings(u.email);
+    return { ...u, experience_level: settings.experience_level };
+  });
+  return NextResponse.json({ users: usersWithLevel });
 }
 
 export async function POST(request: NextRequest) {
@@ -112,14 +118,14 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: { email: string; newEmail?: string; is_admin?: boolean; resetPassword?: boolean };
+  let body: { email: string; newEmail?: string; is_admin?: boolean; resetPassword?: boolean; experience_level?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { email, newEmail, is_admin, resetPassword } = body;
+  const { email, newEmail, is_admin, resetPassword, experience_level } = body;
   if (!email || typeof email !== "string") {
     return NextResponse.json({ error: "Missing email" }, { status: 400 });
   }
@@ -168,6 +174,14 @@ export async function PATCH(request: NextRequest) {
     const hash = await bcrypt.hash(password, 12);
     db.prepare("UPDATE users SET hash = ? WHERE email = ?").run(hash, effectiveEmail);
     result.password = password;
+  }
+
+  if (experience_level !== undefined) {
+    const validLevels = ["beginner", "intermediate", "expert"];
+    if (!validLevels.includes(experience_level)) {
+      return NextResponse.json({ error: "Invalid experience_level" }, { status: 400 });
+    }
+    updateUserSettings(effectiveEmail, { experience_level });
   }
 
   return NextResponse.json({ ok: true, email: effectiveEmail, ...result });

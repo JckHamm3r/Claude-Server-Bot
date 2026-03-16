@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
+import { Users } from "lucide-react";
 import type { ClaudeSession } from "@/lib/claude-db";
 import { DEFAULT_MODEL, AVAILABLE_MODELS, getModelLabel } from "@/lib/models";
 import { apiUrl } from "@/lib/utils";
@@ -13,6 +14,7 @@ import { SkipPermissionsBanner } from "./skip-permissions-banner";
 import { UnifiedSearchDialog } from "./unified-search-dialog";
 import { ChatInput } from "./chat-input";
 import { useChatSocket } from "@/hooks/use-chat-socket";
+import { getSocket } from "@/lib/socket";
 import type { ChatMessage } from "@/types/chat";
 
 interface ChatTabProps {
@@ -22,7 +24,8 @@ interface ChatTabProps {
 const ACTIVE_SESSION_KEY = "claude:activeSessionId";
 
 export function ChatTab({ isWidget = false }: ChatTabProps) {
-  const { status: sessionStatus } = useSession();
+  const { status: sessionStatus, data: sessionData } = useSession();
+  const currentEmail = sessionData?.user?.email ?? null;
   const [sessions, setSessions] = useState<ClaudeSession[]>([]);
   const [activeSession, setActiveSession] = useState<ClaudeSession | null>(null);
   const [showNewDialog, setShowNewDialog] = useState(false);
@@ -47,12 +50,23 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
 
   const [botAvatarUrl, setBotAvatarUrl] = useState<string | null>(null);
 
+  const handleSessionRemoved = useCallback((sessionId: string) => {
+    setActiveSession((current) => {
+      if (current?.id === sessionId) {
+        try { localStorage.removeItem(ACTIVE_SESSION_KEY); } catch { /* ignore */ }
+        return null;
+      }
+      return current;
+    });
+  }, []);
+
   const chat = useChatSocket({
     sessionStatus,
     activeSession,
     autoAccept,
     setSessions,
     setLoadingSessions,
+    onSessionRemoved: handleSessionRemoved,
   });
 
   useEffect(() => {
@@ -60,6 +74,16 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
       .then((r) => r.json())
       .then((d: { avatar?: string | null }) => setBotAvatarUrl(d.avatar ?? null))
       .catch(() => {});
+  }, []);
+
+  // Listen for real-time bot identity updates
+  useEffect(() => {
+    const socket = getSocket();
+    const handleIdentityUpdate = ({ avatar }: { name?: string; tagline?: string; avatar?: string | null }) => {
+      setBotAvatarUrl(avatar ?? null);
+    };
+    socket.on("bot:identity_updated", handleIdentityUpdate);
+    return () => { socket.off("bot:identity_updated", handleIdentityUpdate); };
   }, []);
 
   // Sync activeSession when the sessions list changes (e.g. server-side rename)
@@ -240,7 +264,12 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
 
   const handleDeleteSession = useCallback(
     (session: ClaudeSession) => {
-      chat.emit("claude:delete_session", { sessionId: session.id });
+      if (session.shared_by) {
+        // For shared sessions, leave rather than delete
+        chat.emit("claude:remove_from_session", { sessionId: session.id, removeEmail: currentEmail });
+      } else {
+        chat.emit("claude:delete_session", { sessionId: session.id });
+      }
       setSessions((prev) => prev.filter((s) => s.id !== session.id));
       if (chat.activeSessionRef.current?.id === session.id) {
         chat.activeSessionRef.current = null;
@@ -250,7 +279,7 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
         try { localStorage.removeItem(ACTIVE_SESSION_KEY); } catch { /* ignore */ }
       }
     },
-    [chat],
+    [chat, currentEmail],
   );
 
   const handleCompact = useCallback(() => {
@@ -433,6 +462,7 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
         loading={loadingSessions}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
+        currentEmail={currentEmail ?? undefined}
       />
 
       <div className="flex flex-1 flex-col overflow-hidden">
@@ -443,24 +473,46 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
         )}
 
         {(() => {
-          const others = chat.presenceUsers.filter((u) => u.activeSession === activeSession?.id);
-          if (!others.length) return null;
+          const others = chat.presenceUsers.filter(
+            (u) => u.activeSession === activeSession?.id && u.email !== currentEmail
+          );
+          const isGuest = activeSession && currentEmail && activeSession.created_by !== currentEmail && activeSession.shared_by;
+          if (!others.length && !isGuest) return null;
           return (
             <div className="flex items-center gap-2 border-b border-bot-border bg-bot-surface px-4 py-1.5">
-              <span className="text-caption text-bot-muted">Also here:</span>
-              {others.map((u) => (
-                <span
-                  key={u.email}
-                  className="inline-flex items-center gap-1 rounded-full bg-bot-accent/10 px-2 py-0.5 text-caption text-bot-accent"
-                >
-                  <span className="h-1.5 w-1.5 rounded-full bg-bot-accent" />
-                  {u.email.split("@")[0]}
+              {isGuest && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-bot-muted/15 px-2 py-0.5 text-caption font-medium text-bot-muted border border-bot-border/40">
+                  <Users className="h-3 w-3" />
+                  Guest — {activeSession?.shared_by?.split("@")[0]}&apos;s session
                 </span>
-              ))}
+              )}
+              {others.length > 0 && (
+                <>
+                  <span className="text-caption text-bot-muted">{isGuest ? "·" : "Also here:"}</span>
+                  {others.map((u) => (
+                    <span
+                      key={u.email}
+                      className="inline-flex items-center gap-1 rounded-full bg-bot-accent/10 px-2 py-0.5 text-caption text-bot-accent"
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-bot-accent" />
+                      {u.email.split("@")[0]}
+                    </span>
+                  ))}
+                </>
+              )}
               {chat.commandRunner && chat.commandRunner !== activeSession?.created_by && (
                 <span className="ml-auto text-caption text-bot-amber">
                   {chat.commandRunner.split("@")[0]} is running a command…
                 </span>
+              )}
+              {isGuest && activeSession && (
+                <button
+                  onClick={() => handleDeleteSession(activeSession)}
+                  className="ml-auto text-caption text-bot-muted hover:text-bot-amber hover:bg-bot-amber/10 rounded-lg px-2 py-1 transition-colors"
+                  title="Leave this shared session"
+                >
+                  Leave session
+                </button>
               )}
             </div>
           );
@@ -483,6 +535,8 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
           onOpenSearch={() => setShowSearch(true)}
           sessionId={activeSession?.id}
           messages={chat.messages}
+          activeSession={activeSession}
+          canShare={!!activeSession && !!currentEmail && activeSession.created_by === currentEmail}
         />
 
         {!chat.connected && (

@@ -60,13 +60,13 @@ export function SettingsPanel() {
   const userExperienceLevel = userProfile.experience_level;
 
   // Users state
-  const [users, setUsers] = useState<{ email: string; is_admin: number; created_at: string }[]>([]);
+  const [users, setUsers] = useState<{ email: string; is_admin: number; created_at: string; experience_level?: string }[]>([]);
   const [newEmail, setNewEmail] = useState("");
   const [addingUser, setAddingUser] = useState(false);
   const [newUserPassword, setNewUserPassword] = useState<{ email: string; password: string } | null>(null);
   const [deletingEmail, setDeletingEmail] = useState<string | null>(null);
-  const [editingUser, setEditingUser] = useState<{ email: string; is_admin: number } | null>(null);
-  const [editForm, setEditForm] = useState({ email: "", isAdmin: false });
+  const [editingUser, setEditingUser] = useState<{ email: string; is_admin: number; experience_level?: string } | null>(null);
+  const [editForm, setEditForm] = useState({ email: "", isAdmin: false, experienceLevel: "expert" });
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
@@ -136,6 +136,12 @@ export function SettingsPanel() {
       .then((r) => r.json())
       .then((d) => { setBotName(d.name); setBotTagline(d.tagline); setBotAvatar(d.avatar); })
       .catch(() => {});
+    // Real-time bot identity updates
+    socket.on("bot:identity_updated", ({ name, tagline, avatar }: { name?: string; tagline?: string; avatar?: string | null }) => {
+      if (name !== undefined) setBotName(name);
+      if (tagline !== undefined) setBotTagline(tagline);
+      if (avatar !== undefined) setBotAvatar(avatar ?? null);
+    });
     // Load app settings
     fetch(apiUrl("/api/app-settings"))
       .then((r) => r.json())
@@ -145,7 +151,7 @@ export function SettingsPanel() {
         setRateConcurrent(d.rate_limit_concurrent ?? "3");
       })
       .catch(() => {});
-    return () => { socket.off("claude:settings"); };
+    return () => { socket.off("claude:settings"); socket.off("bot:identity_updated"); };
   }, []);
 
   useEffect(() => {
@@ -230,7 +236,7 @@ export function SettingsPanel() {
       if (res.ok) {
         setNewUserPassword({ email: data.email, password: data.password });
         setNewEmail("");
-        setUsers((prev) => [...prev, { email: data.email, is_admin: 0, created_at: new Date().toISOString() }]);
+        setUsers((prev) => [...prev, { email: data.email, is_admin: 0, created_at: new Date().toISOString(), experience_level: "expert" }]);
       }
     } finally {
       setAddingUser(false);
@@ -255,9 +261,9 @@ export function SettingsPanel() {
     }
   }
 
-  function startEditUser(user: { email: string; is_admin: number }) {
+  function startEditUser(user: { email: string; is_admin: number; experience_level?: string }) {
     setEditingUser(user);
-    setEditForm({ email: user.email, isAdmin: Boolean(user.is_admin) });
+    setEditForm({ email: user.email, isAdmin: Boolean(user.is_admin), experienceLevel: user.experience_level ?? "expert" });
     setEditError(null);
     setDeletingEmail(null);
   }
@@ -274,6 +280,9 @@ export function SettingsPanel() {
       if (editForm.isAdmin !== Boolean(editingUser.is_admin)) {
         patch.is_admin = editForm.isAdmin;
       }
+      if (editForm.experienceLevel !== (editingUser.experience_level ?? "expert")) {
+        patch.experience_level = editForm.experienceLevel;
+      }
       const res = await fetch(apiUrl("/api/users"), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -287,7 +296,7 @@ export function SettingsPanel() {
       setUsers((prev) =>
         prev.map((u) =>
           u.email === editingUser.email
-            ? { ...u, email: data.email, is_admin: editForm.isAdmin ? 1 : 0 }
+            ? { ...u, email: data.email, is_admin: editForm.isAdmin ? 1 : 0, experience_level: editForm.experienceLevel }
             : u
         )
       );
@@ -553,7 +562,7 @@ export function SettingsPanel() {
             <div className="space-y-6">
 
               {/* Experience Level */}
-              <ProfileSection />
+              <ProfileSection isAdmin={isAdmin} />
 
               <SettingRow title="Session Auto-Naming" description="Automatically name new sessions based on the first message sent.">
                 <Toggle checked={settings.auto_naming_enabled} onChange={(v) => update({ auto_naming_enabled: v })} />
@@ -765,6 +774,27 @@ export function SettingsPanel() {
                             <span className={cn("inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform", editForm.isAdmin ? "translate-x-4" : "translate-x-1")} />
                           </button>
                         </div>
+                        <div className="space-y-2">
+                          <label className="block text-caption font-medium text-bot-muted">Experience Level</label>
+                          <p className="text-caption text-bot-muted/70">Controls how the assistant communicates with this user and which features are shown.</p>
+                          <div className="grid grid-cols-3 gap-2">
+                            {(["beginner", "intermediate", "expert"] as const).map((lvl) => (
+                              <button
+                                key={lvl}
+                                type="button"
+                                onClick={() => setEditForm((f) => ({ ...f, experienceLevel: lvl }))}
+                                className={cn(
+                                  "rounded-lg border px-3 py-2 text-left text-caption transition-all",
+                                  editForm.experienceLevel === lvl
+                                    ? "border-bot-accent bg-bot-accent/10 text-bot-accent"
+                                    : "border-bot-border/40 text-bot-muted hover:border-bot-accent/40 hover:bg-bot-elevated/30"
+                                )}
+                              >
+                                <span className="font-medium capitalize">{lvl}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                         {editError && <p className="text-caption text-bot-red">{editError}</p>}
                         <div className="flex items-center gap-2 pt-1">
                           <button
@@ -795,7 +825,13 @@ export function SettingsPanel() {
                       <div className="flex items-center justify-between px-4 py-3">
                         <div>
                           <p className="text-body text-bot-text">{user.email}</p>
-                          <p className="text-caption text-bot-muted">{user.is_admin ? "Admin" : "User"} · Joined {new Date(user.created_at).toLocaleDateString()}</p>
+                          <p className="text-caption text-bot-muted">
+                            {user.is_admin ? "Admin" : "User"}
+                            {" · "}
+                            <span className="capitalize">{user.experience_level ?? "expert"}</span>
+                            {" · Joined "}
+                            {new Date(user.created_at).toLocaleDateString()}
+                          </p>
                         </div>
                         <div className="flex items-center gap-2">
                           <button
@@ -1593,7 +1629,7 @@ function Toggle({
 
 // ── Profile Section (experience level, server purpose, project type) ─────────
 
-function ProfileSection() {
+function ProfileSection({ isAdmin = false }: { isAdmin?: boolean }) {
   const profile = useUserProfile();
   const [experienceLevel, setExperienceLevel] = useState(profile.experience_level);
   const [autSummary, setAutoSummary] = useState(profile.auto_summary);
@@ -1614,7 +1650,7 @@ function ProfileSection() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          experience_level: experienceLevel,
+          ...(isAdmin && { experience_level: experienceLevel }),
           auto_summary: autSummary,
           update_claude_md: true,
         }),
@@ -1629,22 +1665,33 @@ function ProfileSection() {
     <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5 space-y-4">
       <div>
         <p className="text-body font-medium text-bot-text">Experience Level</p>
-        <p className="mt-0.5 text-caption text-bot-muted">Changes how the assistant communicates and which features are shown.</p>
+        <p className="mt-0.5 text-caption text-bot-muted">
+          {isAdmin
+            ? "Changes how the assistant communicates and which features are shown."
+            : "Your experience level is set by an admin and determines how the assistant communicates."}
+        </p>
       </div>
       <div className="grid grid-cols-3 gap-2">
         {LEVEL_OPTIONS.map((opt) => (
-          <button key={opt.id} onClick={() => setExperienceLevel(opt.id as typeof experienceLevel)}
+          <button key={opt.id}
+            onClick={() => isAdmin && setExperienceLevel(opt.id as typeof experienceLevel)}
+            disabled={!isAdmin}
             className={cn(
               "rounded-xl border px-3 py-3 text-left text-caption transition-all duration-200",
               experienceLevel === opt.id
                 ? "border-bot-accent bg-bot-accent/10 text-bot-accent"
-                : "border-bot-border/40 text-bot-text/80 hover:border-bot-accent/40 hover:bg-bot-elevated/30"
+                : "border-bot-border/40 text-bot-text/80",
+              isAdmin && experienceLevel !== opt.id && "hover:border-bot-accent/40 hover:bg-bot-elevated/30",
+              !isAdmin && "cursor-not-allowed opacity-70"
             )}>
             <div className="font-medium">{opt.label}</div>
             <div className={cn("text-[10px] mt-0.5", experienceLevel === opt.id ? "text-bot-accent/70" : "text-bot-muted/60")}>{opt.desc}</div>
           </button>
         ))}
       </div>
+      {!isAdmin && (
+        <p className="text-caption text-bot-muted/70 italic">Contact an admin to change your experience level.</p>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <p className="text-body text-bot-text">Summarize completed actions</p>
