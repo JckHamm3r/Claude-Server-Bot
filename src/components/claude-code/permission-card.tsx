@@ -9,7 +9,7 @@ interface PermissionCardProps {
   sessionId: string;
   messageId?: string;
   onAllow: (sessionId: string, toolName: string, scope: "session" | "once", toolCallId?: string, messageId?: string) => void;
-  onAlwaysAllow?: (sessionId: string, toolName: string, command: string, toolCallId?: string) => void;
+  onAlwaysAllow?: (sessionId: string, toolName: string, command: string, toolCallId?: string, messageId?: string) => void;
   disabled?: boolean;
   sandboxCategory?: string;
   sandboxReason?: string;
@@ -131,7 +131,7 @@ export function PermissionCard({ toolName, toolInput, toolCallId, sessionId, mes
         </button>
         {onAlwaysAllow && (isRestricted || isDangerous) && command && (
           <button
-            onClick={() => onAlwaysAllow(sessionId, toolName, command, toolCallId)}
+            onClick={() => onAlwaysAllow(sessionId, toolName, command, toolCallId, messageId)}
             disabled={disabled}
             className="rounded-xl px-4 py-1.5 border border-bot-green/30 text-caption font-medium text-bot-green hover:bg-bot-green/10 disabled:opacity-50 transition-all duration-200"
           >

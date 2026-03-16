@@ -850,8 +850,13 @@ export const sdkProvider: ClaudeCodeProvider = {
       // Stream is alive — push message into the generator
       resetTimers(state);
       pushMessage(state, fullPrompt).catch((err) => {
-        console.error("SDK push error:", err);
         state.running = false;
+        if (err instanceof Error && (err.name === "AbortError" || err.message.includes("aborted"))) {
+          // Interrupted by user — don't surface as an error
+          state.emitter.emit("output", { type: "done" } as ParsedOutput);
+          return;
+        }
+        console.error("SDK push error:", err);
         state.emitter.emit("output", { type: "error", message: String(err) } as ParsedOutput);
         state.emitter.emit("output", { type: "done" } as ParsedOutput);
       });
@@ -861,8 +866,13 @@ export const sdkProvider: ClaudeCodeProvider = {
         resetTimers(state);
         return pushMessage(state, fullPrompt);
       }).catch((err) => {
-        console.error("SDK stream start error:", err);
         state.running = false;
+        if (err instanceof Error && (err.name === "AbortError" || err.message.includes("aborted"))) {
+          // Interrupted by user — don't surface as an error
+          state.emitter.emit("output", { type: "done" } as ParsedOutput);
+          return;
+        }
+        console.error("SDK stream start error:", err);
         state.emitter.emit("output", { type: "error", message: String(err) } as ParsedOutput);
         state.emitter.emit("output", { type: "done" } as ParsedOutput);
       });

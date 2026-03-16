@@ -20,7 +20,7 @@ interface MessageItemProps {
   onSelectOption?: (sessionId: string, choice: string) => void;
   onConfirm?: (sessionId: string, value: boolean) => void;
   onAllowTool?: (sessionId: string, toolName: string, scope: "session" | "once", toolCallId?: string, messageId?: string) => void;
-  onAlwaysAllow?: (sessionId: string, toolName: string, command: string, toolCallId?: string) => void;
+  onAlwaysAllow?: (sessionId: string, toolName: string, command: string, toolCallId?: string, messageId?: string) => void;
   onAnswerQuestion?: (sessionId: string, answer: string) => void;
   onEdit?: (messageId: string, newContent: string) => void;
   onDelete?: (messageId: string) => void;

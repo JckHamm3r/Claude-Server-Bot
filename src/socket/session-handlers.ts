@@ -182,6 +182,8 @@ export function registerSessionHandlers(ctx: HandlerContext) {
           return;
         }
         renameSession(sessionId, name);
+        // Broadcast rename to all collaborators in the session room
+        io.to(`session:${sessionId}`).emit("claude:session_renamed", { sessionId, name });
       } catch (err: unknown) {
         console.error("[db] rename_session failed:", err);
         socket.emit("claude:error", { message: "Failed to rename session." });
