@@ -1,6 +1,56 @@
+# Build outputs
 .next/
+out/
+dist/
+build/
+
+# Dependencies
 node_modules/
+
+# Package manager lock files (project uses pnpm — keep pnpm-lock.yaml only)
+package-lock.json
+yarn.lock
+
+# TypeScript build cache
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# Environment files
 .env
+.env.local
+.env.*.local
+
+# Runtime data
 data/
 data-test/
+uploads/
+
+# Logs
 *.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS metadata
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDE / editor config
+.cursor/
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# AI tool context (runtime/local only)
+.claude/memory/
+
+# Test artifacts
+coverage/
+.nyc_output/
