@@ -83,11 +83,14 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         // Resolve per-session provider
         const sessionProvider = ctx.getSessionProvider(sessionId, sessionProviderType);
 
+        const userSettings = getUserSettings(email);
         const systemPrompt = await buildSystemPrompt({
           interfaceType: interface_type,
           personality: sessionPersonality,
           personalityCustom: personality_custom,
           templateSystemPrompt,
+          experienceLevel: userSettings.experience_level,
+          autoSummary: userSettings.auto_summary,
         });
         if (interface_type === "customization_interface") {
           logActivity("customization_session_started", email, { sessionId });
@@ -319,8 +322,11 @@ export function registerSessionHandlers(ctx: HandlerContext) {
       // is still alive in memory, just re-attach the listener.
       const hasResumeId = sessionProvider.getClaudeSessionId?.(sessionId) != null;
       if (!hasResumeId) {
+        const rejoinSettings = getUserSettings(email);
         const systemPrompt = await buildSystemPrompt({
           personality: dbSession.personality ?? undefined,
+          experienceLevel: rejoinSettings.experience_level,
+          autoSummary: rejoinSettings.auto_summary,
         });
         sessionProvider.createSession(sessionId, {
           skipPermissions: dbSession.skip_permissions,

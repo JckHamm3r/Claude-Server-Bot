@@ -536,7 +536,7 @@ Options:
   --dry-run             Print what would happen, then exit
   --config <file>       Load settings from config file (flags override)
   --mode <mode>         Deployment mode: vps, local
-  --bot-name <name>     Bot display name (2-20 chars, alphanumeric + hyphens)
+  --bot-name <name>     Bot display name (optional — set in the web UI after login)
   --email <email>       Admin email address
   --domain <domain>     Domain name (optional)
   --https <method>      HTTPS method: letsencrypt, cloudflare, none
@@ -577,7 +577,7 @@ load_config_file() {
 validate_unattended() {
   local missing=()
   [ -z "$CLI_MODE" ] && missing+=("--mode")
-  [ -z "$CLI_BOT_NAME" ] && missing+=("--bot-name")
+  # --bot-name is now optional (display name is set in the web wizard)
   [ -z "$CLI_EMAIL" ] && missing+=("--email")
   if [ ${#missing[@]} -gt 0 ]; then
     error "Missing required fields for unattended mode:"
@@ -617,31 +617,14 @@ screen_welcome() {
     echo ""
   fi
 
-  if [ -n "$CLI_BOT_NAME" ]; then
-    BOT_NAME="$CLI_BOT_NAME"
-    local err
-    if ! err="$(validate_bot_name "$BOT_NAME")"; then
-      error "Invalid bot name '$BOT_NAME': $err"; exit 1
-    fi
-  else
-    echo -e "  ${BOLD}What should we call your bot?${NC}"
-    hint "This name appears in the UI and URL (e.g. Jarvis, Friday, Botsworth)"
-    echo ""
-    while true; do
-      if ! prompt_input "Bot name" "Claude-Bot"; then continue; fi
-      BOT_NAME="$REPLY"
-      local err
-      if err="$(validate_bot_name "$BOT_NAME")"; then break; fi
-      error "$err"
-    done
-  fi
-  info "Bot name: ${BOLD}${BOT_NAME}${NC}"
-  echo ""
+  # Bot display name is set in the web UI wizard after first login.
+  # Default to "Claude-Bot" silently — users personalise it in the UI.
+  BOT_NAME="${CLI_BOT_NAME:-Claude-Bot}"
 
   if [ -n "$CLI_MODE" ]; then
     DEPLOY_MODE="$CLI_MODE"
   else
-    echo -e "  ${BOLD}Where will ${BOT_NAME} live?${NC}"
+    echo -e "  ${BOLD}Where will your assistant live?${NC}"
     echo ""
     echo -e "    ${CYAN}1${NC}  Production server  ${DIM}— systemd, nginx, HTTPS${NC}"
     echo -e "    ${CYAN}2${NC}  Local machine      ${DIM}— dev, home server, Raspberry Pi${NC}"
@@ -894,7 +877,10 @@ screen_confirm() {
   step_indicator 3
 
   SLUG=$(openssl rand -base64 96 2>/dev/null | tr -dc 'a-zA-Z0-9' | head -c64)
-  BOT_PATH_PREFIX=$(echo "$BOT_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
+  # Auto-generate a 12-char random URL prefix — adds security through obscurity
+  # and decouples the bot's display name from its URL path.
+  BOT_PATH_PREFIX=$(openssl rand -base64 24 2>/dev/null | tr -dc 'a-z0-9' | head -c12)
+  [ ${#BOT_PATH_PREFIX} -lt 8 ] && BOT_PATH_PREFIX="assistant"
   NEXTAUTH_SECRET=$(openssl rand -base64 32 2>/dev/null)
   if [ -z "$NEXTAUTH_SECRET" ] || [ ${#NEXTAUTH_SECRET} -lt 32 ]; then
     error "Failed to generate NEXTAUTH_SECRET (got ${#NEXTAUTH_SECRET} chars, need ≥32)"
@@ -1652,6 +1638,8 @@ show_completion_summary() {
     copy_to_clipboard "$ADMIN_PASSWORD" && echo -e "  ${DIM}│${NC}  ${GREEN}✓${NC} Password copied to clipboard"
     echo -e "  ${DIM}│${NC}  ${RED}${BOLD}Save this password — it won't be shown again${NC}"
     echo -e "  ${DIM}│${NC}                                                ${DIM}│${NC}"
+    echo -e "  ${DIM}│${NC}  ${DIM}Log in to finish setup (name your bot, API key,${NC}  ${DIM}│${NC}"
+    echo -e "  ${DIM}│${NC}  ${DIM}experience level) in the web interface.${NC}         ${DIM}│${NC}"
     echo -e "  ${DIM}└────────────────────────────────────────────────┘${NC}"
     echo ""
   } > "$_cred_out"

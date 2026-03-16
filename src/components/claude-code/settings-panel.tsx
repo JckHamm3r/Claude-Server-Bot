@@ -24,6 +24,7 @@ import { NotificationsSection } from "@/components/claude-code/settings/notifica
 import { SecuritySection } from "@/components/claude-code/settings/security-section";
 import { TemplatesSection } from "@/components/claude-code/settings/templates-section";
 import { CustomizationSection } from "@/components/claude-code/settings/customization-section";
+import { useUserProfile, invalidateProfileCache } from "@/hooks/use-user-profile";
 
 type SectionKey =
   | "general"
@@ -53,6 +54,8 @@ export function SettingsPanel() {
   const [savedMsg, setSavedMsg] = useState(false);
   const [activeSection, setActiveSection] = useState<SectionKey>("general");
   const [isAdmin, setIsAdmin] = useState(false);
+  const userProfile = useUserProfile();
+  const userExperienceLevel = userProfile.experience_level;
 
   // Users state
   const [users, setUsers] = useState<{ email: string; is_admin: number; created_at: string }[]>([]);
@@ -495,7 +498,25 @@ export function SettingsPanel() {
     { key: "budgets", label: "Budgets", adminOnly: true },
     { key: "api_key", label: "API Key (SDK)", adminOnly: true },
   ];
-  const sections = allSections.filter((s) => !s.adminOnly || isAdmin);
+
+  // Apply experience-level gating
+  // Import inline to avoid circular deps
+  const levelSections: Record<string, string[]> = {
+    beginner: ["general", "bot_identity", "notifications"],
+    intermediate: [
+      "general", "bot_identity", "customization", "rate_limits",
+      "users", "project", "notifications", "activity_log",
+      "backup", "database", "system", "smtp", "budgets", "api_key",
+    ],
+    expert: allSections.map((s) => s.key),
+  };
+  const userLevel = settings ? "expert" : "expert"; // will be overridden below
+  void userLevel; // suppress unused warning — level comes from useUserProfile in parent
+  // Sections are filtered by adminOnly AND by experience level (fetched in SettingsPanel)
+  const visibleLevelSections = levelSections[userExperienceLevel] ?? levelSections.expert;
+  const sections = allSections.filter((s) =>
+    (!s.adminOnly || isAdmin) && visibleLevelSections.includes(s.key)
+  );
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -525,31 +546,39 @@ export function SettingsPanel() {
           <div className="mx-auto max-w-2xl">
             <h2 className="mb-6 text-subtitle font-bold text-bot-text">General</h2>
             <div className="space-y-6">
+
+              {/* Experience Level */}
+              <ProfileSection />
+
               <SettingRow title="Session Auto-Naming" description="Automatically name new sessions based on the first message sent.">
                 <Toggle checked={settings.auto_naming_enabled} onChange={(v) => update({ auto_naming_enabled: v })} />
               </SettingRow>
-              <SettingRow
-                title="Full Trust Mode"
-                description="Skip confirmation prompts for destructive operations."
-                warning={settings.full_trust_mode}
-                warningText="Full Trust Mode is active. Claude will execute destructive operations without confirmation."
-              >
-                <Toggle checked={settings.full_trust_mode} onChange={(v) => update({ full_trust_mode: v })} danger />
-              </SettingRow>
-              <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5">
-                <div className="mb-3">
-                  <p className="text-body font-medium text-bot-text">Custom Default Context</p>
-                  <p className="mt-0.5 text-caption text-bot-muted">Prepended to every new session as additional context for Claude.</p>
-                </div>
-                <textarea
-                  value={settings.custom_default_context ?? ""}
-                  onChange={(e) => setSettings((s) => s ? { ...s, custom_default_context: e.target.value || null } : s)}
-                  onBlur={(e) => update({ custom_default_context: e.target.value || null })}
-                  rows={5}
-                  placeholder="e.g. Focus on the authentication module. Always prefer TypeScript…"
-                  className="w-full rounded-xl border border-bot-border/40 bg-bot-elevated/40 px-4 py-2.5 text-body text-bot-text placeholder:text-bot-muted/50 outline-none focus:border-bot-accent/50 focus:shadow-glow-sm transition-all duration-200 resize-none"
-                />
-              </div>
+              {userExperienceLevel !== "beginner" && (
+                <>
+                  <SettingRow
+                    title="Full Trust Mode"
+                    description="Skip confirmation prompts for destructive operations."
+                    warning={settings.full_trust_mode}
+                    warningText="Full Trust Mode is active. Claude will execute destructive operations without confirmation."
+                  >
+                    <Toggle checked={settings.full_trust_mode} onChange={(v) => update({ full_trust_mode: v })} danger />
+                  </SettingRow>
+                  <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5">
+                    <div className="mb-3">
+                      <p className="text-body font-medium text-bot-text">Custom Default Context</p>
+                      <p className="mt-0.5 text-caption text-bot-muted">Prepended to every new session as additional context for Claude.</p>
+                    </div>
+                    <textarea
+                      value={settings.custom_default_context ?? ""}
+                      onChange={(e) => setSettings((s) => s ? { ...s, custom_default_context: e.target.value || null } : s)}
+                      onBlur={(e) => update({ custom_default_context: e.target.value || null })}
+                      rows={5}
+                      placeholder="e.g. Focus on the authentication module. Always prefer TypeScript…"
+                      className="w-full rounded-xl border border-bot-border/40 bg-bot-elevated/40 px-4 py-2.5 text-body text-bot-text placeholder:text-bot-muted/50 outline-none focus:border-bot-accent/50 focus:shadow-glow-sm transition-all duration-200 resize-none"
+                    />
+                  </div>
+                </>
+              )}
             </div>
             <div className="mt-4 flex items-center gap-2 text-caption">
               {saving && <span className="text-bot-muted">Saving…</span>}
@@ -1552,4 +1581,90 @@ function Toggle({
       <span className={cn("inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-all duration-300", checked ? "translate-x-6" : "translate-x-1")} />
     </button>
   );
+}
+
+// ── Profile Section (experience level, server purpose, project type) ─────────
+
+function ProfileSection() {
+  const profile = useUserProfile();
+  const [experienceLevel, setExperienceLevel] = useState(profile.experience_level);
+  const [autSummary, setAutoSummary] = useState(profile.auto_summary);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const bp = getBasePath();
+
+  const LEVEL_OPTIONS = [
+    { id: "beginner", label: "🌱 Beginner", desc: "Plain language, step-by-step" },
+    { id: "intermediate", label: "🔧 Intermediate", desc: "Technical when needed" },
+    { id: "expert", label: "⚡ Expert", desc: "Full detail, no hand-holding" },
+  ];
+
+  async function save() {
+    setSaving(true);
+    try {
+      await fetch(`${bp}/api/users/profile`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          experience_level: experienceLevel,
+          auto_summary: autSummary,
+          update_claude_md: true,
+        }),
+      });
+      invalidateProfileCache(); // force refetch on next render
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5 space-y-4">
+      <div>
+        <p className="text-body font-medium text-bot-text">Experience Level</p>
+        <p className="mt-0.5 text-caption text-bot-muted">Changes how the assistant communicates and which features are shown.</p>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        {LEVEL_OPTIONS.map((opt) => (
+          <button key={opt.id} onClick={() => setExperienceLevel(opt.id as typeof experienceLevel)}
+            className={cn(
+              "rounded-xl border px-3 py-3 text-left text-caption transition-all duration-200",
+              experienceLevel === opt.id
+                ? "border-bot-accent bg-bot-accent/10 text-bot-accent"
+                : "border-bot-border/40 text-bot-text/80 hover:border-bot-accent/40 hover:bg-bot-elevated/30"
+            )}>
+            <div className="font-medium">{opt.label}</div>
+            <div className={cn("text-[10px] mt-0.5", experienceLevel === opt.id ? "text-bot-accent/70" : "text-bot-muted/60")}>{opt.desc}</div>
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-body text-bot-text">Summarize completed actions</p>
+          <p className="text-caption text-bot-muted mt-0.5">Assistant explains what it did after each task.</p>
+        </div>
+        <button
+          onClick={() => setAutoSummary((v) => !v)}
+          className={cn(
+            "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-300",
+            autSummary ? "bg-bot-accent shadow-glow-sm" : "bg-bot-elevated"
+          )}
+        >
+          <span className={cn("inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-all duration-300", autSummary ? "translate-x-6" : "translate-x-1")} />
+        </button>
+      </div>
+      <div className="flex items-center gap-3 pt-1">
+        <button onClick={save} disabled={saving}
+          className="rounded-lg gradient-accent px-4 py-2 text-caption font-semibold text-white shadow-glow-sm hover:brightness-110 disabled:opacity-50 transition-all duration-200">
+          {saving ? "Saving…" : "Save changes"}
+        </button>
+        {saved && <span className="text-caption text-bot-green">✓ Saved — effective in new sessions</span>}
+      </div>
+    </div>
+  );
+}
+
+function getBasePath() {
+  const slug = process.env.NEXT_PUBLIC_CLAUDE_BOT_SLUG ?? "";
+  const prefix = process.env.NEXT_PUBLIC_CLAUDE_BOT_PATH_PREFIX ?? "c";
+  return slug ? `/${prefix}/${slug}` : "";
 }

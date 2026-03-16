@@ -13,10 +13,12 @@ import { FilesTab } from "@/components/claude-code/files-tab";
 import { MessageSquare, Bot, ListChecks, Brain, Settings, TerminalSquare, FolderTree } from "lucide-react";
 import { motion } from "framer-motion";
 import { NotificationBell } from "@/components/claude-code/notification-bell";
+import { useUserProfile } from "@/hooks/use-user-profile";
+import { LEVEL_VISIBLE_TABS } from "@/lib/user-profile-constants";
 
 type TabKey = "chat" | "agents" | "plan" | "memory" | "settings" | "terminal" | "files";
 
-const BASE_TABS: { key: TabKey; label: string; icon: typeof MessageSquare; adminOnly?: boolean }[] = [
+const ALL_TABS: { key: TabKey; label: string; icon: typeof MessageSquare; adminOnly?: boolean }[] = [
   { key: "chat", label: "Chat", icon: MessageSquare },
   { key: "agents", label: "Agents", icon: Bot },
   { key: "plan", label: "Plan Mode", icon: ListChecks },
@@ -29,7 +31,14 @@ const BASE_TABS: { key: TabKey; label: string; icon: typeof MessageSquare; admin
 export default function DashboardPage() {
   const { data: session } = useSession();
   const isAdmin = Boolean((session?.user as { isAdmin?: boolean })?.isAdmin);
-  const TABS = BASE_TABS.filter((t) => !t.adminOnly || isAdmin);
+  const profile = useUserProfile();
+  const levelKey = profile.experience_level as keyof typeof LEVEL_VISIBLE_TABS;
+  const allowedTabKeys = LEVEL_VISIBLE_TABS[levelKey] ?? LEVEL_VISIBLE_TABS.expert;
+
+  const TABS = ALL_TABS.filter((t) => {
+    if (t.adminOnly && !isAdmin) return false;
+    return allowedTabKeys.includes(t.key);
+  });
 
   const [activeTab, setActiveTab] = useState<TabKey>("chat");
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});

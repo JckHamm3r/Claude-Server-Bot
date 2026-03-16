@@ -5,6 +5,7 @@ import { Terminal, Code2, FileSearch, MessageSquare, Slash, Sparkles, ChevronDow
 import { MessageItem } from "./message-item";
 import { ToolCallGroup } from "./tool-call-group";
 import { apiUrl } from "@/lib/utils";
+import { useUserProfile } from "@/hooks/use-user-profile";
 import type { ChatMessage } from "@/types/chat";
 
 export type { ChatMessage };
@@ -174,6 +175,7 @@ export function MessageList({
   onSendStarter,
   runStartTime,
 }: MessageListProps) {
+  const userProfile = useUserProfile();
   const bottomRef = useRef<HTMLDivElement>(null);
   const activeElRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -346,6 +348,7 @@ export function MessageList({
                     )
                   }
                   botAvatarUrl={botAvatarUrl}
+                  experienceLevel={userProfile.experience_level}
                 />
               </div>
             );

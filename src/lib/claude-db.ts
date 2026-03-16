@@ -586,16 +586,29 @@ export interface ClaudeUserSettings {
   custom_default_context: string | null;
   auto_naming_enabled: boolean;
   setup_complete: boolean;
+  // User profile fields
+  experience_level: string;        // 'beginner' | 'intermediate' | 'expert'
+  server_purposes: string[];       // parsed from JSON
+  project_type: string;            // 'new' | 'existing' | ''
+  auto_summary: boolean;
+  profile_wizard_complete: boolean;
   updated_at: string;
 }
 
 function rowToSettings(row: Record<string, unknown>): ClaudeUserSettings {
+  let server_purposes: string[] = [];
+  try { server_purposes = JSON.parse(row.server_purposes as string ?? "[]"); } catch { /* ignore */ }
   return {
     email: row.email as string,
     full_trust_mode: Boolean(row.full_trust_mode),
     custom_default_context: row.custom_default_context as string | null,
     auto_naming_enabled: Boolean(row.auto_naming_enabled),
     setup_complete: Boolean(row.setup_complete),
+    experience_level: (row.experience_level as string) || "expert",
+    server_purposes,
+    project_type: (row.project_type as string) || "",
+    auto_summary: row.auto_summary !== undefined ? Boolean(row.auto_summary) : true,
+    profile_wizard_complete: Boolean(row.profile_wizard_complete),
     updated_at: row.updated_at as string,
   };
 }
@@ -608,7 +621,17 @@ export function getUserSettings(email: string): ClaudeUserSettings {
 
 export function updateUserSettings(
   email: string,
-  data: Partial<{ full_trust_mode: boolean; custom_default_context: string | null; auto_naming_enabled: boolean; setup_complete: boolean }>,
+  data: Partial<{
+    full_trust_mode: boolean;
+    custom_default_context: string | null;
+    auto_naming_enabled: boolean;
+    setup_complete: boolean;
+    experience_level: string;
+    server_purposes: string[];
+    project_type: string;
+    auto_summary: boolean;
+    profile_wizard_complete: boolean;
+  }>,
 ): ClaudeUserSettings {
   const fields: string[] = [];
   const values: unknown[] = [];
@@ -616,6 +639,12 @@ export function updateUserSettings(
   if (data.custom_default_context !== undefined) { fields.push("custom_default_context = ?"); values.push(data.custom_default_context); }
   if (data.auto_naming_enabled !== undefined) { fields.push("auto_naming_enabled = ?"); values.push(data.auto_naming_enabled ? 1 : 0); }
   if (data.setup_complete !== undefined) { fields.push("setup_complete = ?"); values.push(data.setup_complete ? 1 : 0); }
+  if (data.experience_level !== undefined) { fields.push("experience_level = ?"); values.push(data.experience_level); }
+  if (data.server_purposes !== undefined) { fields.push("server_purposes = ?"); values.push(JSON.stringify(data.server_purposes)); }
+  if (data.project_type !== undefined) { fields.push("project_type = ?"); values.push(data.project_type); }
+  if (data.auto_summary !== undefined) { fields.push("auto_summary = ?"); values.push(data.auto_summary ? 1 : 0); }
+  if (data.profile_wizard_complete !== undefined) { fields.push("profile_wizard_complete = ?"); values.push(data.profile_wizard_complete ? 1 : 0); }
+  if (fields.length === 0) return getUserSettings(email);
   fields.push("updated_at = datetime('now')");
   values.push(email);
   db.prepare("INSERT OR IGNORE INTO user_settings (email) VALUES (?)").run(email);

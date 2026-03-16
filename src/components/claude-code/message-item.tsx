@@ -30,6 +30,7 @@ interface MessageItemProps {
   isRunning?: boolean;
   isInteractive?: boolean;
   botAvatarUrl?: string | null;
+  experienceLevel?: string;
 }
 
 function CopyButton({ text, size = "sm" }: { text: string; size?: "sm" | "xs" }) {
@@ -236,6 +237,7 @@ export const MessageItem = memo(function MessageItem({
   isRunning,
   isInteractive,
   botAvatarUrl,
+  experienceLevel,
 }: MessageItemProps) {
   const isUser = message.sender_type === "admin";
   const [isEditing, setIsEditing] = useState(false);
@@ -338,6 +340,7 @@ export const MessageItem = memo(function MessageItem({
             disabled={!isInteractive}
             sandboxCategory={p.sandboxCategory}
             sandboxReason={p.sandboxReason}
+            experienceLevel={experienceLevel}
           />
         </div>
       );
