@@ -22,7 +22,7 @@ When enabled, tool use is auto-approved without prompting the user. A banner is 
 ## Chat Features
 
 - **Message sending** -- Type in the input area and send. Messages are queued if Claude is currently processing.
-- **Slash commands** -- `/compact`, `/clear`, `/memory`, and others for quick actions.
+- **Slash commands** -- Type `/` for a palette of quick-action commands (see table below).
 - **@ file references** -- Type `@` to autocomplete and reference project files.
 - **File attachments** -- Attach uploaded files (including images) to messages.
 - **Tool approval** -- When Claude wants to use a tool, a permission card appears with three options: Allow Once, Allow for Session, or Always Allow. Multiple permission requests can be pending simultaneously; each card remains interactive and can be approved independently. The session resumes only after all pending permissions are resolved.
@@ -32,6 +32,25 @@ When enabled, tool use is auto-approved without prompting the user. A banner is 
 - **Interrupt** -- Stop Claude mid-response.
 - **Retry** -- Re-send the last message.
 - **Clear context** -- Reset conversation context.
+
+## Slash Commands
+
+Commands can be typed directly in the chat input. Type `/` to open the autocomplete palette.
+
+| Command | Args | Behavior |
+|---------|------|----------|
+| `/compact` | `[focus]` | Compact conversation history (passes to Claude SDK). Triggered automatically at 93% context. |
+| `/clear` | | **Client-side**: closes and restarts the Claude session, wiping context. |
+| `/help` | | **Client-side**: injects a formatted help message listing all commands and keyboard shortcuts. |
+| `/cost` | | **Client-side**: injects a message showing input/output token counts and estimated cost for the session. |
+| `/status` | | **Client-side**: injects a message showing session ID, name, model, skip-permissions state, and context usage. |
+| `/memory` | | **Passes to Claude**: ask Claude to list or edit project memory files (CLAUDE.md, docs/). |
+| `/rename` | `<name>` | **Client-side**: renames the current session without sending anything to Claude. |
+| `/new` | `[name]` | **Client-side**: creates a new session (with optional name) or opens the New Session dialog. |
+| `/export` | `[md\|json]` | **Client-side**: downloads the current session as Markdown (default) or JSON. |
+| `/model` | `<model>` | **Client-side**: switches the AI model for the current session. Shows available models if no arg given. |
+
+Commands not in this table are passed through to Claude unchanged (e.g. any custom prompts starting with `/`).
 
 ## Tool Calls
 

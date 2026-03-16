@@ -23,15 +23,16 @@ interface ChatInputProps {
 }
 
 const SLASH_COMMANDS = [
-  { cmd: "/compact", args: "[focus]", desc: "Compact conversation history to save context" },
-  { cmd: "/clear",   args: "",        desc: "Clear conversation context completely" },
-  { cmd: "/memory",  args: "",        desc: "View and manage Claude's memory files" },
-  { cmd: "/help",    args: "",        desc: "Show available commands and usage" },
-  { cmd: "/cost",    args: "",        desc: "Show token usage for this session" },
-  { cmd: "/doctor",  args: "",        desc: "Run diagnostics on Claude Code setup" },
-  { cmd: "/status",  args: "",        desc: "Show current session info" },
-  { cmd: "/init",    args: "",        desc: "Initialize Claude Code in a project" },
-  { cmd: "/bug",     args: "",        desc: "Report a Claude Code bug" },
+  { cmd: "/compact", args: "[focus]",    desc: "Compact conversation history to save context" },
+  { cmd: "/clear",   args: "",           desc: "Clear conversation context and start fresh" },
+  { cmd: "/help",    args: "",           desc: "Show available commands" },
+  { cmd: "/cost",    args: "",           desc: "Show token usage and cost for this session" },
+  { cmd: "/status",  args: "",           desc: "Show current session info" },
+  { cmd: "/memory",  args: "",           desc: "List and manage project memory files" },
+  { cmd: "/rename",  args: "<name>",     desc: "Rename the current session" },
+  { cmd: "/new",     args: "[name]",     desc: "Create a new session" },
+  { cmd: "/export",  args: "[md|json]",  desc: "Export this session" },
+  { cmd: "/model",   args: "<model>",    desc: "Switch the AI model" },
 ];
 
 export interface ChatInputHandle {

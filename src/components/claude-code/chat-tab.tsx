@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import type { ClaudeSession } from "@/lib/claude-db";
-import { DEFAULT_MODEL } from "@/lib/models";
+import { DEFAULT_MODEL, AVAILABLE_MODELS, getModelLabel } from "@/lib/models";
 import { apiUrl } from "@/lib/utils";
 import { SessionSidebar } from "./session-sidebar";
 import { MessageList } from "./message-list";
@@ -13,6 +13,7 @@ import { SkipPermissionsBanner } from "./skip-permissions-banner";
 import { UnifiedSearchDialog } from "./unified-search-dialog";
 import { ChatInput } from "./chat-input";
 import { useChatSocket } from "@/hooks/use-chat-socket";
+import type { ChatMessage } from "@/types/chat";
 
 interface ChatTabProps {
   isWidget?: boolean;
@@ -193,33 +194,6 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
     [activeSession, chat],
   );
 
-  const handleSendWithAutoName = useCallback(
-    (content: string, attachments?: string[]) => {
-      if (!activeSession) {
-        handleCreateSession("", false);
-        return;
-      }
-
-      chat.handleSend(content, attachments);
-    },
-    [activeSession, chat, handleCreateSession],
-  );
-
-  const handleDeleteSession = useCallback(
-    (session: ClaudeSession) => {
-      chat.emit("claude:delete_session", { sessionId: session.id });
-      setSessions((prev) => prev.filter((s) => s.id !== session.id));
-      if (chat.activeSessionRef.current?.id === session.id) {
-        chat.activeSessionRef.current = null;
-        setActiveSession(null);
-        chat.resetSessionState();
-        chat.setIsRunning(false);
-        try { localStorage.removeItem(ACTIVE_SESSION_KEY); } catch { /* ignore */ }
-      }
-    },
-    [chat],
-  );
-
   const handleRenameSession = useCallback(
     (session: ClaudeSession, newName: string) => {
       chat.emit("claude:rename_session", { sessionId: session.id, name: newName });
@@ -264,10 +238,187 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
     });
   }, [activeSession, chat]);
 
+  const handleDeleteSession = useCallback(
+    (session: ClaudeSession) => {
+      chat.emit("claude:delete_session", { sessionId: session.id });
+      setSessions((prev) => prev.filter((s) => s.id !== session.id));
+      if (chat.activeSessionRef.current?.id === session.id) {
+        chat.activeSessionRef.current = null;
+        setActiveSession(null);
+        chat.resetSessionState();
+        chat.setIsRunning(false);
+        try { localStorage.removeItem(ACTIVE_SESSION_KEY); } catch { /* ignore */ }
+      }
+    },
+    [chat],
+  );
+
   const handleCompact = useCallback(() => {
     if (!activeSession || chat.isRunning) return;
     chat.handleSend("/compact");
   }, [activeSession, chat]);
+
+  const injectLocalMessage = useCallback(
+    (content: string) => {
+      const msg: ChatMessage = {
+        id: "local-" + Date.now(),
+        sender_type: "claude",
+        content,
+        parsed: { type: "text", content },
+        timestamp: new Date().toISOString(),
+      };
+      chat.setMessages((prev) => [...prev, msg]);
+    },
+    [chat],
+  );
+
+  const handleSendWithAutoName = useCallback(
+    (content: string, attachments?: string[]) => {
+      if (!activeSession) {
+        handleCreateSession("", false);
+        return;
+      }
+
+      // ── Client-side slash command interception ──────────────────────────
+      const trimmed = content.trim();
+      if (trimmed.startsWith("/") && !attachments?.length) {
+        const parts = trimmed.split(/\s+/);
+        const cmd = parts[0].toLowerCase();
+        const args = parts.slice(1);
+
+        switch (cmd) {
+          case "/clear": {
+            handleClearContext();
+            return;
+          }
+
+          case "/help": {
+            const lines = [
+              "**Available Commands**",
+              "",
+              "| Command | Description |",
+              "|---------|-------------|",
+              "| `/compact [focus]` | Compact conversation history to save context |",
+              "| `/clear` | Clear conversation context and start fresh |",
+              "| `/help` | Show this help message |",
+              "| `/cost` | Show token usage and cost for this session |",
+              "| `/status` | Show current session info |",
+              "| `/memory` | List and manage project memory files |",
+              "| `/rename <name>` | Rename the current session |",
+              "| `/new [name]` | Create a new session |",
+              "| `/export [md\\|json]` | Export this session (default: markdown) |",
+              "| `/model <model>` | Switch the AI model |",
+              "",
+              "**Keyboard Shortcuts**",
+              "",
+              "| Shortcut | Action |",
+              "|----------|--------|",
+              "| `Ctrl/Cmd+F` | Search in session |",
+              "| `Ctrl/Cmd+Shift+F` | Global search across all sessions |",
+              "| `Ctrl/Cmd+/` | Focus chat input |",
+              "| `Ctrl/Cmd+Shift+C` | Copy last Claude reply |",
+              "",
+              "**@ File References** — type `@` to autocomplete project files.",
+            ];
+            injectLocalMessage(lines.join("\n"));
+            return;
+          }
+
+          case "/cost": {
+            const usage = chat.sessionUsage;
+            if (!usage || usage.total_input_tokens === 0) {
+              injectLocalMessage("No usage recorded for this session yet.");
+            } else {
+              const inputK = (usage.total_input_tokens / 1000).toFixed(1);
+              const outputK = (usage.total_output_tokens / 1000).toFixed(1);
+              const cost = usage.total_cost_usd.toFixed(4);
+              injectLocalMessage(
+                `**Session Token Usage**\n\n` +
+                `- Input tokens: ${usage.total_input_tokens.toLocaleString()} (${inputK}k)\n` +
+                `- Output tokens: ${usage.total_output_tokens.toLocaleString()} (${outputK}k)\n` +
+                `- Total tokens: ${(usage.total_input_tokens + usage.total_output_tokens).toLocaleString()}\n` +
+                `- Estimated cost: **$${cost}**`,
+              );
+            }
+            return;
+          }
+
+          case "/status": {
+            const modelLabel = getModelLabel(chat.sessionModel);
+            const contextPct = chat.contextUsage?.percentage ?? 0;
+            const contextToks = chat.contextUsage?.inputTokens ?? 0;
+            const contextMax = chat.contextUsage?.contextWindow ?? 0;
+            injectLocalMessage(
+              `**Session Status**\n\n` +
+              `- Session ID: \`${activeSession.id.slice(0, 8)}...\`\n` +
+              `- Name: ${activeSession.name ?? "*(unnamed)*"}\n` +
+              `- Model: ${modelLabel}\n` +
+              `- Skip permissions: ${activeSession.skip_permissions ? "**enabled**" : "off"}\n` +
+              `- Context window: ${contextToks > 0 ? `${contextPct}% (${(contextToks / 1000).toFixed(0)}k / ${(contextMax / 1000).toFixed(0)}k tokens)` : "n/a"}\n` +
+              `- Status: ${chat.isRunning ? "running" : "idle"}`,
+            );
+            return;
+          }
+
+          case "/rename": {
+            const newName = args.join(" ").trim();
+            if (!newName) {
+              injectLocalMessage("Usage: `/rename <new session name>`");
+            } else {
+              handleRenameSession(activeSession, newName);
+              injectLocalMessage(`Session renamed to **${newName}**.`);
+            }
+            return;
+          }
+
+          case "/new": {
+            const newSessionName = args.join(" ").trim();
+            if (newSessionName) {
+              handleCreateSession(newSessionName, false);
+            } else {
+              setShowNewDialog(true);
+            }
+            return;
+          }
+
+          case "/export": {
+            const fmt = (args[0] ?? "md").toLowerCase();
+            const format = fmt === "json" ? "json" : "markdown";
+            window.open(apiUrl(`/api/claude-code/export?sessionId=${activeSession.id}&format=${format}`), "_blank");
+            injectLocalMessage(`Exporting session as **${format}**…`);
+            return;
+          }
+
+          case "/model": {
+            const modelArg = args[0]?.toLowerCase() ?? "";
+            if (!modelArg) {
+              const modelList = AVAILABLE_MODELS.map((m) => `- \`${m.value}\` — ${m.label}`).join("\n");
+              injectLocalMessage(`**Available models:**\n\n${modelList}\n\nUsage: \`/model <model-id>\``);
+            } else {
+              const match = AVAILABLE_MODELS.find(
+                (m) => m.value === modelArg || m.label.toLowerCase().includes(modelArg),
+              );
+              if (!match) {
+                const modelList = AVAILABLE_MODELS.map((m) => `\`${m.value}\``).join(", ");
+                injectLocalMessage(`Unknown model \`${modelArg}\`. Available: ${modelList}`);
+              } else {
+                handleModelChange(match.value);
+                injectLocalMessage(`Model switched to **${match.label}**.`);
+              }
+            }
+            return;
+          }
+
+          default:
+            // Unknown slash command — pass through to Claude
+            break;
+        }
+      }
+
+      chat.handleSend(content, attachments);
+    },
+    [activeSession, chat, handleCreateSession, handleClearContext, handleRenameSession, handleModelChange, injectLocalMessage, setShowNewDialog],
+  );
 
   return (
     <div className="flex h-full overflow-hidden">
