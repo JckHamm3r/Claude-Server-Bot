@@ -9,6 +9,7 @@ import { MemoryTab } from "@/components/claude-code/memory-tab";
 import { SettingsPanel } from "@/components/claude-code/settings-panel";
 import { MessageSquare, Bot, ListChecks, Brain, Settings } from "lucide-react";
 import { motion } from "framer-motion";
+import { NotificationBell } from "@/components/claude-code/notification-bell";
 
 type TabKey = "chat" | "agents" | "plan" | "memory" | "settings";
 
@@ -44,7 +45,7 @@ export default function DashboardPage() {
     <div className="flex flex-col h-screen bg-bot-bg">
       {/* Tab bar */}
       <div className="relative border-b border-bot-border/60 bg-bot-surface/80 backdrop-blur-md shrink-0">
-        <div className="flex items-center px-4 py-1">
+        <div className="flex items-center justify-between px-4 py-1">
           <div className="relative flex items-center gap-0.5">
             {TABS.map((tab) => {
               const Icon = tab.icon;
@@ -72,6 +73,7 @@ export default function DashboardPage() {
               transition={{ type: "spring", stiffness: 400, damping: 30 }}
             />
           </div>
+          <NotificationBell />
         </div>
       </div>
 
