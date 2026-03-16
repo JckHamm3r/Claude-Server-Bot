@@ -385,9 +385,11 @@ for (let v = currentVersion + 1; v <= LATEST_SCHEMA_VERSION; v++) {
 db.exec("UPDATE sessions SET status = 'idle' WHERE status IN ('running', 'needs_attention')");
 
 // Seed or sync admin user from env
+// TEMPORARY: Disabled due to env parsing issue with bcrypt $ characters
+// TODO: Fix .env parsing or use alternative password storage method
 const adminEmail = process.env.CLAUDE_BOT_ADMIN_EMAIL;
 const adminHash = process.env.CLAUDE_BOT_ADMIN_HASH;
-if (adminEmail && adminHash) {
+if (false && adminEmail && adminHash) {
   const existing = db.prepare("SELECT hash FROM users WHERE email = ?").get(adminEmail) as { hash: string } | undefined;
   if (!existing) {
     db.prepare("INSERT INTO users (email, hash, is_admin) VALUES (?, ?, 1)").run(adminEmail, adminHash);
