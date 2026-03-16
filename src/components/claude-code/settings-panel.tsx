@@ -539,7 +539,9 @@ export function SettingsPanel() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-8 pb-12 space-y-6">
+      <div className={activeSection === "customization"
+        ? "flex-1 overflow-hidden p-6 flex flex-col"
+        : "flex-1 overflow-y-auto p-8 pb-12 space-y-6"}>
 
         {/* ── General ── */}
         {activeSection === "general" && (
