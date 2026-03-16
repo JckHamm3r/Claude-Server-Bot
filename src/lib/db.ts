@@ -356,7 +356,19 @@ const migrations: Record<number, () => void> = {
       );
     `);
   },
-  // Future migrations go here as 2, 3, etc.
+  2: () => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS memories (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at DESC);
+    `);
+  },
 };
 
 const LATEST_SCHEMA_VERSION = Math.max(...Object.keys(migrations).map(Number));

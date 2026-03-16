@@ -21,18 +21,34 @@ Project context files stored on disk (not in the database) that Claude reads at 
 
 ## Memory Tab
 
-The Memory tab in the dashboard provides a file list and editor for managing all memory files. Users can:
+The Memory tab in the dashboard has two sub-tabs:
 
-- Browse the list of memory files across all three locations.
-- Read file contents in the editor.
-- Edit and save changes (admin only via API).
+### Memories (individual items)
+
+Users can manage individual, standalone memory items:
+
+- Browse the list of all saved memories with expand/collapse
+- Add new memories with a title and content (admin only)
+- Edit existing memories — update title and/or content (admin only)
+- Delete memories (admin only, with confirmation)
+- Import from a `.md` file using AI — Claude parses the document and extracts individual titled memories automatically (admin only)
+
+### Context Files
+
+The traditional file browser/editor for raw memory files:
+
+- Browse files across `CLAUDE.md`, `.claude/memory/`, and `.context/`
+- Read file contents in the Monaco editor
+- Edit and save changes (admin only via API)
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `src/components/claude-code/memory-tab.tsx` | Memory file browser and editor UI |
-| `src/app/api/claude-code/memory/route.ts` | Memory file read/write API |
+| `src/components/claude-code/memory-tab.tsx` | Memory tab UI — individual items + file browser |
+| `src/app/api/claude-code/memories/route.ts` | Individual memory items CRUD API (GET/POST/PUT/DELETE) |
+| `src/app/api/claude-code/memories/import/route.ts` | AI-powered .md import endpoint |
+| `src/app/api/claude-code/memory/route.ts` | Memory file read/write API (CLAUDE.md, .claude/memory, .context) |
 | `src/lib/system-prompt.ts` | System prompt composition (reads CLAUDE.md) |
 
 ## Agent Context System (.context/)
@@ -69,3 +85,8 @@ The `.context/` folder is a persistent knowledge base the agent builds and maint
 |--------|-------|---------|
 | GET | `/api/claude-code/memory` | List and read memory and context files |
 | PUT | `/api/claude-code/memory` | Write memory files (admin only) |
+| GET | `/api/claude-code/memories` | List all individual memory items |
+| POST | `/api/claude-code/memories` | Create a memory item (admin only) |
+| PUT | `/api/claude-code/memories` | Update a memory item (admin only) |
+| DELETE | `/api/claude-code/memories?id=<id>` | Delete a memory item (admin only) |
+| POST | `/api/claude-code/memories/import` | AI-parse a .md file and bulk-create memories (admin only) |

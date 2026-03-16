@@ -47,12 +47,19 @@ Admin-created presets for starting new sessions:
 
 ## Memory
 
-Project context files stored on disk (not in DB):
+Project context in two forms:
 
+**Individual Memory Items** (stored in SQLite `memories` table):
+- Standalone titled memory entries visible in the Memory tab
+- Add, edit, rename, delete individual items (admin only)
+- Import from `.md` file: AI (claude-haiku) parses the document and extracts individual titled memories
+- All users can view; only admins can modify
+
+**Context Files** (stored on disk):
 - `CLAUDE.md` — Main project instructions (slim index with reference table)
 - `.claude/docs/*.md` — Detailed reference docs (read on demand, not auto-ingested)
 - `.claude/memory/*.md` — Additional memory files
-- Readable/writable via Memory tab in UI
+- Readable/writable via Context Files sub-tab in Memory tab
 - Admin-only write access via API
 
 ## Notifications
