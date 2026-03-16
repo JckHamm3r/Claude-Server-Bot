@@ -83,6 +83,21 @@ Key-value store in `app_settings`:
 - `budget_limit_session_usd` / `budget_limit_daily_usd` / `budget_limit_monthly_usd` — Cost budgets (0 = no cap)
 - `upload_max_size_bytes` (default 10MB) — File upload limit
 
+## Services (Admin Settings)
+
+Admin Settings > Services section provides:
+
+- **App Service status** — Shows whether the systemd `claude-bot.service` is active or inactive with a live indicator and last-started timestamp.
+- **Restart operation** — One-click service restart via `sudo systemctl restart` (spawned as a detached process so the current response completes first).
+- **Version & Updates** — Shows the current git commit hash and tag, plus the latest commit/tag from GitHub. Indicates when an update is available.
+- **Apply Update** — Triggers `update.sh` in a detached background process with output logged to `/tmp/claude-bot-update.log`.
+- **Component Health** — Overview of all core components: Database, Claude SDK, Anthropic API key, Socket.IO server, SMTP.
+
+Key files:
+- `src/components/claude-code/settings/services-section.tsx` — React component
+- `src/app/api/system/service/route.ts` — GET status, POST restart/stop/start, PATCH update
+- `src/app/api/system/version/route.ts` — GET version info + GitHub check
+
 ## PTY Terminal
 
 Admin-accessible terminal sessions via Socket.IO for direct server access.
