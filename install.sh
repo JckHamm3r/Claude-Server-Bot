@@ -279,7 +279,7 @@ progress_bar() {
 }
 
 run_cmd() {
-  if $VERBOSE; then "$@"; else "$@" 2>/dev/null; fi
+  if $VERBOSE; then "$@"; else "$@" > /dev/null 2>&1; fi
 }
 
 safe_rm_install_dir() {
@@ -539,7 +539,7 @@ Options:
   --bot-name <name>     Bot display name (optional — set in the web UI after login)
   --email <email>       Admin email address
   --domain <domain>     Domain name (optional)
-  --https <method>      HTTPS method: letsencrypt, cloudflare, none
+  --https <method>      HTTPS method: letsencrypt, cloudflare, selfsigned, none
   --project-root <dir>  Working directory for Claude
   --port <port>         Server port (default: 3000)
   --install-dir <dir>   Installation directory
@@ -629,7 +629,7 @@ screen_welcome() {
     echo -e "    ${CYAN}1${NC}  Production server  ${DIM}— systemd, nginx, HTTPS${NC}"
     echo -e "    ${CYAN}2${NC}  Local machine      ${DIM}— dev, home server, Raspberry Pi${NC}"
     echo ""
-    if ! prompt_input "Choice" "1"; then continue; fi
+    if ! prompt_input "Choice" "1"; then NEXT_STEP=1; return; fi
     case "$REPLY" in
       1|vps)   DEPLOY_MODE="vps" ;;
       2|local) DEPLOY_MODE="local" ;;
@@ -769,6 +769,7 @@ screen_configure() {
       case "$CLI_HTTPS" in
         letsencrypt) USE_HTTPS=true; HTTPS_METHOD="letsencrypt"; SETUP_NGINX=true ;;
         cloudflare)  USE_HTTPS=true; HTTPS_METHOD="cloudflare"; SETUP_CF_TUNNEL=true ;;
+        none)        USE_HTTPS=false; HTTPS_METHOD="none" ;;
         *)           USE_HTTPS=true; HTTPS_METHOD="selfsigned" ;;
       esac
     else
@@ -935,6 +936,14 @@ check_and_install_prerequisites() {
   local missing=()
   local need_node=false need_pnpm=false need_git=false need_openssl=false need_build_tools=false
 
+  # Disk space check first — before any installation consumes space
+  local avail_kb
+  avail_kb=$(df -k . 2>/dev/null | awk 'NR==2 {print $4}')
+  if [ "${avail_kb:-0}" -lt 512000 ]; then
+    error "Insufficient disk space (need 500 MB minimum, have $(( ${avail_kb:-0} / 1024 )) MB)"
+    exit 1
+  fi
+
   if ! command -v node &>/dev/null; then
     need_node=true
   else
@@ -1015,14 +1024,6 @@ check_and_install_prerequisites() {
     info "Build tools installed"
   fi
 
-  # Disk space
-  local avail_kb
-  avail_kb=$(df -k . 2>/dev/null | awk 'NR==2 {print $4}')
-  if [ "${avail_kb:-0}" -lt 512000 ]; then
-    error "Insufficient disk space (need 500 MB minimum)"
-    exit 1
-  fi
-
   info "All prerequisites satisfied"
   return 0
 }
@@ -1083,7 +1084,10 @@ fs.writeFileSync(process.argv[11], JSON.stringify(config));
 
   # Write API key to .env if provided
   if [ -n "${CLI_API_KEY:-}" ]; then
-    echo "ANTHROPIC_API_KEY=$CLI_API_KEY" >> "$INSTALL_DIR/.env"
+    # Escape $ signs to prevent dotenv-expand from treating them as variable refs
+    local escaped_key
+    escaped_key="${CLI_API_KEY//\$/\\\$}"
+    echo "ANTHROPIC_API_KEY=${escaped_key}" >> "$INSTALL_DIR/.env"
     info "Anthropic API key added to .env"
   fi
 }
@@ -1096,9 +1100,24 @@ generate_selfsigned_cert() {
   [ -z "$cert_cn" ] && cert_cn="localhost"
   local san="DNS:$cert_cn,DNS:localhost"
   [[ "$cert_cn" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && san="IP:$cert_cn,IP:127.0.0.1,DNS:localhost"
-  openssl req -x509 -newkey rsa:2048 -nodes \
-    -keyout "$cert_dir/key.pem" -out "$cert_dir/cert.pem" -days 365 \
-    -subj "/CN=$cert_cn" -addext "subjectAltName=$san" 2>/dev/null
+  # Try -addext first (OpenSSL >= 1.1.1); fall back to a temporary ext file for older versions
+  if openssl req -x509 -newkey rsa:2048 -nodes \
+      -keyout "$cert_dir/key.pem" -out "$cert_dir/cert.pem" -days 365 \
+      -subj "/CN=$cert_cn" -addext "subjectAltName=$san" 2>/dev/null; then
+    : # success
+  else
+    local ext_file
+    ext_file="$(mktemp)"
+    printf '[san]\nsubjectAltName=%s\n' "$san" > "$ext_file"
+    openssl req -x509 -newkey rsa:2048 -nodes \
+      -keyout "$cert_dir/key.pem" -out "$cert_dir/cert.pem" -days 365 \
+      -subj "/CN=$cert_cn" \
+      -extensions san -config <(cat /etc/ssl/openssl.cnf 2>/dev/null || openssl version -d | sed 's/.*"\(.*\)".*/\1\/openssl.cnf/'; cat "$ext_file") 2>/dev/null || \
+    openssl req -x509 -newkey rsa:2048 -nodes \
+      -keyout "$cert_dir/key.pem" -out "$cert_dir/cert.pem" -days 365 \
+      -subj "/CN=$cert_cn" 2>/dev/null
+    rm -f "$ext_file"
+  fi
   chmod 600 "$cert_dir/key.pem"
   chmod 644 "$cert_dir/cert.pem"
   if [ -f "$INSTALL_DIR/.env" ]; then
@@ -1223,6 +1242,10 @@ fs.writeFileSync(envPath, env);
   if $SETUP_UFW; then
     sudo ufw allow 80/tcp > /dev/null 2>&1 || true
     sudo ufw allow 443/tcp > /dev/null 2>&1 || true
+    # Enable UFW if it isn't already active
+    if ! sudo ufw status 2>/dev/null | grep -q "active"; then
+      sudo ufw --force enable > /dev/null 2>&1 || warn "Could not enable UFW — rules staged but not yet active"
+    fi
     info "UFW rules added"
   fi
 
@@ -1371,6 +1394,7 @@ upgrade_in_place() {
   backup_dir="$(mktemp -d)"
   [ -f "$target_dir/.env" ] && cp "$target_dir/.env" "$backup_dir/.env"
   [ -d "$target_dir/data" ] && cp -r "$target_dir/data" "$backup_dir/data"
+  [ -d "$target_dir/certs" ] && cp -r "$target_dir/certs" "$backup_dir/certs"
   cd "$target_dir"
   if ! git pull --ff-only 2>/dev/null; then
     local repo_url
@@ -1382,6 +1406,7 @@ upgrade_in_place() {
   fi
   [ -f "$backup_dir/.env" ] && cp "$backup_dir/.env" "$target_dir/.env"
   [ -d "$backup_dir/data" ] && cp -r "$backup_dir/data" "$target_dir/data"
+  [ -d "$backup_dir/certs" ] && cp -r "$backup_dir/certs" "$target_dir/certs"
   rm -rf "$backup_dir"
   [ -f "$target_dir/.env.example" ] && migrate_env "$target_dir/.env" "$target_dir/.env.example"
   pnpm install --frozen-lockfile --reporter=silent 2>&1 || pnpm install --reporter=silent 2>&1
@@ -1402,7 +1427,7 @@ upgrade_in_place() {
 
 migrate_env() {
   local env_file="${1:-.env}" example_file="${2:-.env.example}"
-  [ ! -f "$example_file" ] || [ ! -f "$env_file" ] && return
+  { [ ! -f "$example_file" ] || [ ! -f "$env_file" ]; } && return
   while IFS= read -r line; do
     [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
     local key="${line%%=*}"
@@ -1465,6 +1490,7 @@ run_installation() {
       backup_dir="$(mktemp -d)"
       [ -d "$INSTALL_DIR/data" ] && cp -r "$INSTALL_DIR/data" "$backup_dir/data"
       [ -f "$INSTALL_DIR/.env" ] && cp "$INSTALL_DIR/.env" "$backup_dir/.env.old"
+      [ -d "$INSTALL_DIR/certs" ] && cp -r "$INSTALL_DIR/certs" "$backup_dir/certs"
     fi
     if $UNATTENDED; then
       safe_rm_install_dir
@@ -1486,9 +1512,9 @@ run_installation() {
   CLONE_DONE=true
   info "Cloned into $INSTALL_DIR"
   cd "$INSTALL_DIR"
-  [ -n "${INSTALL_LOG:-}" ] && [ -f "$INSTALL_LOG" ] && cp "$INSTALL_LOG" "$INSTALL_DIR/install.log"
   if [ -n "${backup_dir:-}" ] && [ -d "${backup_dir:-}" ]; then
     [ -d "$backup_dir/data" ] && cp -r "$backup_dir/data" "$INSTALL_DIR/data"
+    [ -d "$backup_dir/certs" ] && cp -r "$backup_dir/certs" "$INSTALL_DIR/certs"
     rm -rf "$backup_dir"
   fi
 
@@ -1581,11 +1607,11 @@ run_installation() {
   local health_url="${health_scheme}://localhost:${PORT}/$BOT_PATH_PREFIX/$SLUG/api/health/ping"
   sleep 3
   local healthy=false
-  for _ in $(seq 1 5); do
+  for _ in $(seq 1 12); do
     local http_code
     http_code=$(curl $health_curl_flags "$health_url" 2>/dev/null || echo "000")
     [ "$http_code" = "200" ] && { healthy=true; break; }
-    sleep 2
+    sleep 3
   done
   $healthy && info "Health check passed!" || warn "Health check inconclusive — server may still be starting."
 

@@ -44,6 +44,25 @@ for (const key of required) {
   }
 }
 
+// Validate formats to catch injection or misconfiguration early
+const portNum = parseInt(config.port, 10);
+if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
+  console.error(`Invalid port value: ${config.port}`);
+  process.exit(1);
+}
+if (!/^[a-zA-Z0-9_-]+$/.test(config.pathPrefix)) {
+  console.error(`Invalid pathPrefix — must be alphanumeric with hyphens/underscores only: ${config.pathPrefix}`);
+  process.exit(1);
+}
+if (!/^[a-zA-Z0-9]+$/.test(config.slug)) {
+  console.error(`Invalid slug — must be alphanumeric only: ${config.slug}`);
+  process.exit(1);
+}
+if (config.installDir.includes("..")) {
+  console.error(`Invalid installDir — must not contain '..': ${config.installDir}`);
+  process.exit(1);
+}
+
 const hash = bcrypt.hashSync(config.password, 12);
 
 // Verify the hash immediately to catch bcrypt issues
@@ -62,15 +81,15 @@ const env = [
   "PORT=" + config.port,
   "NEXTAUTH_URL=" + config.baseUrl + "/" + config.pathPrefix + "/" + config.slug,
   "NEXTAUTH_SECRET=" + escapeForDotenv(config.secret),
-  "CLAUDE_BOT_PATH_PREFIX=" + config.pathPrefix,
-  "NEXT_PUBLIC_CLAUDE_BOT_PATH_PREFIX=" + config.pathPrefix,
-  "CLAUDE_BOT_SLUG=" + config.slug,
-  "NEXT_PUBLIC_CLAUDE_BOT_SLUG=" + config.slug,
-  "CLAUDE_BOT_NAME=" + config.botName,
-  "CLAUDE_BOT_ADMIN_EMAIL=" + config.email,
+  "CLAUDE_BOT_PATH_PREFIX=" + escapeForDotenv(config.pathPrefix),
+  "NEXT_PUBLIC_CLAUDE_BOT_PATH_PREFIX=" + escapeForDotenv(config.pathPrefix),
+  "CLAUDE_BOT_SLUG=" + escapeForDotenv(config.slug),
+  "NEXT_PUBLIC_CLAUDE_BOT_SLUG=" + escapeForDotenv(config.slug),
+  "CLAUDE_BOT_NAME=" + escapeForDotenv(config.botName),
+  "CLAUDE_BOT_ADMIN_EMAIL=" + escapeForDotenv(config.email),
   "CLAUDE_BOT_ADMIN_HASH=" + escapeForDotenv(hash),
-  "CLAUDE_PROJECT_ROOT=" + config.projectRoot,
-  "DATA_DIR=" + path.join(config.installDir, "data"),
+  "CLAUDE_PROJECT_ROOT=" + escapeForDotenv(config.projectRoot),
+  "DATA_DIR=" + escapeForDotenv(path.join(config.installDir, "data")),
 ].join("\n") + "\n";
 
 const envPath = path.join(config.installDir, ".env");

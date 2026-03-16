@@ -49,9 +49,13 @@ export async function middleware(request: NextRequest) {
       return NextResponse.next();
     }
 
+    // Only the admin owner needs to complete setup. Non-admin users skip the
+    // wizard entirely and go straight to the dashboard.
+    const isAdmin = token.isAdmin === true;
     const setupComplete = token.setupComplete === true ||
       request.cookies.get("bot_setup_complete")?.value === "1";
     if (
+      isAdmin &&
       !setupComplete &&
       pathname !== "/setup" &&
       !pathname.startsWith("/api/settings/project") &&

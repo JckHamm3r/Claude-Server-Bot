@@ -12,7 +12,13 @@ INSTALL_DIR="${5:-}"
 ADMIN_EMAIL="${6:-}"
 
 json_ok()    { echo "{\"ok\":true}"; }
-json_fail()  { echo "{\"ok\":false,\"error\":$(printf '%s' "$1" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')}"; exit 0; }
+json_fail()  {
+  local msg
+  # Escape the error string for JSON without requiring python3
+  msg=$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g' | tr -d '\n')
+  echo "{\"ok\":false,\"error\":\"${msg}\"}"
+  exit 0
+}
 
 # Validate domain format
 if ! echo "$DOMAIN" | grep -qE '^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$'; then
@@ -47,11 +53,24 @@ if [ -n "$ADMIN_EMAIL" ] && ! echo "$ADMIN_EMAIL" | grep -qE '^[^@[:space:]]+@[^
   json_fail "Invalid email format: $ADMIN_EMAIL"
 fi
 
+# Detect package manager
+_pkg_install() {
+  if command -v apt-get &>/dev/null; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq >/dev/null 2>&1
+    apt-get install -y -qq "$@" >/dev/null 2>&1
+  elif command -v dnf &>/dev/null; then
+    dnf install -y -q "$@" >/dev/null 2>&1
+  elif command -v yum &>/dev/null; then
+    yum install -y -q "$@" >/dev/null 2>&1
+  else
+    return 1
+  fi
+}
+
 # Install nginx if missing
 if ! command -v nginx &>/dev/null; then
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq >/dev/null 2>&1
-  apt-get install -y -qq nginx >/dev/null 2>&1 || json_fail "Failed to install nginx"
+  _pkg_install nginx || json_fail "Failed to install nginx — no supported package manager found"
 fi
 
 # Determine config path
@@ -64,11 +83,11 @@ else
   nginx_conf="/etc/nginx/conf.d/claude-bot.conf"
 fi
 
-# Build location path
-LOCATION_PATH="/"
-if [ -n "$PATH_PREFIX" ] && [ -n "$SLUG" ]; then
-  LOCATION_PATH="/${PATH_PREFIX}/${SLUG}/"
+# Build location path — both PATH_PREFIX and SLUG are required for safe operation
+if [ -z "$PATH_PREFIX" ] || [ -z "$SLUG" ]; then
+  json_fail "Both path-prefix and slug are required for nginx configuration"
 fi
+LOCATION_PATH="/${PATH_PREFIX}/${SLUG}/"
 
 # Detect whether upstream Node.js server uses TLS (self-signed certs)
 UPSTREAM_SCHEME="http"
@@ -149,9 +168,7 @@ systemctl reload nginx 2>/dev/null || systemctl start nginx 2>/dev/null || json_
 
 # Install certbot if missing
 if ! command -v certbot &>/dev/null; then
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq >/dev/null 2>&1
-  apt-get install -y -qq certbot python3-certbot-nginx >/dev/null 2>&1 || json_fail "Failed to install certbot"
+  _pkg_install certbot python3-certbot-nginx || json_fail "Failed to install certbot — no supported package manager found"
 fi
 
 # Run certbot

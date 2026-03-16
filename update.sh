@@ -19,6 +19,19 @@ INSTALL_DIR="$(pwd)"
 BACKUP_DIR=""
 OLD_SHA=""
 ROLLBACK_NEEDED=false
+YES=false
+
+# Parse flags
+for arg in "$@"; do
+  case "$arg" in
+    --yes|-y) YES=true ;;
+    --help|-h)
+      echo "Usage: $0 [--yes]"
+      echo "  --yes   Skip confirmation prompts (non-interactive)"
+      exit 0
+      ;;
+  esac
+done
 
 # ─── Cleanup on failure ───────────────────────────────────────────────────
 cleanup() {
@@ -45,6 +58,13 @@ rollback() {
     rm -rf .next
     cp -r "$BACKUP_DIR/.next" .next
     info "Build restored from backup"
+  fi
+
+  # Restore certs
+  if [ -d "$BACKUP_DIR/certs" ]; then
+    rm -rf certs
+    cp -r "$BACKUP_DIR/certs" certs
+    info "Certs restored from backup"
   fi
 
   # Restore node_modules state
@@ -105,14 +125,14 @@ health_check() {
   echo "  Running health check..."
   sleep 3
 
-  for attempt in $(seq 1 5); do
-    echo -e "  ${DIM}Attempt ${attempt}/5...${NC}"
+  for attempt in $(seq 1 12); do
+    echo -e "  ${DIM}Attempt ${attempt}/12...${NC}"
     local http_code
     http_code=$(curl $curl_flags "$health_url" 2>/dev/null || echo "000")
     if [ "$http_code" = "200" ]; then
       return 0
     fi
-    sleep 2
+    sleep 3
   done
   return 1
 }
@@ -122,7 +142,7 @@ migrate_env() {
   local env_file=".env"
   local example_file=".env.example"
 
-  if [ ! -f "$example_file" ] || [ ! -f "$env_file" ]; then
+  if { [ ! -f "$example_file" ] || [ ! -f "$env_file" ]; }; then
     return
   fi
 
@@ -174,6 +194,21 @@ echo -e "${BOLD}       Claude Server Bot — Updater${NC}"
 echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
 echo ""
 
+# Check node/pnpm are available
+if ! command -v node &>/dev/null; then
+  error "Node.js not found — cannot update. Install Node.js 20+ and retry."
+  exit 1
+else
+  node_major=$(node --version 2>/dev/null | sed 's/v//' | cut -d. -f1)
+  if [ "${node_major:-0}" -lt 20 ]; then
+    warn "Node.js $(node --version) detected — version 20+ is recommended."
+  fi
+fi
+if ! command -v pnpm &>/dev/null; then
+  error "pnpm not found — cannot update. Install pnpm and retry."
+  exit 1
+fi
+
 # Save current state for rollback
 OLD_SHA=$(git rev-parse HEAD)
 info "Current version: ${OLD_SHA:0:8}"
@@ -183,6 +218,7 @@ BACKUP_DIR="$(mktemp -d)"
 echo "  Creating build backup..."
 [ -d .next ] && cp -r .next "$BACKUP_DIR/.next"
 [ -f pnpm-lock.yaml ] && cp pnpm-lock.yaml "$BACKUP_DIR/pnpm-lock.yaml"
+[ -d certs ] && cp -r certs "$BACKUP_DIR/certs"
 info "Build backup created at $BACKUP_DIR"
 
 # Back up SQLite database before update (keep last 3 upgrade backups)
@@ -217,11 +253,15 @@ REMOTE=$(git config "branch.${BRANCH}.remote" 2>/dev/null || echo "origin")
 AVAIL_KB=$(df -k . | awk 'NR==2 {print $4}')
 if [ "${AVAIL_KB:-0}" -lt 1048576 ]; then
   warn "Low disk space: $(( AVAIL_KB / 1024 )) MB available (recommended: 1 GB)"
-  read -r -p "  Continue anyway? [y/N]: " REPLY
-  if [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
-    echo "  Aborted."
-    ROLLBACK_NEEDED=false
-    exit 0
+  if $YES; then
+    warn "Continuing anyway (--yes flag set)."
+  else
+    read -r -p "  Continue anyway? [y/N]: " REPLY
+    if [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
+      echo "  Aborted."
+      ROLLBACK_NEEDED=false
+      exit 0
+    fi
   fi
 fi
 
@@ -260,7 +300,7 @@ migrate_env
 
 # Install dependencies
 echo "  Installing dependencies..."
-pnpm install --frozen-lockfile --reporter=silent 2>/dev/null || pnpm install --reporter=silent 2>/dev/null
+pnpm install --frozen-lockfile --reporter=silent 2>/dev/null || pnpm install --reporter=silent
 info "Dependencies updated"
 
 # Build

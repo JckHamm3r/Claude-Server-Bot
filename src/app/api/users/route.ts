@@ -24,7 +24,7 @@ export async function GET() {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const users = db.prepare("SELECT email, is_admin, created_at FROM users ORDER BY created_at ASC").all();
+  const users = db.prepare("SELECT email, is_admin, first_name, last_name, created_at FROM users ORDER BY created_at ASC").all();
   return NextResponse.json({ users });
 }
 

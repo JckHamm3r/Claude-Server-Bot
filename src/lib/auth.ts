@@ -132,16 +132,30 @@ export const authOptions: NextAuthOptions = {
         try {
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           const db = (require("./db") as { default: import("better-sqlite3").Database }).default;
-          const row = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(token.email as string) as
-            | { is_admin: number }
+          const row = db.prepare("SELECT is_admin, first_name, last_name FROM users WHERE email = ?").get(token.email as string) as
+            | { is_admin: number; first_name: string; last_name: string }
             | undefined;
           if (row) {
             token.isAdmin = Boolean(row.is_admin);
+            token.firstName = row.first_name ?? "";
+            token.lastName = row.last_name ?? "";
           }
-          const settings = db.prepare("SELECT setup_complete FROM user_settings WHERE email = ?").get(token.email as string) as
-            | { setup_complete: number }
-            | undefined;
-          token.setupComplete = settings ? Boolean(settings.setup_complete) : false;
+
+          // Non-admin users don't go through the setup wizard.
+          // Auto-mark their setup_complete on first encounter so the middleware
+          // never redirects them to /setup.
+          if (!token.isAdmin) {
+            token.setupComplete = true;
+            // Persist the flag so it survives JWT refreshes
+            db.prepare("INSERT OR IGNORE INTO user_settings (email) VALUES (?)").run(token.email as string);
+            db.prepare("UPDATE user_settings SET setup_complete = 1 WHERE email = ?").run(token.email as string);
+          } else {
+            const settings = db.prepare("SELECT setup_complete FROM user_settings WHERE email = ?").get(token.email as string) as
+              | { setup_complete: number }
+              | undefined;
+            token.setupComplete = settings ? Boolean(settings.setup_complete) : false;
+          }
+
           token.lastRefresh = Date.now();
         } catch {
           // DB unavailable in edge runtime — keep existing value
@@ -155,6 +169,8 @@ export const authOptions: NextAuthOptions = {
       if (session.user) {
         session.user.email = token.email as string;
         (session.user as { isAdmin: boolean }).isAdmin = Boolean(token.isAdmin);
+        (session.user as { firstName: string }).firstName = (token.firstName as string) ?? "";
+        (session.user as { lastName: string }).lastName = (token.lastName as string) ?? "";
       }
       return session;
     },

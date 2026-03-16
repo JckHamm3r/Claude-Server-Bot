@@ -1,24 +1,35 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { CheckCircle2, XCircle, Loader2, Key, Sparkles, ChevronRight, Server } from "lucide-react";
+import { CheckCircle2, XCircle, Loader2, Key, Sparkles, ChevronRight, Server, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { EXPERIENCE_LEVELS, SERVER_PURPOSES } from "@/lib/user-profile-constants";
 import type { ExperienceLevel } from "@/lib/user-profile-constants";
 
-// Steps: 1=BotName 2=APIKey 3=TestClaude 4=ProjectDir 5=ExperienceLevel 6=ServerProfile 7=Done
-type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+// Steps:
+//  1 = AdminName (your first & last name)
+//  2 = BotName
+//  3 = APIKey
+//  4 = TestClaude
+//  5 = ProjectDir
+//  6 = ExperienceLevel
+//  7 = ServerProfile
+//  8 = Done
+type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
 const STEPS = [
-  { n: 1, label: "Name" },
-  { n: 2, label: "API Key" },
-  { n: 3, label: "Test" },
-  { n: 4, label: "Project" },
-  { n: 5, label: "Level" },
-  { n: 6, label: "Server" },
-  { n: 7, label: "Done" },
+  { n: 1, label: "You" },
+  { n: 2, label: "Bot" },
+  { n: 3, label: "API Key" },
+  { n: 4, label: "Test" },
+  { n: 5, label: "Project" },
+  { n: 6, label: "Level" },
+  { n: 7, label: "Server" },
+  { n: 8, label: "Done" },
 ];
 
 function getBasePath() {
@@ -53,31 +64,36 @@ function recommendLevel(answers: (boolean | null)[]): ExperienceLevel {
 
 export default function SetupPage() {
   const bp = getBasePath();
+  const { data: session, status } = useSession();
+  const router = useRouter();
   const [step, setStep] = useState<Step>(1);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Step 1 — Bot name
-  const [botName, setBotName] = useState("Claude-Bot");
-  const [_botNameSaved, setBotNameSaved] = useState(false);
+  // Step 1 — Admin name
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [nameError, setNameError] = useState("");
 
-  // Step 2 — API key
+  // Step 2 — Bot name
+  const [botName, setBotName] = useState("Claude-Bot");
+
+  // Step 3 — API key
   const [apiKey, setApiKey] = useState("");
-  const [_apiKeySaved, setApiKeySaved] = useState(false);
   const [apiKeyError, setApiKeyError] = useState("");
 
-  // Step 3 — Test Claude
+  // Step 4 — Test Claude
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; latency?: number; error?: string } | null>(null);
 
-  // Step 4 — Project directory
+  // Step 5 — Project directory
   const [projectRoot, setProjectRoot] = useState("");
   const [projectInput, setProjectInput] = useState("");
   const [projectStatus, setProjectStatus] = useState<{ hasClaudeMd: boolean; hasClaudeDir: boolean } | null>(null);
   const [savingProject, setSavingProject] = useState(false);
   const [projectError, setProjectError] = useState("");
 
-  // Step 5 — Experience level
+  // Step 6 — Experience level
   const [level, setLevel] = useState<ExperienceLevel | null>(null);
   const [showQuiz, setShowQuiz] = useState(false);
   const [quizAnswers, setQuizAnswers] = useState<(boolean | null)[]>(QUIZ_QUESTIONS.map(() => null));
@@ -85,7 +101,7 @@ export default function SetupPage() {
   const [quizDone, setQuizDone] = useState(false);
   const [quizRecommendation, setQuizRecommendation] = useState<ExperienceLevel | null>(null);
 
-  // Step 6 — Server purpose
+  // Step 7 — Server purpose
   const [selectedPurposes, setSelectedPurposes] = useState<string[]>([]);
   const [customPurpose, setCustomPurpose] = useState("");
   const [projectType, setProjectType] = useState<"new" | "existing" | "">("");
@@ -105,6 +121,13 @@ export default function SetupPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Guard: non-admin users should never see this page — redirect to dashboard
+  useEffect(() => {
+    if (status === "authenticated" && !(session?.user as { isAdmin?: boolean })?.isAdmin) {
+      router.replace(bp || "/");
+    }
+  }, [status, session, router, bp]);
+
   async function checkProject(path: string) {
     if (!path) return;
     try {
@@ -121,6 +144,28 @@ export default function SetupPage() {
 
   // ── Step handlers ─────────────────────────────────────────────────────────
 
+  async function saveAdminName() {
+    const first = firstName.trim();
+    const last = lastName.trim();
+    if (!first) { setNameError("First name is required."); return; }
+    if (saving) return;
+    setSaving(true);
+    setNameError("");
+    try {
+      const res = await fetch(`${bp}/api/setup/name`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ first_name: first, last_name: last }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({})) as { error?: string };
+        setNameError(d.error ?? "Failed to save name. Try again.");
+        return;
+      }
+      setStep(2);
+    } catch { setNameError("Network error. Try again."); }
+    finally { setSaving(false); }
+  }
+
   async function saveBotName() {
     if (!botName.trim() || saving) return;
     setSaving(true);
@@ -129,9 +174,8 @@ export default function SetupPage() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: botName.trim() }),
       });
-      setBotNameSaved(true);
-      setStep(2);
-    } catch { /* proceed anyway */ setStep(2); }
+      setStep(3);
+    } catch { /* proceed anyway */ setStep(3); }
     finally { setSaving(false); }
   }
 
@@ -149,8 +193,7 @@ export default function SetupPage() {
         body: JSON.stringify({ anthropic_api_key: apiKey.trim() }),
       });
       if (!res.ok) { setApiKeyError("Failed to save key. Try again."); return; }
-      setApiKeySaved(true);
-      setStep(3);
+      setStep(4);
     } catch { setApiKeyError("Network error. Try again."); }
     finally { setSaving(false); }
   }
@@ -209,11 +252,9 @@ export default function SetupPage() {
     setSaving(true);
     setError(null);
     try {
-      // Prepare purposes list (include custom if filled)
       const purposes = [...selectedPurposes];
       if (customPurpose.trim()) purposes.push(`custom:${customPurpose.trim()}`);
 
-      // Save profile
       await fetch(`${bp}/api/users/profile`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -225,7 +266,6 @@ export default function SetupPage() {
         }),
       });
 
-      // Mark setup complete
       const res = await fetch(`${bp}/api/setup/complete`, { method: "POST" });
       if (!res.ok) {
         const text = await res.text().catch(() => "Unknown error");
@@ -238,6 +278,12 @@ export default function SetupPage() {
   }, [bp, level, selectedPurposes, customPurpose, projectType]);
 
   const progressPercent = ((step - 1) / (STEPS.length - 1)) * 100;
+  const displayName = firstName.trim() || "there";
+
+  // Show blank while checking admin status (avoids a flash of the wizard for non-admin users)
+  if (status === "loading" || (status === "authenticated" && !(session?.user as { isAdmin?: boolean })?.isAdmin)) {
+    return null;
+  }
 
   return (
     <main className="min-h-screen gradient-mesh-bg flex flex-col items-center justify-center px-4 py-12 relative overflow-hidden">
@@ -292,12 +338,64 @@ export default function SetupPage() {
         <div className="glass-heavy rounded-2xl p-8 shadow-glass">
           <AnimatePresence mode="wait">
 
-            {/* ── STEP 1: Bot Name ── */}
+            {/* ── STEP 1: Admin Name ── */}
             {step === 1 && (
               <motion.div key="s1" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-6">
                 <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <User className="h-5 w-5 text-bot-accent" />
+                    <h2 className="text-subtitle font-semibold text-bot-text">Who are you?</h2>
+                  </div>
+                  <p className="text-body text-bot-muted">Your name will be associated with your admin account.</p>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-caption font-medium text-bot-muted block mb-1.5">First name <span className="text-bot-red">*</span></label>
+                      <input
+                        type="text"
+                        value={firstName}
+                        onChange={(e) => { setFirstName(e.target.value); setNameError(""); }}
+                        onKeyDown={(e) => { if (e.key === "Enter" && firstName.trim()) saveAdminName(); }}
+                        placeholder="Jane"
+                        autoFocus
+                        autoComplete="given-name"
+                        className="w-full rounded-xl border border-bot-border bg-bot-elevated/60 px-4 py-3 text-body text-bot-text placeholder:text-bot-muted/60 outline-none focus:border-bot-accent focus:shadow-glow-sm transition-all duration-200"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-caption font-medium text-bot-muted block mb-1.5">Last name <span className="text-bot-muted/50">(optional)</span></label>
+                      <input
+                        type="text"
+                        value={lastName}
+                        onChange={(e) => setLastName(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter" && firstName.trim()) saveAdminName(); }}
+                        placeholder="Smith"
+                        autoComplete="family-name"
+                        className="w-full rounded-xl border border-bot-border bg-bot-elevated/60 px-4 py-3 text-body text-bot-text placeholder:text-bot-muted/60 outline-none focus:border-bot-accent focus:shadow-glow-sm transition-all duration-200"
+                      />
+                    </div>
+                  </div>
+                  {nameError && <p className="text-caption text-bot-red">{nameError}</p>}
+                </div>
+
+                <button
+                  onClick={saveAdminName}
+                  disabled={!firstName.trim() || saving}
+                  className="w-full rounded-xl gradient-accent px-4 py-3 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] disabled:opacity-50 transition-all duration-200"
+                >
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : "Continue →"}
+                </button>
+              </motion.div>
+            )}
+
+            {/* ── STEP 2: Bot Name ── */}
+            {step === 2 && (
+              <motion.div key="s2" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-6">
+                <div>
                   <h2 className="text-subtitle font-semibold text-bot-text mb-1">Name your assistant</h2>
-                  <p className="text-body text-bot-muted">What would you like to call it? You can always change this later.</p>
+                  <p className="text-body text-bot-muted">What would you like to call it, {displayName}? You can always change this later.</p>
                 </div>
 
                 <input
@@ -320,9 +418,9 @@ export default function SetupPage() {
               </motion.div>
             )}
 
-            {/* ── STEP 2: API Key ── */}
-            {step === 2 && (
-              <motion.div key="s2" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-6">
+            {/* ── STEP 3: API Key ── */}
+            {step === 3 && (
+              <motion.div key="s3" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-6">
                 <div>
                   <h2 className="text-subtitle font-semibold text-bot-text mb-1">Connect to Claude</h2>
                   <p className="text-body text-bot-muted">
@@ -357,7 +455,7 @@ export default function SetupPage() {
                     {saving ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : "Save & Continue →"}
                   </button>
                   <button
-                    onClick={() => setStep(3)}
+                    onClick={() => setStep(4)}
                     className="w-full text-caption text-bot-muted hover:text-bot-text transition-colors py-1"
                   >
                     Skip for now (add in Settings later)
@@ -366,9 +464,9 @@ export default function SetupPage() {
               </motion.div>
             )}
 
-            {/* ── STEP 3: Test Claude ── */}
-            {step === 3 && (
-              <motion.div key="s3" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-6">
+            {/* ── STEP 4: Test Claude ── */}
+            {step === 4 && (
+              <motion.div key="s4" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-6">
                 <div>
                   <h2 className="text-subtitle font-semibold text-bot-text mb-1">Test your connection</h2>
                   <p className="text-body text-bot-muted">Let&apos;s make sure Claude is responding.</p>
@@ -411,14 +509,14 @@ export default function SetupPage() {
 
                 <div className="space-y-2">
                   <button
-                    onClick={() => setStep(4)}
+                    onClick={() => setStep(5)}
                     disabled={!testResult?.ok}
                     className="w-full rounded-xl gradient-accent px-4 py-3 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] disabled:opacity-50 transition-all duration-200"
                   >
                     Continue →
                   </button>
                   {!testResult?.ok && (
-                    <button onClick={() => setStep(4)} className="w-full text-caption text-bot-muted hover:text-bot-text transition-colors py-1">
+                    <button onClick={() => setStep(5)} className="w-full text-caption text-bot-muted hover:text-bot-text transition-colors py-1">
                       Skip (set up API key in Settings)
                     </button>
                   )}
@@ -426,9 +524,9 @@ export default function SetupPage() {
               </motion.div>
             )}
 
-            {/* ── STEP 4: Project Directory ── */}
-            {step === 4 && (
-              <motion.div key="s4" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-6">
+            {/* ── STEP 5: Project Directory ── */}
+            {step === 5 && (
+              <motion.div key="s5" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-6">
                 <div>
                   <h2 className="text-subtitle font-semibold text-bot-text mb-1">Working directory</h2>
                   <p className="text-body text-bot-muted">Where should your assistant look for files and run commands?</p>
@@ -458,16 +556,16 @@ export default function SetupPage() {
                   {projectError && <p className="text-caption text-bot-red">{projectError}</p>}
                 </form>
 
-                <button onClick={() => setStep(5)} disabled={!projectRoot}
+                <button onClick={() => setStep(6)} disabled={!projectRoot}
                   className="w-full rounded-xl gradient-accent px-4 py-3 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] disabled:opacity-50 transition-all duration-200">
                   Continue →
                 </button>
               </motion.div>
             )}
 
-            {/* ── STEP 5: Experience Level ── */}
-            {step === 5 && (
-              <motion.div key="s5" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-5">
+            {/* ── STEP 6: Experience Level ── */}
+            {step === 6 && (
+              <motion.div key="s6" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-5">
                 {!showQuiz ? (
                   <>
                     <div>
@@ -497,7 +595,7 @@ export default function SetupPage() {
                       Not sure? Answer a few questions <ChevronRight className="h-3 w-3" />
                     </button>
 
-                    <button onClick={() => setStep(6)} disabled={!level}
+                    <button onClick={() => setStep(7)} disabled={!level}
                       className="w-full rounded-xl gradient-accent px-4 py-3 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] disabled:opacity-50 transition-all duration-200">
                       Continue →
                     </button>
@@ -545,7 +643,7 @@ export default function SetupPage() {
                       );
                     })()}
                     <div className="space-y-2">
-                      <button onClick={() => { setLevel(quizRecommendation!); setShowQuiz(false); setStep(6); }}
+                      <button onClick={() => { setLevel(quizRecommendation!); setShowQuiz(false); setStep(7); }}
                         className="w-full rounded-xl gradient-accent px-4 py-3 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 transition-all duration-200">
                         Use this — Continue →
                       </button>
@@ -556,9 +654,9 @@ export default function SetupPage() {
               </motion.div>
             )}
 
-            {/* ── STEP 6: Server Purpose ── */}
-            {step === 6 && (
-              <motion.div key="s6" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-5">
+            {/* ── STEP 7: Server Purpose ── */}
+            {step === 7 && (
+              <motion.div key="s7" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-5">
                 <div>
                   <h2 className="text-subtitle font-semibold text-bot-text mb-1">What is this server for?</h2>
                   <p className="text-body text-bot-muted">This helps your assistant give better advice. Pick all that apply.</p>
@@ -601,28 +699,35 @@ export default function SetupPage() {
                   </div>
                 </div>
 
-                <button onClick={() => { if (selectedPurposes.length === 0 && !customPurpose) { setStep(7); } else { setStep(7); } }}
+                <button onClick={() => setStep(8)}
                   className="w-full rounded-xl gradient-accent px-4 py-3 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] transition-all duration-200">
                   Continue →
                 </button>
               </motion.div>
             )}
 
-            {/* ── STEP 7: Done ── */}
-            {step === 7 && (
-              <motion.div key="s7" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-6 text-center">
+            {/* ── STEP 8: Done ── */}
+            {step === 8 && (
+              <motion.div key="s8" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-6 text-center">
                 <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 200, damping: 15, delay: 0.1 }}
                   className="flex flex-col items-center gap-3">
                   <div className="relative">
                     <div className="absolute -inset-3 rounded-full bg-bot-green/20 blur-xl" />
                     <Sparkles className="relative h-16 w-16 text-bot-green" />
                   </div>
-                  <h2 className="text-subtitle font-bold text-bot-text">All set, {botName}!</h2>
-                  <p className="text-body text-bot-muted">Your assistant is personalised and ready to go.</p>
+                  <h2 className="text-subtitle font-bold text-bot-text">All set, {firstName.trim() || "there"}!</h2>
+                  <p className="text-body text-bot-muted">{botName} is personalised and ready to go.</p>
                 </motion.div>
 
                 {/* Profile summary */}
                 <div className="rounded-xl border border-bot-border/60 bg-bot-elevated/40 p-4 text-left space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span>👤</span>
+                    <span className="text-caption text-bot-muted">Admin:</span>
+                    <span className="text-caption text-bot-text font-medium">
+                      {[firstName.trim(), lastName.trim()].filter(Boolean).join(" ")}
+                    </span>
+                  </div>
                   {level && (() => {
                     const lvl = EXPERIENCE_LEVELS.find((l) => l.id === level)!;
                     return (

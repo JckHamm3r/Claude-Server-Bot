@@ -117,6 +117,8 @@ db.exec(`
       email TEXT PRIMARY KEY,
       hash TEXT NOT NULL,
       is_admin INTEGER NOT NULL DEFAULT 0,
+      first_name TEXT NOT NULL DEFAULT '',
+      last_name TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
@@ -128,6 +130,8 @@ for (const migration of [
   "ALTER TABLE user_settings ADD COLUMN project_type TEXT NOT NULL DEFAULT ''",
   "ALTER TABLE user_settings ADD COLUMN auto_summary INTEGER NOT NULL DEFAULT 1",
   "ALTER TABLE user_settings ADD COLUMN profile_wizard_complete INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE users ADD COLUMN first_name TEXT NOT NULL DEFAULT ''",
+  "ALTER TABLE users ADD COLUMN last_name TEXT NOT NULL DEFAULT ''",
 ]) {
   try { db.exec(migration); } catch { /* column already exists */ }
 }
