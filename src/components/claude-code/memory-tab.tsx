@@ -17,6 +17,8 @@ import {
   ChevronDown,
   ChevronRight,
   BookOpen,
+  Sparkles,
+  RotateCcw,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -162,8 +164,18 @@ function MemoryEditModal({ memory, onSave, onClose, saving, error }: MemoryEditM
   const [content, setContent] = useState(memory?.content ?? "");
   const titleRef = useRef<HTMLInputElement>(null);
 
+  // Refactor state
+  const [refactoring, setRefactoring] = useState(false);
+  const [refactorError, setRefactorError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ title: string; content: string } | null>(null);
+  const [botName, setBotName] = useState("AI");
+
   useEffect(() => {
     titleRef.current?.focus();
+    fetch(apiUrl("/api/bot-identity"))
+      .then((r) => r.json())
+      .then((d: { name?: string }) => { if (d.name) setBotName(d.name); })
+      .catch(() => { /* keep default */ });
   }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -172,9 +184,47 @@ function MemoryEditModal({ memory, onSave, onClose, saving, error }: MemoryEditM
     onSave(title.trim(), content);
   };
 
+  const handleRefactor = async () => {
+    if (!title.trim() && !content.trim()) return;
+    setRefactoring(true);
+    setRefactorError(null);
+    setPreview(null);
+    try {
+      const res = await fetch(apiUrl("/api/claude-code/memories/refactor"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, content }),
+      });
+      const data = await res.json() as { title?: string; content?: string; error?: string };
+      if (!res.ok || data.error) {
+        setRefactorError(data.error ?? "Refactor failed.");
+        return;
+      }
+      if (data.title && data.content) {
+        setPreview({ title: data.title, content: data.content });
+      }
+    } catch {
+      setRefactorError("Network error. Please try again.");
+    } finally {
+      setRefactoring(false);
+    }
+  };
+
+  const applyPreview = () => {
+    if (!preview) return;
+    setTitle(preview.title);
+    setContent(preview.content);
+    setPreview(null);
+  };
+
+  const dismissPreview = () => setPreview(null);
+
+  const hasContent = title.trim() || content.trim();
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-      <div className="w-full max-w-xl bg-bot-surface border border-bot-border/40 rounded-2xl shadow-2xl flex flex-col max-h-[80vh]">
+      <div className="w-full max-w-xl bg-bot-surface border border-bot-border/40 rounded-2xl shadow-2xl flex flex-col max-h-[88vh]">
+        {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-bot-border/30">
           <h2 className="text-[14px] font-semibold text-bot-text">
             {memory ? "Edit Memory" : "New Memory"}
@@ -186,45 +236,139 @@ function MemoryEditModal({ memory, onSave, onClose, saving, error }: MemoryEditM
             <X className="h-4 w-4" />
           </button>
         </div>
+
         <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
-          <div className="px-5 pt-4 pb-3">
-            <input
-              ref={titleRef}
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Title — short and descriptive"
-              className="w-full px-3 py-2 rounded-lg bg-bot-bg border border-bot-border/30 text-[13px] text-bot-text placeholder:text-bot-muted/40 focus:outline-none focus:border-bot-accent/50 focus:ring-1 focus:ring-bot-accent/20 transition-all"
-            />
-          </div>
-          <div className="flex flex-col flex-1 min-h-0 px-5 pb-3">
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="Memory content…"
-              className="flex-1 min-h-[180px] w-full px-3 py-2.5 rounded-lg bg-bot-bg border border-bot-border/30 text-[12.5px] text-bot-text placeholder:text-bot-muted/40 focus:outline-none focus:border-bot-accent/50 focus:ring-1 focus:ring-bot-accent/20 transition-all resize-none font-mono leading-relaxed"
-            />
-          </div>
-          {error && (
-            <div className="mx-5 mb-3 px-3 py-2 rounded-lg bg-bot-red/10 border border-bot-red/20 text-bot-red text-[12px]">
-              {error}
+          <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
+            {/* Title */}
+            <div className="px-5 pt-4 pb-3">
+              <input
+                ref={titleRef}
+                value={title}
+                onChange={(e) => { setTitle(e.target.value); setPreview(null); }}
+                placeholder="Title — short and descriptive"
+                className="w-full px-3 py-2 rounded-lg bg-bot-bg border border-bot-border/30 text-[13px] text-bot-text placeholder:text-bot-muted/40 focus:outline-none focus:border-bot-accent/50 focus:ring-1 focus:ring-bot-accent/20 transition-all"
+              />
             </div>
-          )}
-          <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-bot-border/25">
+
+            {/* Content */}
+            <div className="flex flex-col px-5 pb-3">
+              <textarea
+                value={content}
+                onChange={(e) => { setContent(e.target.value); setPreview(null); }}
+                placeholder="Memory content…"
+                className="min-h-[140px] w-full px-3 py-2.5 rounded-lg bg-bot-bg border border-bot-border/30 text-[12.5px] text-bot-text placeholder:text-bot-muted/40 focus:outline-none focus:border-bot-accent/50 focus:ring-1 focus:ring-bot-accent/20 transition-all resize-none font-mono leading-relaxed"
+              />
+            </div>
+
+            {/* AI Refactor preview */}
+            {preview && (
+              <div className="mx-5 mb-3 rounded-xl border border-bot-accent/25 bg-bot-accent/5 overflow-hidden">
+                <div className="flex items-center justify-between px-3.5 py-2 border-b border-bot-accent/15">
+                  <div className="flex items-center gap-1.5">
+                    <Sparkles className="h-3.5 w-3.5 text-bot-accent" />
+                    <span className="text-[11.5px] font-semibold text-bot-accent">{botName} suggestion</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={dismissPreview}
+                    className="p-1 rounded text-bot-muted/60 hover:text-bot-muted transition-colors"
+                    title="Dismiss"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+                <div className="px-3.5 py-3 space-y-2">
+                  <div>
+                    <p className="text-[10.5px] uppercase tracking-wider text-bot-muted/50 font-semibold mb-0.5">Title</p>
+                    <p className="text-[12.5px] font-medium text-bot-text">{preview.title}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10.5px] uppercase tracking-wider text-bot-muted/50 font-semibold mb-0.5">Content</p>
+                    <pre className="text-[12px] text-bot-text/80 whitespace-pre-wrap font-sans leading-relaxed">
+                      {preview.content}
+                    </pre>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 px-3.5 py-2.5 border-t border-bot-accent/15">
+                  <button
+                    type="button"
+                    onClick={applyPreview}
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-[12px] font-semibold gradient-accent text-white shadow-glow-sm hover:brightness-110 active:scale-[0.98] transition-all"
+                  >
+                    <Check className="h-3 w-3" />
+                    Apply
+                  </button>
+                  <button
+                    type="button"
+                    onClick={dismissPreview}
+                    className="px-3 py-1 rounded-lg text-[12px] text-bot-muted hover:text-bot-text hover:bg-bot-elevated/30 transition-all"
+                  >
+                    Keep mine
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Errors */}
+            {(error || refactorError) && (
+              <div className="mx-5 mb-3 px-3 py-2 rounded-lg bg-bot-red/10 border border-bot-red/20 text-bot-red text-[12px]">
+                {error ?? refactorError}
+              </div>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="flex items-center justify-between gap-2 px-5 py-3.5 border-t border-bot-border/25 shrink-0">
+            {/* Refactor button — left side */}
             <button
               type="button"
-              onClick={onClose}
-              className="px-4 py-1.5 rounded-lg text-[12.5px] text-bot-muted hover:text-bot-text hover:bg-bot-elevated/40 transition-all"
+              onClick={handleRefactor}
+              disabled={!hasContent || refactoring || saving}
+              title={`Ask ${botName} to rewrite this memory for clarity and precision`}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] text-bot-muted hover:text-bot-accent hover:bg-bot-accent/8 border border-bot-border/25 hover:border-bot-accent/30 disabled:opacity-40 transition-all duration-150"
             >
-              Cancel
+              {refactoring ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Refactoring…
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Refactor with {botName}
+                </>
+              )}
             </button>
-            <button
-              type="submit"
-              disabled={!title.trim() || saving}
-              className="px-4 py-1.5 rounded-lg text-[12.5px] font-semibold gradient-accent text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] disabled:opacity-50 transition-all duration-200 flex items-center gap-1.5"
-            >
-              {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              {memory ? "Save" : "Create"}
-            </button>
+
+            {/* Cancel / Save — right side */}
+            <div className="flex items-center gap-2">
+              {preview && (
+                <button
+                  type="button"
+                  onClick={handleRefactor}
+                  disabled={refactoring || saving}
+                  title="Re-run refactor"
+                  className="p-1.5 rounded-lg text-bot-muted/60 hover:text-bot-muted hover:bg-bot-elevated/30 transition-all"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-1.5 rounded-lg text-[12.5px] text-bot-muted hover:text-bot-text hover:bg-bot-elevated/40 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!title.trim() || saving}
+                className="px-4 py-1.5 rounded-lg text-[12.5px] font-semibold gradient-accent text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] disabled:opacity-50 transition-all duration-200 flex items-center gap-1.5"
+              >
+                {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {memory ? "Save" : "Create"}
+              </button>
+            </div>
           </div>
         </form>
       </div>
