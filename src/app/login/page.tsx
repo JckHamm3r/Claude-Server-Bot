@@ -61,6 +61,24 @@ function LoginForm() {
       setShake(true);
       setTimeout(() => setShake(false), 500);
     } else {
+      // Check if this admin needs to go through the setup wizard first.
+      // The middleware also enforces this, but checking here ensures the
+      // redirect happens immediately after login regardless of JWT cache state.
+      try {
+        const slug = process.env.NEXT_PUBLIC_CLAUDE_BOT_SLUG ?? "";
+        const prefix = process.env.NEXT_PUBLIC_CLAUDE_BOT_PATH_PREFIX ?? "c";
+        const bp = slug ? `/${prefix}/${slug}` : "";
+        const statusRes = await fetch(`${bp}/api/setup/status`);
+        if (statusRes.ok) {
+          const { needsSetup } = await statusRes.json() as { needsSetup: boolean };
+          if (needsSetup) {
+            window.location.href = `${bp}/setup`;
+            return;
+          }
+        }
+      } catch {
+        // If the check fails, fall through to the normal callbackUrl redirect
+      }
       window.location.href = callbackUrl;
     }
   };

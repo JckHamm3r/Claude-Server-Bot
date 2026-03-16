@@ -908,7 +908,7 @@ screen_confirm() {
     echo -e "  ${DIM}│${NC}  ${BOLD}API key${NC}      ${YELLOW}not set (add later)${NC}"
   fi
   echo -e "  ${DIM}│${NC}"
-  echo -e "  ${DIM}│${NC}  ${BOLD}URL${NC}  ${CYAN}${full_url}${NC}"
+  echo -e "  ${DIM}│${NC}  ${BOLD}URL${NC}  ${CYAN}${full_url}/login${NC}"
   echo -e "  ${DIM}└────────────────────────────────────────────────┘${NC}"
   echo ""
 
@@ -1638,7 +1638,7 @@ show_completion_summary() {
   {
     echo -e "  ${DIM}┌────────────────────────────────────────────────┐${NC}"
     echo -e "  ${DIM}│${NC}                                                ${DIM}│${NC}"
-    echo -e "  ${DIM}│${NC}  ${BOLD}URL${NC}       ${CYAN}${full_url}${NC}"
+    echo -e "  ${DIM}│${NC}  ${BOLD}URL${NC}       ${CYAN}${full_url}/login${NC}"
     echo -e "  ${DIM}│${NC}  ${BOLD}Email${NC}     ${ADMIN_EMAIL}"
     echo -e "  ${DIM}│${NC}  ${BOLD}Password${NC}  ${ADMIN_PASSWORD}"
     echo -e "  ${DIM}│${NC}                                                ${DIM}│${NC}"
