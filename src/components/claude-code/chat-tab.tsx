@@ -22,7 +22,8 @@ interface ChatTabProps {
 const ACTIVE_SESSION_KEY = "claude:activeSessionId";
 
 export function ChatTab({ isWidget = false }: ChatTabProps) {
-  const { status: sessionStatus } = useSession();
+  const { status: sessionStatus, data: sessionData } = useSession();
+  const currentEmail = sessionData?.user?.email ?? null;
   const [sessions, setSessions] = useState<ClaudeSession[]>([]);
   const [activeSession, setActiveSession] = useState<ClaudeSession | null>(null);
   const [showNewDialog, setShowNewDialog] = useState(false);
@@ -240,7 +241,12 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
 
   const handleDeleteSession = useCallback(
     (session: ClaudeSession) => {
-      chat.emit("claude:delete_session", { sessionId: session.id });
+      if (session.shared_by) {
+        // For shared sessions, leave rather than delete
+        chat.emit("claude:remove_from_session", { sessionId: session.id, removeEmail: currentEmail });
+      } else {
+        chat.emit("claude:delete_session", { sessionId: session.id });
+      }
       setSessions((prev) => prev.filter((s) => s.id !== session.id));
       if (chat.activeSessionRef.current?.id === session.id) {
         chat.activeSessionRef.current = null;
@@ -250,7 +256,7 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
         try { localStorage.removeItem(ACTIVE_SESSION_KEY); } catch { /* ignore */ }
       }
     },
-    [chat],
+    [chat, currentEmail],
   );
 
   const handleCompact = useCallback(() => {
@@ -483,6 +489,8 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
           onOpenSearch={() => setShowSearch(true)}
           sessionId={activeSession?.id}
           messages={chat.messages}
+          activeSession={activeSession}
+          canShare={!!activeSession && !!currentEmail && activeSession.created_by === currentEmail}
         />
 
         {!chat.connected && (

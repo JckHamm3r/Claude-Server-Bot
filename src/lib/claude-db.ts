@@ -18,6 +18,8 @@ export interface ClaudeSession {
   status: SessionStatus;
   personality: string | null;
   claude_session_id: string | null;
+  /** Set when the session is shared with the current user (not owned by them) */
+  shared_by?: string;
 }
 
 export interface ClaudeMessage {
@@ -97,8 +99,36 @@ export function getSession(id: string): ClaudeSession | null {
 }
 
 export function listSessions(createdBy: string): ClaudeSession[] {
-  const rows = db.prepare("SELECT * FROM sessions WHERE created_by = ? ORDER BY updated_at DESC").all(createdBy) as Record<string, unknown>[];
-  return rows.map(rowToSession);
+  // Own sessions
+  const ownRows = db.prepare("SELECT * FROM sessions WHERE created_by = ? ORDER BY updated_at DESC").all(createdBy) as Record<string, unknown>[];
+  // Shared sessions (participant but not owner)
+  const sharedRows = db.prepare(`
+    SELECT s.*, sp.user_email as _participant_email
+    FROM sessions s
+    JOIN session_participants sp ON sp.session_id = s.id
+    WHERE sp.user_email = ? AND s.created_by != ?
+    ORDER BY s.updated_at DESC
+  `).all(createdBy, createdBy) as Record<string, unknown>[];
+
+  const own = ownRows.map(rowToSession);
+  const shared = sharedRows.map((row) => {
+    const session = rowToSession(row);
+    session.shared_by = row.created_by as string;
+    return session;
+  });
+
+  // Merge: own first, then shared; de-duplicate by id
+  const seen = new Set<string>(own.map((s) => s.id));
+  const merged = [...own];
+  for (const s of shared) {
+    if (!seen.has(s.id)) {
+      seen.add(s.id);
+      merged.push(s);
+    }
+  }
+  // Sort combined list by updated_at desc
+  merged.sort((a, b) => (b.updated_at > a.updated_at ? 1 : -1));
+  return merged;
 }
 
 export function renameSession(id: string, name: string): void {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { AlertCircle, AlertTriangle, Loader2, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, Search, Tag, Trash2, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, Loader2, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, Search, Tag, Trash2, Users, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ClaudeSession } from "@/lib/claude-db";
 
@@ -253,8 +253,8 @@ export function SessionSidebar({
                 ) : (
                   <p
                     className="truncate text-body font-medium"
-                    onDoubleClick={(e) => startRename(session, e)}
-                    title="Double-click to rename"
+                    onDoubleClick={(e) => !session.shared_by && startRename(session, e)}
+                    title={session.shared_by ? `Shared by ${session.shared_by}` : "Double-click to rename"}
                   >
                     {session.name ?? "Untitled"}
                   </p>
@@ -262,6 +262,12 @@ export function SessionSidebar({
 
                 <p className="truncate text-caption text-bot-muted/70">
                   {new Date(session.updated_at).toLocaleDateString()}
+                  {session.shared_by && (
+                    <span className="ml-1.5 inline-flex items-center gap-0.5 rounded-full bg-bot-muted/10 px-1.5 py-px text-[10px] font-medium text-bot-muted border border-bot-border/30" title={`Shared by ${session.shared_by}`}>
+                      <Users className="h-2.5 w-2.5" />
+                      shared
+                    </span>
+                  )}
                   {session.personality && (
                     <span className="ml-1.5 inline-flex items-center rounded-full bg-bot-accent/10 px-1.5 py-px text-[10px] font-medium text-bot-accent">
                       {session.personality}
@@ -307,20 +313,22 @@ export function SessionSidebar({
               </div>
 
               <div className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                <button
-                  onClick={(e) => openTagEditor(session, e)}
-                  className="flex items-center justify-center rounded-md p-1 text-bot-muted hover:text-bot-accent hover:bg-bot-accent/10 transition-colors"
-                  title="Add tag"
-                >
-                  <Tag className="h-3.5 w-3.5" />
-                </button>
+                {!session.shared_by && (
+                  <button
+                    onClick={(e) => openTagEditor(session, e)}
+                    className="flex items-center justify-center rounded-md p-1 text-bot-muted hover:text-bot-accent hover:bg-bot-accent/10 transition-colors"
+                    title="Add tag"
+                  >
+                    <Tag className="h-3.5 w-3.5" />
+                  </button>
+                )}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     onDelete(session);
                   }}
                   className="flex items-center justify-center rounded-md p-1 text-bot-muted hover:text-bot-red hover:bg-bot-red/10 transition-colors"
-                  title="Delete session"
+                  title={session.shared_by ? "Leave shared session" : "Delete session"}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>

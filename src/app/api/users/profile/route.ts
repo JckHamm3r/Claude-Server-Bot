@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 import { getUserSettings, updateUserSettings } from "@/lib/claude-db";
 import { applyProfileToClaudeMd } from "@/lib/user-profile-context";
+import db from "@/lib/db";
 
 export async function GET(req: NextRequest) {
   const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET ?? "" });
@@ -31,6 +32,15 @@ export async function POST(req: NextRequest) {
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
 
   const email = token.email as string;
+
+  // Check if the user is an admin
+  const userRow = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(email) as { is_admin: number } | undefined;
+  const isAdmin = Boolean(userRow?.is_admin);
+
+  // Only admins can change experience_level
+  if (body.experience_level !== undefined && !isAdmin) {
+    return NextResponse.json({ error: "Experience level can only be changed by an admin" }, { status: 403 });
+  }
 
   // Validate experience_level if provided
   const validLevels = ["beginner", "intermediate", "expert"];

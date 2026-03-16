@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Square, RotateCcw, Trash2, Zap, Search, Download, ChevronDown, ClipboardCopy, Check } from "lucide-react";
+import { Square, RotateCcw, Trash2, Zap, Search, Download, ChevronDown, ClipboardCopy, Check, Share2 } from "lucide-react";
 import { cn, apiUrl } from "@/lib/utils";
 import { ModelSelector } from "./model-selector";
+import { ShareSessionDialog } from "./share-session-dialog";
 import type { ChatMessage, SessionUsage, BudgetLimits, ContextUsage } from "@/types/chat";
+import type { ClaudeSession } from "@/lib/claude-db";
 
 interface ChatToolbarProps {
   onInterrupt: () => void;
@@ -23,6 +25,8 @@ interface ChatToolbarProps {
   contextUsage?: ContextUsage | null;
   isCompacting?: boolean;
   onCompact?: () => void;
+  activeSession?: ClaudeSession | null;
+  canShare?: boolean;
 }
 
 function formatTokenCount(n: number): string {
@@ -170,8 +174,12 @@ export function ChatToolbar({
   contextUsage,
   isCompacting,
   onCompact,
+  activeSession,
+  canShare = false,
 }: ChatToolbarProps) {
+  const [shareOpen, setShareOpen] = useState(false);
   return (
+    <>
     <div className="flex items-center gap-1 border-b border-bot-border/30 bg-bot-surface/60 backdrop-blur-md px-3 py-1.5">
       <button
         onClick={onInterrupt}
@@ -228,6 +236,17 @@ export function ChatToolbar({
           </button>
         )}
 
+        {canShare && activeSession && (
+          <button
+            onClick={() => setShareOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated/50 transition-all duration-200"
+            title="Share session"
+          >
+            <Share2 className="h-3.5 w-3.5" />
+            <span className="hidden xl:inline">Share</span>
+          </button>
+        )}
+
         <CopyAllButton messages={messages} />
 
         {sessionId && <ExportDropdown sessionId={sessionId} />}
@@ -277,5 +296,14 @@ export function ChatToolbar({
         </button>
       </div>
     </div>
+
+    {shareOpen && activeSession && (
+      <ShareSessionDialog
+        sessionId={activeSession.id}
+        sessionName={activeSession.name}
+        onClose={() => setShareOpen(false)}
+      />
+    )}
+  </>
   );
 }
