@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import db from "@/lib/db";
+import { broadcastToAll } from "@/lib/broadcast";
 
 interface BotSettingsRow {
   name: string;
@@ -82,6 +83,9 @@ export async function POST(request: NextRequest) {
   const updated = db
     .prepare("SELECT name, tagline, avatar FROM bot_settings WHERE id = 1")
     .get() as BotSettingsRow;
+
+  // Broadcast to all connected clients so they update without page refresh
+  broadcastToAll("bot:identity_updated", { name: updated.name, tagline: updated.tagline, avatar: updated.avatar });
 
   return NextResponse.json({ ok: true, ...updated });
 }

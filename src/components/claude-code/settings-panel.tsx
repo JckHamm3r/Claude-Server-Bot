@@ -136,6 +136,12 @@ export function SettingsPanel() {
       .then((r) => r.json())
       .then((d) => { setBotName(d.name); setBotTagline(d.tagline); setBotAvatar(d.avatar); })
       .catch(() => {});
+    // Real-time bot identity updates
+    socket.on("bot:identity_updated", ({ name, tagline, avatar }: { name?: string; tagline?: string; avatar?: string | null }) => {
+      if (name !== undefined) setBotName(name);
+      if (tagline !== undefined) setBotTagline(tagline);
+      if (avatar !== undefined) setBotAvatar(avatar ?? null);
+    });
     // Load app settings
     fetch(apiUrl("/api/app-settings"))
       .then((r) => r.json())
@@ -145,7 +151,7 @@ export function SettingsPanel() {
         setRateConcurrent(d.rate_limit_concurrent ?? "3");
       })
       .catch(() => {});
-    return () => { socket.off("claude:settings"); };
+    return () => { socket.off("claude:settings"); socket.off("bot:identity_updated"); };
   }, []);
 
   useEffect(() => {

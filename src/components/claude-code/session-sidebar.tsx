@@ -16,6 +16,7 @@ interface SessionSidebarProps {
   loading?: boolean;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  currentEmail?: string;
 }
 
 export function SessionSidebar({
@@ -29,6 +30,7 @@ export function SessionSidebar({
   loading = false,
   collapsed = false,
   onToggleCollapse,
+  currentEmail,
 }: SessionSidebarProps) {
   const [search, setSearch] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -262,12 +264,16 @@ export function SessionSidebar({
 
                 <p className="truncate text-caption text-bot-muted/70">
                   {new Date(session.updated_at).toLocaleDateString()}
-                  {session.shared_by && (
-                    <span className="ml-1.5 inline-flex items-center gap-0.5 rounded-full bg-bot-muted/10 px-1.5 py-px text-[10px] font-medium text-bot-muted border border-bot-border/30" title={`Shared by ${session.shared_by}`}>
+                  {session.shared_by ? (
+                    <span className="ml-1.5 inline-flex items-center gap-0.5 rounded-full bg-bot-muted/15 px-1.5 py-px text-[10px] font-medium text-bot-muted border border-bot-border/40" title={`Shared by ${session.shared_by}`}>
                       <Users className="h-2.5 w-2.5" />
-                      shared
+                      Guest
                     </span>
-                  )}
+                  ) : currentEmail && session.created_by && session.created_by !== currentEmail ? (
+                    <span className="ml-1.5 inline-flex items-center rounded-full bg-bot-accent/10 px-1.5 py-px text-[10px] font-medium text-bot-accent border border-bot-accent/20">
+                      Owner
+                    </span>
+                  ) : null}
                   {session.personality && (
                     <span className="ml-1.5 inline-flex items-center rounded-full bg-bot-accent/10 px-1.5 py-px text-[10px] font-medium text-bot-accent">
                       {session.personality}
@@ -327,7 +333,12 @@ export function SessionSidebar({
                     e.stopPropagation();
                     onDelete(session);
                   }}
-                  className="flex items-center justify-center rounded-md p-1 text-bot-muted hover:text-bot-red hover:bg-bot-red/10 transition-colors"
+                  className={cn(
+                    "flex items-center justify-center rounded-md p-1 transition-colors",
+                    session.shared_by
+                      ? "text-bot-muted hover:text-bot-amber hover:bg-bot-amber/10"
+                      : "text-bot-muted hover:text-bot-red hover:bg-bot-red/10"
+                  )}
                   title={session.shared_by ? "Leave shared session" : "Delete session"}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
