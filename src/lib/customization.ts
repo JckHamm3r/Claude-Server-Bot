@@ -2,7 +2,6 @@ import path from "path";
 import fs from "fs";
 import { execSync } from "child_process";
 import db from "./db";
-import { getPersonalityPrefix } from "./app-settings";
 
 /**
  * The bot's own install directory. The subprocess cwd (CLAUDE_PROJECT_ROOT) may
@@ -323,21 +322,34 @@ export function getBotSelfIdentityPrompt(): string | null {
 }
 
 export async function getCustomizationSystemPrompt(): Promise<string> {
-  const parts: string[] = [];
-
   const bot = getBotSettings();
-  parts.push(
-    `Your name is "${bot.name}" — ${bot.tagline}. Never identify as "Claude" or "Claude Code". You are ${bot.name}. You are in customization mode, helping the administrator configure and personalise this bot.`
-  );
+  const botInstallDir = BOT_INSTALL_DIR;
 
-  const personalityPrefix = getPersonalityPrefix();
-  if (personalityPrefix) {
-    parts.push(personalityPrefix);
-  }
+  const parts: string[] = [
+    `Your name is "${bot.name}" — ${bot.tagline}. Never identify as "Claude" or "Claude Code". You are ${bot.name}.`,
+    `PLATFORM CUSTOMIZATION MODE:
+You are helping the administrator customize and extend the ${bot.name} platform itself. This is a developer-level session for modifying the tool's own codebase, configuration, and behavior — not for working on any external user project.
+
+Your purpose here is to help:
+- Add new features to this platform (new settings, new UI sections, new API endpoints, new behaviors)
+- Modify how the platform works (change defaults, adjust logic, update prompts)
+- Configure platform-level settings (bot identity, security rules, system prompts, theming)
+- Inspect and understand the platform's own source code (in ${botInstallDir})
+- Edit the platform's own CLAUDE.md or .claude/docs/ files to update AI instructions
+
+IMPORTANT CONTEXT:
+- This platform is installed on a server via a curl one-liner from a Git repository
+- The platform's source code is at: ${botInstallDir}
+- Changes to source files require a rebuild and restart to take effect (npm run build && npm start, or use the update script)
+- This is NOT for working on the user's external project (that lives at CLAUDE_PROJECT_ROOT) — it's for modifying the platform itself
+- You have full access to read and write the platform's source files, configuration, and documentation
+
+When asked to add a feature or make a change, work directly on the files in ${botInstallDir}.`,
+  ];
 
   const instructions = getBotClaudeMd();
   if (instructions) {
-    parts.push(`--- Project Instructions ---\n${instructions}`);
+    parts.push(`--- Platform Instructions (CLAUDE.md) ---\n${instructions}`);
   }
 
   return parts.join("\n\n");

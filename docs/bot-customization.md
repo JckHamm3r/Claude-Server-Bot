@@ -1,6 +1,6 @@
 # Bot Customization
 
-Customize the bot's identity, personality, and visual theme. These settings affect how Claude presents itself across the login page, chat interface, and embedded widget.
+Customize the bot's identity, visual theme, and platform-level behavior. The **Customization** section in Settings provides a dedicated chat interface for making structural changes to the platform itself.
 
 ## Identity
 
@@ -14,7 +14,7 @@ Identity is stored in the `bot_settings` database table and served via `/api/bot
 
 ## Personality
 
-Personality defines the tone and style of Claude's responses. It is set per-session at creation time in the New Session dialog -- not as a global setting.
+Personality defines the tone and style of Claude's responses. It is set **per-session** at creation time in the New Session dialog — not as a global setting.
 
 Available presets:
 
@@ -49,6 +49,20 @@ Visual theming uses CSS variables defined in `globals.css`. Admins can adjust co
 | `bot-amber` | Warning status |
 | `bot-blue` | Info status |
 
+## Customization Chat (Platform Self-Customization)
+
+The **Customization** section in Settings is a dedicated chat interface where admins can talk to Claude to customize and extend the platform itself. This is distinct from normal chat sessions — it operates in `customization_interface` mode with a system prompt that instructs Claude:
+
+- It is in platform customization mode, not user-project mode
+- Its purpose is to help add features, modify behavior, update configuration, and edit documentation for the platform itself
+- The platform's own source code lives at `BOT_INSTALL_DIR` (the install root)
+- Changes require a rebuild + restart (`npm run build && npm start`)
+- The user's external project (at `CLAUDE_PROJECT_ROOT`) is out of scope here
+
+Each admin gets a persistent customization session stored in `localStorage` under the key `claude:customization_session_id`. A "New session" button lets admins start fresh.
+
+The customization chat uses `interface_type: "customization_interface"` when creating the session, which causes `buildSystemPrompt` to call `getCustomizationSystemPrompt()` instead of the normal chat system prompt.
+
 ## Server Environment Awareness
 
 The system prompt includes live server environment details at session creation time (computed in `src/lib/customization.ts`). This gives the bot context about:
@@ -66,18 +80,19 @@ The bot will never use a port that's already in use, and never assume public/pri
 
 1. Security prompt (guard rails, sandbox rules)
 2. Template prompt (if session uses a template)
-3. Identity + personality prefix (includes server environment context)
+3. Identity + personality prefix (includes server environment context) — for normal `ui_chat` sessions
 4. Project CLAUDE.md content
+
+For `customization_interface` sessions, a dedicated system prompt is used (from `getCustomizationSystemPrompt()`) instead of steps 3–4.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `src/components/claude-code/settings/customization-section.tsx` | Customization settings UI |
+| `src/components/claude-code/settings/customization-section.tsx` | Customization chat UI (platform self-customization) |
 | `src/components/claude-code/new-session-dialog.tsx` | Personality selection at session creation |
 | `src/app/api/bot-identity/route.ts` | Bot identity API |
-| `src/app/api/settings/customization/route.ts` | Personality/customization API |
-| `src/lib/customization.ts` | Customization helpers |
+| `src/lib/customization.ts` | Customization helpers + `getCustomizationSystemPrompt()` |
 | `src/lib/system-prompt.ts` | System prompt composition |
 
 ## Database Tables
@@ -85,4 +100,4 @@ The bot will never use a port that's already in use, and never assume public/pri
 | Table | Purpose |
 |-------|---------|
 | `bot_settings` | Bot identity (name, avatar, tagline) |
-| `app_settings` | Personality and customization preferences (keys: `personality`, `personality_custom`) |
+| `app_settings` | Legacy personality keys (`personality`, `personality_custom`) — no longer used by the Customization section UI |
