@@ -37,6 +37,7 @@ const SLASH_COMMANDS = [
 
 export interface ChatInputHandle {
   focus: () => void;
+  setValue: (value: string) => void;
 }
 
 export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
@@ -59,6 +60,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
   useImperativeHandle(ref, () => ({
     focus: () => textareaRef.current?.focus(),
+    setValue: (v: string) => {
+      setValue(v);
+      setTimeout(() => textareaRef.current?.focus(), 0);
+    },
   }), []);
 
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);

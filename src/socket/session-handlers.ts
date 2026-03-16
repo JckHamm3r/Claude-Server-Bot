@@ -350,6 +350,18 @@ export function registerSessionHandlers(ctx: HandlerContext) {
     },
   );
 
+  // ── Runtime timer reset ────────────────────────────────────────────
+  // Resets the session's runtime start time so users can continue after
+  // hitting the rate_limit_runtime_min limit.
+  socket.on("claude:reset_runtime", ({ sessionId }: { sessionId: string }) => {
+    if (!canAccessSession(sessionId, email)) {
+      socket.emit("claude:error", { sessionId, message: "Access denied" });
+      return;
+    }
+    ctx.sessionStartTimes.set(sessionId, Date.now());
+    socket.emit("claude:runtime_reset", { sessionId });
+  });
+
   // ── Session state sync (reconnection) ─────────────────────────────
   socket.on(
     "claude:get_session_state",

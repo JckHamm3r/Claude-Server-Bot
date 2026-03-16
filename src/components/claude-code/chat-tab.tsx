@@ -258,6 +258,10 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
     chat.handleSend("/compact");
   }, [activeSession, chat]);
 
+  const handleResetRuntime = useCallback(() => {
+    chat.handleResetRuntime();
+  }, [chat]);
+
   const injectLocalMessage = useCallback(
     (content: string) => {
       const msg: ChatMessage = {
@@ -492,6 +496,21 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
           </div>
         )}
 
+        {chat.runtimeLimited && chat.connected && (
+          <div className="flex items-center justify-between gap-2 bg-bot-amber/10 border-b border-bot-amber/20 px-4 py-2 text-caption text-bot-amber">
+            <div className="flex items-center gap-2">
+              <div className="h-2 w-2 rounded-full bg-bot-amber" />
+              Session runtime limit reached. Reset the timer to continue.
+            </div>
+            <button
+              onClick={handleResetRuntime}
+              className="rounded-md bg-bot-amber/20 px-3 py-1 text-caption font-medium text-bot-amber hover:bg-bot-amber/30 transition-colors"
+            >
+              Extend Session
+            </button>
+          </div>
+        )}
+
         {!activeSession ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 text-bot-muted">
             <p className="text-body">Select a session or create a new one.</p>
@@ -521,6 +540,7 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
             loadingMessages={chat.loadingMessages}
             botAvatarUrl={botAvatarUrl}
             onSendStarter={(msg) => handleSendWithAutoName(msg)}
+            onFillStarter={(msg) => chat.chatInputRef.current?.setValue(msg)}
             onRetry={chat.handleRetryLast}
             runStartTime={chat.runStartTime}
           />
