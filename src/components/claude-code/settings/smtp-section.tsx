@@ -170,7 +170,8 @@ export function SmtpSection() {
       </div>
 
       <div className="border-t border-bot-border pt-4">
-        <h4 className="text-body font-semibold text-bot-text mb-2">Send Test Email</h4>
+        <h4 className="text-body font-semibold text-bot-text mb-1">Send Test Email</h4>
+        <p className="text-caption text-bot-muted mb-2">Tests the saved SMTP configuration. Save your settings first if you made changes.</p>
         <div className="flex gap-2">
           <input
             className="flex-1 rounded-lg border border-bot-border bg-bot-elevated px-3 py-1.5 text-caption text-bot-text outline-none focus:border-bot-accent"
