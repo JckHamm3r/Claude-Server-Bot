@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import type { HandlerContext } from "./types";
 import {
   saveMessage,
@@ -11,6 +13,7 @@ import {
   getGlobalTokenUsage,
   canAccessSession,
   canModifySession,
+  getUpload,
 } from "../lib/claude-db";
 import { logActivity } from "../lib/activity-log";
 import { getAppSetting } from "../lib/app-settings";
@@ -45,6 +48,9 @@ function checkBudget(email: string, sessionId: string): BudgetResult {
     if (usage.total_cost_usd >= dailyBudget) {
       return { exceeded: true, warning: false, type: "daily", limit: dailyBudget, current: usage.total_cost_usd };
     }
+    if (usage.total_cost_usd >= dailyBudget * 0.8) {
+      return { exceeded: false, warning: true, type: "daily", limit: dailyBudget, current: usage.total_cost_usd };
+    }
   }
 
   const monthlyBudget = parseFloat(getAppSetting("budget_limit_monthly_usd", "0"));
@@ -55,6 +61,9 @@ function checkBudget(email: string, sessionId: string): BudgetResult {
     const usage = getGlobalTokenUsage({ since: monthStart.toISOString(), userId: email });
     if (usage.total_cost_usd >= monthlyBudget) {
       return { exceeded: true, warning: false, type: "monthly", limit: monthlyBudget, current: usage.total_cost_usd };
+    }
+    if (usage.total_cost_usd >= monthlyBudget * 0.8) {
+      return { exceeded: false, warning: true, type: "monthly", limit: monthlyBudget, current: usage.total_cost_usd };
     }
   }
 
@@ -139,10 +148,6 @@ export function registerMessageHandlers(ctx: HandlerContext) {
         const inputFiles: string[] = [];
         if (attachments && attachments.length > 0) {
           try {
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            const { getUpload } = require("../lib/claude-db") as typeof import("../lib/claude-db");
-            const fs = require("fs");
-            const pathMod = require("path");
             const DATA_DIR = process.env.DATA_DIR ?? "./data";
 
             const contextParts: string[] = [];
@@ -150,7 +155,7 @@ export function registerMessageHandlers(ctx: HandlerContext) {
             for (const uploadId of attachments) {
               const upload = getUpload(uploadId);
               if (!upload) continue;
-              const filePath = pathMod.join(DATA_DIR, "uploads", upload.session_id, upload.stored_name);
+              const filePath = path.join(DATA_DIR, "uploads", upload.session_id, upload.stored_name);
               if (!fs.existsSync(filePath)) continue;
 
               if (upload.mime_type.startsWith("image/")) {

@@ -24,6 +24,9 @@ export function TemplatesSection() {
   const [templates, setTemplates] = useState<SessionTemplate[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const [formName, setFormName] = useState("");
   const [formDescription, setFormDescription] = useState("");
@@ -34,12 +37,22 @@ export function TemplatesSection() {
 
   useEffect(() => {
     const socket = getSocket();
-    const handle = ({ templates: t }: { templates: SessionTemplate[] }) => {
+    const handleTemplates = ({ templates: t }: { templates: SessionTemplate[] }) => {
       setTemplates(t);
+      setSaving(false);
     };
-    socket.on("claude:templates", handle);
+    const handleError = ({ message }: { message: string }) => {
+      setSaving(false);
+      setMsg({ ok: false, text: message ?? "Operation failed" });
+      setTimeout(() => setMsg(null), 4000);
+    };
+    socket.on("claude:templates", handleTemplates);
+    socket.on("claude:error", handleError);
     socket.emit("claude:list_templates");
-    return () => { socket.off("claude:templates", handle); };
+    return () => {
+      socket.off("claude:templates", handleTemplates);
+      socket.off("claude:error", handleError);
+    };
   }, []);
 
   const resetForm = () => {
@@ -69,7 +82,9 @@ export function TemplatesSection() {
   };
 
   const handleSave = () => {
+    if (!formName.trim() || saving) return;
     const socket = getSocket();
+    setSaving(true);
     const data = {
       name: formName.trim(),
       description: formDescription.trim() || undefined,
@@ -87,11 +102,21 @@ export function TemplatesSection() {
     setCreating(false);
     setEditing(null);
     resetForm();
+    setMsg({ ok: true, text: creating ? "Template created" : "Template saved" });
+    setTimeout(() => setMsg(null), 3000);
   };
 
   const handleDelete = (id: string) => {
+    if (confirmDelete !== id) {
+      setConfirmDelete(id);
+      return;
+    }
+    setConfirmDelete(null);
     const socket = getSocket();
     socket.emit("claude:delete_template", { templateId: id });
+    setTemplates((prev) => prev.filter((t) => t.id !== id));
+    setMsg({ ok: true, text: "Template deleted" });
+    setTimeout(() => setMsg(null), 3000);
   };
 
   const isFormOpen = creating || editing !== null;
@@ -112,6 +137,9 @@ export function TemplatesSection() {
       <p className="text-caption text-bot-muted">
         Templates pre-configure new sessions with a model, system prompt, and other settings.
       </p>
+      {msg && (
+        <p className={`text-caption ${msg.ok ? "text-bot-green" : "text-bot-red"}`}>{msg.text}</p>
+      )}
 
       {isFormOpen && (
         <div className="rounded-lg border border-bot-border bg-bot-elevated p-4 space-y-3">
@@ -171,9 +199,9 @@ export function TemplatesSection() {
               className="rounded-md border border-bot-border px-4 py-2 text-body text-bot-muted hover:bg-bot-surface transition-colors">
               Cancel
             </button>
-            <button onClick={handleSave} disabled={!formName.trim()}
+            <button onClick={handleSave} disabled={!formName.trim() || saving}
               className="rounded-md bg-bot-accent px-4 py-2 text-body font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors">
-              {creating ? "Create" : "Save"}
+              {saving ? "Saving…" : creating ? "Create" : "Save"}
             </button>
           </div>
         </div>
@@ -200,11 +228,19 @@ export function TemplatesSection() {
                 title="Edit">
                 <Pencil className="h-3.5 w-3.5" />
               </button>
-              <button onClick={() => handleDelete(t.id)}
-                className="rounded p-1 text-bot-muted hover:text-bot-red hover:bg-bot-red/10 transition-colors"
-                title="Delete">
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              {confirmDelete === t.id ? (
+                <button onClick={() => handleDelete(t.id)}
+                  className="rounded px-2 py-1 text-caption text-bot-red bg-bot-red/10 hover:bg-bot-red/20 transition-colors"
+                  title="Click again to confirm delete">
+                  Confirm
+                </button>
+              ) : (
+                <button onClick={() => handleDelete(t.id)}
+                  className="rounded p-1 text-bot-muted hover:text-bot-red hover:bg-bot-red/10 transition-colors"
+                  title="Delete (click to confirm)">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
           </div>
         ))}

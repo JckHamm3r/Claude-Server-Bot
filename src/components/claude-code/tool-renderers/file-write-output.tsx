@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, FilePlus, FilePen } from "lucide-react";
+import { FilePlus, FilePen } from "lucide-react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 

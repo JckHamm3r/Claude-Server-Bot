@@ -468,6 +468,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             placeholder={placeholder}
             disabled={disabled}
             aria-label="Message input"
+            role="combobox"
             aria-haspopup="listbox"
             aria-expanded={slashOpen || atOpen}
             aria-controls={slashOpen ? "slash-palette" : atOpen ? "file-palette" : undefined}

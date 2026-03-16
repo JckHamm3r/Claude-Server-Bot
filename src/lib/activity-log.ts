@@ -30,7 +30,8 @@ export type ActivityEventType =
   | "security_ip_unblocked"
   | "security_manual_ip_block"
   | "security_command_blocked"
-  | "security_command_policy_changed";
+  | "security_command_policy_changed"
+  | "app_setting_changed";
 
 export function logActivity(
   event_type: ActivityEventType,

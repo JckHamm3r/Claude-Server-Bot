@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Shield, Wifi, Terminal, ScrollText, Plus, X, RefreshCw, Lock, Unlock } from "lucide-react";
 import { cn, apiUrl } from "@/lib/utils";
 
@@ -139,17 +139,24 @@ export function SecuritySection() {
   async function saveGuardSettings(updates: Partial<SecuritySettings>) {
     setSavingGuard(true);
     setGuardMsg("");
+    const previous = secSettings;
     const updated = { ...secSettings, ...updates };
     setSecSettings(updated as SecuritySettings);
     try {
-      await fetch(apiUrl("/api/security/settings"), {
+      const res = await fetch(apiUrl("/api/security/settings"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
       });
-      setGuardMsg("Saved");
-      setTimeout(() => setGuardMsg(""), 2000);
+      if (!res.ok) {
+        setSecSettings(previous as SecuritySettings);
+        setGuardMsg("Error saving");
+      } else {
+        setGuardMsg("Saved");
+        setTimeout(() => setGuardMsg(""), 2000);
+      }
     } catch {
+      setSecSettings(previous as SecuritySettings);
       setGuardMsg("Error saving");
     } finally {
       setSavingGuard(false);
@@ -180,15 +187,25 @@ export function SecuritySection() {
   }
 
   async function unblockIP(ip: string) {
-    await fetch(apiUrl(`/api/security/ip-protection/${encodeURIComponent(ip)}/unblock`), { method: "POST" });
-    setBlockedIPs((prev) => prev.filter((b) => b.ip_address !== ip));
+    try {
+      const res = await fetch(apiUrl(`/api/security/ip-protection/${encodeURIComponent(ip)}/unblock`), { method: "POST" });
+      if (res.ok) {
+        setBlockedIPs((prev) => prev.filter((b) => b.ip_address !== ip));
+        setIpMsg("IP unblocked");
+        setTimeout(() => setIpMsg(""), 2000);
+      } else {
+        setIpMsg("Failed to unblock IP");
+      }
+    } catch {
+      setIpMsg("Error unblocking IP");
+    }
   }
 
   async function manualBlockIP() {
     if (!manualIP.trim()) return;
     setBlockingIP(true);
     try {
-      await fetch(apiUrl("/api/security/ip-protection/block"), {
+      const res = await fetch(apiUrl("/api/security/ip-protection/block"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -198,9 +215,16 @@ export function SecuritySection() {
           durationMinutes: manualDuration,
         }),
       });
-      setManualIP("");
-      setManualReason("");
-      loadIPData();
+      if (res.ok) {
+        setManualIP("");
+        setManualReason("");
+        setIpMsg("IP blocked successfully");
+        setTimeout(() => setIpMsg(""), 2000);
+        loadIPData();
+      } else {
+        const data = await res.json() as { error?: string };
+        setIpMsg(data.error ?? "Error blocking IP");
+      }
     } catch {
       setIpMsg("Error blocking IP");
     } finally {
@@ -210,59 +234,72 @@ export function SecuritySection() {
 
   // ── Sandbox handlers ───────────────────────────────────────────────────────
 
-  async function saveSandboxEnabled(enabled: boolean) {
-    setSandboxData((prev) => prev ? { ...prev, enabled } : prev);
-    await fetch(apiUrl("/api/security/sandbox"), {
+  async function sandboxPost(body: Record<string, unknown>) {
+    const res = await fetch(apiUrl("/api/security/sandbox"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled }),
+      body: JSON.stringify(body),
     });
+    if (!res.ok) throw new Error("Server error");
+  }
+
+  async function saveSandboxEnabled(enabled: boolean) {
+    const prev = sandboxData;
+    setSandboxData((s) => s ? { ...s, enabled } : s);
+    try {
+      await sandboxPost({ enabled });
+      setSandboxMsg(enabled ? "Sandbox enabled" : "Sandbox disabled");
+      setTimeout(() => setSandboxMsg(""), 2000);
+    } catch {
+      setSandboxData(prev);
+      setSandboxMsg("Error saving");
+    }
   }
 
   async function addAlwaysAllowed() {
     const pattern = newAllowedPattern.trim();
     if (!pattern) return;
-    await fetch(apiUrl("/api/security/sandbox"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ addAlwaysAllowed: pattern }),
-    });
-    setSandboxData((prev) => prev ? { ...prev, alwaysAllowed: [...prev.alwaysAllowed, pattern] } : prev);
-    setNewAllowedPattern("");
-    setSandboxMsg("Added");
-    setTimeout(() => setSandboxMsg(""), 2000);
+    try {
+      await sandboxPost({ addAlwaysAllowed: pattern });
+      setSandboxData((s) => s ? { ...s, alwaysAllowed: [...s.alwaysAllowed, pattern] } : s);
+      setNewAllowedPattern("");
+      setSandboxMsg("Added");
+      setTimeout(() => setSandboxMsg(""), 2000);
+    } catch {
+      setSandboxMsg("Error adding pattern");
+    }
   }
 
   async function removeAlwaysAllowed(pattern: string) {
-    await fetch(apiUrl("/api/security/sandbox"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ removeAlwaysAllowed: pattern }),
-    });
-    setSandboxData((prev) => prev ? { ...prev, alwaysAllowed: prev.alwaysAllowed.filter((p) => p !== pattern) } : prev);
+    try {
+      await sandboxPost({ removeAlwaysAllowed: pattern });
+      setSandboxData((s) => s ? { ...s, alwaysAllowed: s.alwaysAllowed.filter((p) => p !== pattern) } : s);
+    } catch {
+      setSandboxMsg("Error removing pattern");
+    }
   }
 
   async function addAlwaysBlocked() {
     const pattern = newBlockedPattern.trim();
     if (!pattern) return;
-    await fetch(apiUrl("/api/security/sandbox"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ addAlwaysBlocked: pattern }),
-    });
-    setSandboxData((prev) => prev ? { ...prev, alwaysBlocked: [...prev.alwaysBlocked, pattern] } : prev);
-    setNewBlockedPattern("");
-    setSandboxMsg("Added");
-    setTimeout(() => setSandboxMsg(""), 2000);
+    try {
+      await sandboxPost({ addAlwaysBlocked: pattern });
+      setSandboxData((s) => s ? { ...s, alwaysBlocked: [...s.alwaysBlocked, pattern] } : s);
+      setNewBlockedPattern("");
+      setSandboxMsg("Added");
+      setTimeout(() => setSandboxMsg(""), 2000);
+    } catch {
+      setSandboxMsg("Error adding pattern");
+    }
   }
 
   async function removeAlwaysBlocked(pattern: string) {
-    await fetch(apiUrl("/api/security/sandbox"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ removeAlwaysBlocked: pattern }),
-    });
-    setSandboxData((prev) => prev ? { ...prev, alwaysBlocked: prev.alwaysBlocked.filter((p) => p !== pattern) } : prev);
+    try {
+      await sandboxPost({ removeAlwaysBlocked: pattern });
+      setSandboxData((s) => s ? { ...s, alwaysBlocked: s.alwaysBlocked.filter((p) => p !== pattern) } : s);
+    } catch {
+      setSandboxMsg("Error removing pattern");
+    }
   }
 
   // ── Sub-tab definitions ────────────────────────────────────────────────────
@@ -654,9 +691,8 @@ export function SecuritySection() {
                 </thead>
                 <tbody className="divide-y divide-bot-border">
                   {secEvents.map((e) => (
-                    <>
+                    <React.Fragment key={e.id}>
                       <tr
-                        key={e.id}
                         className="bg-bot-elevated cursor-pointer hover:bg-bot-surface transition-colors"
                         onClick={() => setExpandedEvent(expandedEvent === e.id ? null : e.id)}
                       >
@@ -678,7 +714,7 @@ export function SecuritySection() {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>

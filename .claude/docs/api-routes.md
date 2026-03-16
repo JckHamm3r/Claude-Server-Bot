@@ -21,6 +21,7 @@ All routes live under the Next.js App Router (`src/app/api/`).
 | `/api/settings/smtp` | SMTP configuration |
 | `/api/settings/domains` | Domain management |
 | `/api/settings/notifications` | Notification preferences |
+| `/api/notifications` | In-app notification inbox (GET list, POST mark-read) |
 | `/api/settings/customization` | Personality settings |
 | `/api/settings/project` | Project root config |
 | `/api/settings/restore` | Backup restore |

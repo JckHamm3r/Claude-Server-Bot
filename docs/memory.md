@@ -68,4 +68,4 @@ The `.context/` folder is a persistent knowledge base the agent builds and maint
 | Method | Route | Purpose |
 |--------|-------|---------|
 | GET | `/api/claude-code/memory` | List and read memory and context files |
-| POST | `/api/claude-code/memory` | Write memory files (admin only) |
+| PUT | `/api/claude-code/memory` | Write memory files (admin only) |

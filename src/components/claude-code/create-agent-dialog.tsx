@@ -7,7 +7,7 @@ import { getSocket } from "@/lib/socket";
 import type { ClaudeAgent } from "@/lib/claude-db";
 import { motion } from "framer-motion";
 
-import { AVAILABLE_MODELS } from "@/lib/models";
+import { ModelSelector } from "@/components/claude-code/model-selector";
 
 const AVAILABLE_TOOLS = ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "WebSearch", "Agent"];
 
@@ -42,7 +42,7 @@ export function CreateAgentDialog({
     icon: initialData?.icon ?? "",
     name: initialData?.name ?? "",
     description: initialData?.description ?? "",
-    model: initialData?.model ?? "claude-opus-4-6",
+    model: initialData?.model ?? "claude-sonnet-4-6",
     allowed_tools: initialData?.allowed_tools ?? [],
   });
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
@@ -228,17 +228,10 @@ export function CreateAgentDialog({
 
               <div className="flex flex-col gap-1.5">
                 <label className="text-caption font-medium text-bot-muted">Model</label>
-                <select
+                <ModelSelector
                   value={form.model}
-                  onChange={(e) => setForm((p) => ({ ...p, model: e.target.value }))}
-                  className="w-full rounded-xl border border-bot-border/40 bg-bot-elevated/40 px-4 py-2.5 text-body text-bot-text outline-none focus:border-bot-accent/50 focus:shadow-glow-sm transition-all duration-200"
-                >
-                  {AVAILABLE_MODELS.map((m) => (
-                    <option key={m.value} value={m.value}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(model) => setForm((p) => ({ ...p, model }))}
+                />
               </div>
 
               <div className="flex flex-col gap-1.5">

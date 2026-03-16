@@ -532,6 +532,11 @@ export function listPlans(sessionId: string): ClaudePlan[] {
   return rows.map(rowToPlan);
 }
 
+export function listPlansForUser(email: string): ClaudePlan[] {
+  const rows = db.prepare("SELECT * FROM plans WHERE created_by = ? ORDER BY created_at DESC").all(email) as Record<string, unknown>[];
+  return rows.map(rowToPlan);
+}
+
 export function addPlanStep(planId: string, step: { step_order: number; summary: string; details?: string }): ClaudePlanStep {
   const id = randomUUID();
   db.prepare("INSERT INTO plan_steps (id, plan_id, step_order, summary, details) VALUES (?, ?, ?, ?, ?)").run(id, planId, step.step_order, step.summary, step.details ?? null);

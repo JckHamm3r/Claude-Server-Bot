@@ -21,13 +21,14 @@ import {
 import { DomainsSection } from "@/components/claude-code/settings/domains-section";
 import { SmtpSection } from "@/components/claude-code/settings/smtp-section";
 import { NotificationsSection } from "@/components/claude-code/settings/notifications-section";
-
 import { SecuritySection } from "@/components/claude-code/settings/security-section";
 import { TemplatesSection } from "@/components/claude-code/settings/templates-section";
+import { CustomizationSection } from "@/components/claude-code/settings/customization-section";
 
 type SectionKey =
   | "general"
   | "bot_identity"
+  | "customization"
   | "rate_limits"
   | "users"
   | "project"
@@ -84,6 +85,7 @@ export function SettingsPanel() {
   const [rateRuntime, setRateRuntime] = useState("30");
   const [rateConcurrent, setRateConcurrent] = useState("3");
   const [savingRates, setSavingRates] = useState(false);
+  const [ratesMsg, setRatesMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Activity log
   const [activityEntries, setActivityEntries] = useState<{
@@ -155,6 +157,24 @@ export function SettingsPanel() {
       runHealthCheck();
       loadResources();
     }
+    if (activeSection === "project" && !projectStatus) {
+      // Load current project status on first open
+      fetch(apiUrl("/api/bot-identity"))
+        .then((r) => r.json())
+        .then((data: { projectRoot?: string }) => {
+          if (data.projectRoot) setProjectRoot(data.projectRoot);
+          return fetch(apiUrl("/api/settings/project"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ projectRoot: data.projectRoot ?? process.env.NEXT_PUBLIC_CLAUDE_PROJECT_ROOT ?? "" }),
+          });
+        })
+        .then((r) => r.json())
+        .then((d: { hasClaudeMd?: boolean; hasClaudeDir?: boolean }) => {
+          setProjectStatus({ hasClaudeMd: d.hasClaudeMd ?? false, hasClaudeDir: d.hasClaudeDir ?? false });
+        })
+        .catch(() => {});
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSection]);
 
@@ -177,11 +197,18 @@ export function SettingsPanel() {
       custom_default_context: updated.custom_default_context,
       auto_naming_enabled: updated.auto_naming_enabled,
     });
-    socket.once("claude:settings", () => {
-      setSaving(false);
+    const cleanup = () => { setSaving(false); };
+    const onDone = () => {
+      cleanup();
       setSavedMsg(true);
       setTimeout(() => setSavedMsg(false), 2000);
-    });
+    };
+    socket.once("claude:settings", onDone);
+    // Fallback: clear spinner after 5s if server never responds
+    setTimeout(() => {
+      socket.off("claude:settings", onDone);
+      setSaving(false);
+    }, 5000);
   }
 
   async function handleAddUser(e: React.FormEvent) {
@@ -207,12 +234,16 @@ export function SettingsPanel() {
 
   async function handleDeleteUser(email: string) {
     if (deletingEmail === email) {
-      await fetch(apiUrl("/api/users"), {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
-      setUsers((prev) => prev.filter((u) => u.email !== email));
+      try {
+        const res = await fetch(apiUrl("/api/users"), {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email }),
+        });
+        if (res.ok) {
+          setUsers((prev) => prev.filter((u) => u.email !== email));
+        }
+      } catch { /* ignore */ }
       setDeletingEmail(null);
     } else {
       setDeletingEmail(email);
@@ -343,16 +374,25 @@ export function SettingsPanel() {
   async function handleSaveRates(e: React.FormEvent) {
     e.preventDefault();
     setSavingRates(true);
-    await fetch(apiUrl("/api/app-settings"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        rate_limit_commands: rateCmds,
-        rate_limit_runtime_min: rateRuntime,
-        rate_limit_concurrent: rateConcurrent,
-      }),
-    });
-    setSavingRates(false);
+    setRatesMsg(null);
+    try {
+      const res = await fetch(apiUrl("/api/app-settings"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rate_limit_commands: rateCmds,
+          rate_limit_runtime_min: rateRuntime,
+          rate_limit_concurrent: rateConcurrent,
+        }),
+      });
+      const data = await res.json() as { ok?: boolean; error?: string };
+      setRatesMsg(res.ok ? { ok: true, text: "Rate limits saved." } : { ok: false, text: data.error ?? "Save failed" });
+      setTimeout(() => setRatesMsg(null), 3000);
+    } catch (err) {
+      setRatesMsg({ ok: false, text: String(err) });
+    } finally {
+      setSavingRates(false);
+    }
   }
 
   async function loadActivity(offset: number) {
@@ -394,15 +434,17 @@ export function SettingsPanel() {
     setKillMsg(null);
     try {
       const socket = getSocket();
+      let responded = false;
       socket.emit("claude:kill_all");
       socket.once("claude:kill_all_done", ({ killed }: { killed: number }) => {
+        responded = true;
         setKillMsg(`Killed ${killed} session(s)`);
         setKillingAll(false);
       });
-      // Fallback timeout
+      // Fallback timeout — only fires if socket never responded
       setTimeout(() => {
         setKillingAll(false);
-        if (!killMsg) setKillMsg("Kill signal sent");
+        if (!responded) setKillMsg("Kill signal sent");
       }, 3000);
     } catch {
       setKillingAll(false);
@@ -416,7 +458,7 @@ export function SettingsPanel() {
     setRestoreMsg(null);
     try {
       const formData = new FormData();
-      formData.append("backup", file);
+      formData.append("file", file);
       const res = await fetch(apiUrl("/api/settings/restore"), { method: "POST", body: formData });
       const data = await res.json();
       setRestoreMsg(res.ok ? { ok: true, text: "Restore complete. Service restarting…" } : { ok: false, text: data.error ?? "Restore failed" });
@@ -435,12 +477,13 @@ export function SettingsPanel() {
 
   const allSections: { key: SectionKey; label: string; adminOnly?: boolean }[] = [
     { key: "general", label: "General" },
-    { key: "bot_identity", label: "Bot Identity" },
+    { key: "bot_identity", label: "Bot Identity", adminOnly: true },
+    { key: "customization", label: "Customization", adminOnly: true },
     { key: "rate_limits", label: "Rate Limits", adminOnly: true },
     { key: "users", label: "Users", adminOnly: true },
     { key: "project", label: "Project", adminOnly: true },
     { key: "notifications", label: "Notifications" },
-    { key: "activity_log", label: "Activity Log" },
+    { key: "activity_log", label: "Activity Log", adminOnly: true },
     { key: "backup", label: "Backup & Restore", adminOnly: true },
     { key: "database", label: "Database", adminOnly: true },
     { key: "system", label: "System", adminOnly: true },
@@ -582,6 +625,9 @@ export function SettingsPanel() {
           </div>
         )}
 
+        {/* ── Customization ── */}
+        {activeSection === "customization" && <CustomizationSection />}
+
         {/* ── Rate Limits ── */}
         {activeSection === "rate_limits" && (
           <div className="mx-auto max-w-2xl">
@@ -612,12 +658,17 @@ export function SettingsPanel() {
                   className="w-32 rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent"
                 />
               </div>
-              <button
-                type="submit" disabled={savingRates}
-                className="rounded-lg bg-bot-accent px-4 py-2 text-body font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors"
-              >
-                {savingRates ? "Saving…" : "Save Limits"}
-              </button>
+              <div className="flex items-center gap-4">
+                <button
+                  type="submit" disabled={savingRates}
+                  className="rounded-lg bg-bot-accent px-4 py-2 text-body font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors"
+                >
+                  {savingRates ? "Saving…" : "Save Limits"}
+                </button>
+                {ratesMsg && (
+                  <span className={cn("text-caption", ratesMsg.ok ? "text-bot-green" : "text-bot-red")}>{ratesMsg.text}</span>
+                )}
+              </div>
             </form>
           </div>
         )}
@@ -825,12 +876,12 @@ export function SettingsPanel() {
                     <p className="text-body font-medium text-bot-text mb-1">Export Backup</p>
                     <p className="text-caption text-bot-muted mb-4">Downloads a .tar.gz containing the database, project .claude/ directory, and CLAUDE.md.</p>
                     <a
-                      href="/api/settings/backup"
+                      href={apiUrl("/api/settings/backup")}
                       download
                       className="inline-flex items-center gap-2 rounded-lg bg-bot-accent px-4 py-2 text-body font-medium text-white hover:bg-bot-accent/80 transition-colors"
                     >
                       <Download className="h-4 w-4" />
-                      Download Backup
+                      Download Backup (.db)
                     </a>
                   </div>
                 </div>

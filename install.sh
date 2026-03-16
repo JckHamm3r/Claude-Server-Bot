@@ -1636,6 +1636,12 @@ show_completion_summary() {
   echo -e "  ${GREEN}${BOLD}Setup complete — ${BOT_NAME} is live!${NC}"
   echo ""
 
+  # Output credentials to /dev/tty when available (so they appear even in
+  # curl|bash pipes where stdout is captured), falling back to stdout in
+  # environments without a controlling terminal (CI, unattended cloud installs).
+  # The -w test can pass even when writes fail (no TTY), so probe with an actual write.
+  local _cred_out="/dev/stdout"
+  ( printf "" > /dev/tty ) 2>/dev/null && _cred_out="/dev/tty"
   {
     echo -e "  ${DIM}┌────────────────────────────────────────────────┐${NC}"
     echo -e "  ${DIM}│${NC}                                                ${DIM}│${NC}"
@@ -1648,26 +1654,26 @@ show_completion_summary() {
     echo -e "  ${DIM}│${NC}                                                ${DIM}│${NC}"
     echo -e "  ${DIM}└────────────────────────────────────────────────┘${NC}"
     echo ""
-  } > /dev/tty
+  } > "$_cred_out"
 
   if $SETUP_SERVICE; then
     echo -e "  ${BOLD}Service commands${NC}"
     if [ "$PLATFORM" = "macos" ]; then
-      echo -e "  ${DIM}$${NC} launchctl start com.claude-server-bot"
-      echo -e "  ${DIM}$${NC} launchctl stop com.claude-server-bot"
-      echo -e "  ${DIM}$${NC} tail -f $INSTALL_DIR/data/claude-bot.log"
+      echo -e "  ${DIM}\$${NC} launchctl start com.claude-server-bot"
+      echo -e "  ${DIM}\$${NC} launchctl stop com.claude-server-bot"
+      echo -e "  ${DIM}\$${NC} tail -f $INSTALL_DIR/data/claude-bot.log"
     else
-      echo -e "  ${DIM}$${NC} sudo systemctl status ${SERVICE_NAME}"
-      echo -e "  ${DIM}$${NC} sudo journalctl -u ${SERVICE_NAME} -f"
-      echo -e "  ${DIM}$${NC} sudo systemctl restart ${SERVICE_NAME}"
+      echo -e "  ${DIM}\$${NC} sudo systemctl status ${SERVICE_NAME}"
+      echo -e "  ${DIM}\$${NC} sudo journalctl -u ${SERVICE_NAME} -f"
+      echo -e "  ${DIM}\$${NC} sudo systemctl restart ${SERVICE_NAME}"
     fi
   else
     echo -e "  ${BOLD}Start manually${NC}"
-    echo -e "  ${DIM}$${NC} cd $INSTALL_DIR && pnpm start"
+    echo -e "  ${DIM}\$${NC} cd $INSTALL_DIR && pnpm start"
   fi
 
   echo ""
-  echo -e "  ${BOLD}Update${NC}  ${DIM}$${NC} cd $INSTALL_DIR && ./update.sh"
+  echo -e "  ${BOLD}Update${NC}  ${DIM}\$${NC} cd $INSTALL_DIR && ./update.sh"
 
   local next_steps=()
 

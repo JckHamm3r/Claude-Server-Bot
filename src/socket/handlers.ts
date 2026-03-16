@@ -6,9 +6,8 @@ import type { SessionStatus } from "../lib/claude-db";
 import { generateSessionName } from "../lib/claude/session-namer";
 import { getToken } from "next-auth/jwt";
 import { logActivity } from "../lib/activity-log";
-import { getAppSetting, getPersonalityPrefix } from "../lib/app-settings";
+import { getAppSetting } from "../lib/app-settings";
 import {
-  dispatchNotification,
   getUnreadCount,
   setNotificationEmitter,
   type InAppNotification,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSession } from "next-auth/react";
 import { apiUrl } from "@/lib/utils";
 
 const FRIENDLY_NAMES: Record<string, string> = {
@@ -21,6 +22,9 @@ function friendlyName(file: string): string {
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export function MemoryTab() {
+  const { data: session } = useSession();
+  const isAdmin = Boolean((session?.user as { isAdmin?: boolean })?.isAdmin);
+
   const [files, setFiles] = useState<string[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [content, setContent] = useState<string>("");
@@ -77,13 +81,16 @@ export function MemoryTab() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ file: activeFile, content }),
     })
-      .then((r) => r.json())
-      .then((data: { ok?: boolean; error?: string }) => {
+      .then(async (r) => {
+        const data = await r.json() as { ok?: boolean; error?: string };
         if (data.ok) {
           setSaveState("saved");
           setTimeout(() => setSaveState("idle"), 2500);
         } else {
           setSaveState("error");
+          if (r.status === 403) {
+            setLoadError("Save requires admin access. You can view but not edit memory files.");
+          }
         }
       })
       .catch(() => setSaveState("error"));
@@ -151,13 +158,17 @@ export function MemoryTab() {
             <span className="text-body text-bot-text font-semibold truncate">
               {activeFile ? friendlyName(activeFile) : "No file selected"}
             </span>
-            <button
-              onClick={handleSave}
-              disabled={!activeFile || saveState === "saving" || loadingFile}
-              className={saveBtnClass}
-            >
-              {saveLabelMap[saveState]}
-            </button>
+            {isAdmin ? (
+              <button
+                onClick={handleSave}
+                disabled={!activeFile || saveState === "saving" || loadingFile}
+                className={saveBtnClass}
+              >
+                {saveLabelMap[saveState]}
+              </button>
+            ) : (
+              <span className="text-caption text-bot-muted/60 italic">Read-only (admin required to save)</span>
+            )}
           </div>
 
           {loadError && (
@@ -180,11 +191,13 @@ export function MemoryTab() {
               className="w-full h-full resize-none bg-transparent text-bot-text font-mono text-caption p-4 outline-none border-none leading-relaxed"
               value={content}
               onChange={(e) => {
+                if (!isAdmin) return;
                 setContent(e.target.value);
                 if (saveState === "saved" || saveState === "error") setSaveState("idle");
               }}
               spellCheck={false}
               disabled={loadingFile || !activeFile}
+              readOnly={!isAdmin}
               placeholder={activeFile ? "File is empty." : "Select a file from the sidebar."}
             />
           </div>

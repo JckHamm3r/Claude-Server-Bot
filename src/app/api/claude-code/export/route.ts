@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
+import db from "@/lib/db";
 import { getSession, getMessages } from "@/lib/claude-db";
 import { exportToMarkdown, exportToJSON } from "@/lib/session-export";
 
@@ -16,17 +17,21 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
   }
 
-  const session = await getSession(sessionId);
+  const session = getSession(sessionId);
   if (!session) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
-  // Check ownership
-  if (session.created_by !== token.email) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  // Check access: creator, admin, or session participant
+  const user = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(token.email) as { is_admin: number } | undefined;
+  if (session.created_by !== token.email && !user?.is_admin) {
+    const participant = db.prepare("SELECT 1 FROM session_participants WHERE session_id = ? AND user_email = ?").get(sessionId, token.email);
+    if (!participant) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
   }
 
-  const messages = await getMessages(sessionId);
+  const messages = getMessages(sessionId);
   const sessionName = (session.name ?? "session").replace(/[^a-zA-Z0-9-_]/g, "_");
 
   if (format === "json") {

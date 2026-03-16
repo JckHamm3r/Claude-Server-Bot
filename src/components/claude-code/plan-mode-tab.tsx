@@ -26,7 +26,15 @@ export function PlanModeTab() {
   const [pausedStepId, setPausedStepId] = useState<string | null>(null);
   const [pausedCanRollback, setPausedCanRollback] = useState(false);
   const [goal, setGoal] = useState("");
-  const [sessionId] = useState(() => `plan-session-${crypto.randomUUID()}`);
+  // Use a stable per-browser session ID so plans persist across page refreshes.
+  const [sessionId] = useState(() => {
+    if (typeof window === "undefined") return `plan-session-${crypto.randomUUID()}`;
+    const stored = localStorage.getItem("plan-mode-session-id");
+    if (stored) return stored;
+    const id = `plan-session-${crypto.randomUUID()}`;
+    localStorage.setItem("plan-mode-session-id", id);
+    return id;
+  });
 
   const [planError, setPlanError] = useState<string | null>(null);
   const [generatingProgress, setGeneratingProgress] = useState("");

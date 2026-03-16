@@ -1,3 +1,5 @@
+import path from "path";
+import fs from "fs";
 import type { HandlerContext } from "./types";
 import {
   createSession,
@@ -210,8 +212,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
       // Clean up upload files from disk
       try {
         const DATA_DIR = process.env.DATA_DIR ?? "./data";
-        const uploadDir = require("path").join(DATA_DIR, "uploads", sessionId);
-        const fs = require("fs");
+        const uploadDir = path.join(DATA_DIR, "uploads", sessionId);
         if (fs.existsSync(uploadDir)) {
           fs.rmSync(uploadDir, { recursive: true, force: true });
         }
@@ -528,7 +529,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
       }
       addSessionParticipant(sessionId, inviteEmail);
       socket.emit("claude:session_participants", { sessionId, participants: listSessionParticipants(sessionId) });
-    } catch (err) {
+    } catch {
       socket.emit("claude:error", { sessionId, message: "Failed to invite user" });
     }
   });
@@ -541,7 +542,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
       }
       removeSessionParticipant(sessionId, removeEmail);
       socket.emit("claude:session_participants", { sessionId, participants: listSessionParticipants(sessionId) });
-    } catch (err) {
+    } catch {
       socket.emit("claude:error", { sessionId, message: "Failed to remove user" });
     }
   });
@@ -553,7 +554,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         return;
       }
       socket.emit("claude:session_participants", { sessionId, participants: listSessionParticipants(sessionId) });
-    } catch (err) {
+    } catch {
       socket.emit("claude:error", { sessionId, message: "Failed to list participants" });
     }
   });

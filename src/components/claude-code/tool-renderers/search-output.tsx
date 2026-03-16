@@ -10,7 +10,7 @@ interface SearchOutputProps {
   result?: string;
 }
 
-export function SearchOutput({ toolName, pattern, path, result }: SearchOutputProps) {
+export function SearchOutput({ pattern, path, result }: SearchOutputProps) {
   const [showAll, setShowAll] = useState(false);
   const lines = result?.split("\n").filter(Boolean) ?? [];
   const isLong = lines.length > 20;

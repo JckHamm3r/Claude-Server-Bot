@@ -69,7 +69,7 @@ function readContextIndex(): string {
 
 /**
  * Single source of truth for composing the system prompt sent to Claude.
- * Composition order: security → template → project CLAUDE.md → identity + personality
+ * Composition order: security (prepended last) → template → CLAUDE.md → identity + personality (first)
  */
 export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promise<string | undefined> {
   const {

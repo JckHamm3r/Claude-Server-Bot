@@ -43,10 +43,10 @@ export async function sendMail(
   if (!smtp || !smtp.enabled || !smtp.host) return;
 
   try {
-    // nodemailer is optional; load dynamically to avoid build-time hard dependency warnings.
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval
-    const dynamicRequire = Function("return require")() as NodeRequire;
-    const nodemailer = dynamicRequire("nodemailer") as {
+    // nodemailer is an optional runtime dependency. Use a plain require() so
+    // bundlers can tree-shake it, and catch the error if it's not installed.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const nodemailer = require("nodemailer") as {
       createTransport: (config: unknown) => { sendMail: (opts: unknown) => Promise<unknown> };
     };
     const transporter = nodemailer.createTransport({
