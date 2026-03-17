@@ -7,6 +7,7 @@ import {
   markAllNotificationsRead,
 } from "../lib/notifications";
 import { canAccessSession } from "../lib/claude-db";
+import db from "../lib/db";
 
 const PROJECT_ROOT = process.env.CLAUDE_PROJECT_ROOT ?? process.cwd();
 
@@ -17,7 +18,17 @@ export function registerPresenceHandlers(ctx: HandlerContext) {
 
   socket.on("claude:typing_start", ({ sessionId }: { sessionId: string }) => {
     if (!canAccessSession(sessionId, email)) return;
-    socket.to(`session:${sessionId}`).emit("claude:typing", { email, typing: true });
+    
+    const user = db.prepare("SELECT first_name, last_name, avatar_url FROM users WHERE email = ?").get(email) as 
+      { first_name: string; last_name: string; avatar_url: string | null } | undefined;
+    
+    socket.to(`session:${sessionId}`).emit("claude:typing", { 
+      email, 
+      typing: true,
+      firstName: user?.first_name || "",
+      lastName: user?.last_name || "",
+      avatarUrl: user?.avatar_url || null,
+    });
   });
 
   socket.on("claude:typing_stop", ({ sessionId }: { sessionId: string }) => {

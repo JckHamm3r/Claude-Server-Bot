@@ -25,7 +25,7 @@ export async function GET() {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const users = db.prepare("SELECT email, is_admin, first_name, last_name, created_at FROM users ORDER BY created_at ASC").all() as Array<{ email: string; is_admin: number; first_name: string; last_name: string; created_at: string }>;
+  const users = db.prepare("SELECT email, is_admin, first_name, last_name, avatar_url, created_at FROM users ORDER BY created_at ASC").all() as Array<{ email: string; is_admin: number; first_name: string; last_name: string; avatar_url: string | null; created_at: string }>;
   // Attach experience_level from user_settings for each user
   const usersWithLevel = users.map((u) => {
     const settings = getUserSettings(u.email);
@@ -172,7 +172,7 @@ export async function PATCH(request: NextRequest) {
   if (resetPassword) {
     const password = generatePassword();
     const hash = await bcrypt.hash(password, 12);
-    db.prepare("UPDATE users SET hash = ? WHERE email = ?").run(hash, effectiveEmail);
+    db.prepare("UPDATE users SET hash = ?, must_change_password = 1 WHERE email = ?").run(hash, effectiveEmail);
     result.password = password;
   }
 

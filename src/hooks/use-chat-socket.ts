@@ -11,6 +11,13 @@ import type { ChatInputHandle } from "@/components/claude-code/chat-input";
 
 type PresenceUser = { email: string; activeSession: string | null };
 
+interface TypingUser {
+  email: string;
+  firstName: string;
+  lastName: string;
+  avatarUrl: string | null;
+}
+
 interface StoredToolCall {
   toolCallId: string;
   toolName: string;
@@ -100,7 +107,7 @@ export interface UseChatSocketReturn {
   connected: boolean;
   reconnecting: boolean;
   presenceUsers: PresenceUser[];
-  typingUsers: Set<string>;
+  typingUsers: TypingUser[];
   commandRunner: string | null;
   sessionUsage: SessionUsage | null;
   budgetLimits: BudgetLimits | null;
@@ -161,7 +168,7 @@ export function useChatSocket({
   const [connected, setConnected] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   const [presenceUsers, setPresenceUsers] = useState<PresenceUser[]>([]);
-  const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
+  const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
   const [commandRunner, setCommandRunner] = useState<string | null>(null);
   const [sessionModel, setSessionModel] = useState(DEFAULT_MODEL);
   const [sessionUsage, setSessionUsage] = useState<SessionUsage | null>(null);
@@ -295,7 +302,7 @@ export function useChatSocket({
     setMessages([]);
     setCurrentActivity(null);
     setCommandRunner(null);
-    setTypingUsers(new Set());
+    setTypingUsers([]);
     syncQueue([]);
   }, [syncQueue]);
 
@@ -436,20 +443,29 @@ export function useChatSocket({
       setPresenceUsers(presence);
     });
 
-    socket.on("claude:typing", ({ email: typingEmail, typing }: { email: string; typing: boolean }) => {
+    socket.on("claude:typing", ({ email: typingEmail, typing, firstName, lastName, avatarUrl }: 
+      { email: string; typing: boolean; firstName?: string; lastName?: string; avatarUrl?: string | null }) => {
       const timers = typingTimersRef.current;
       if (typing) {
-        setTypingUsers((prev) => new Set(Array.from(prev).concat(typingEmail)));
+        setTypingUsers((prev) => {
+          const filtered = prev.filter(u => u.email !== typingEmail);
+          return [...filtered, { 
+            email: typingEmail, 
+            firstName: firstName || "", 
+            lastName: lastName || "", 
+            avatarUrl: avatarUrl || null 
+          }];
+        });
         if (timers.has(typingEmail)) clearTimeout(timers.get(typingEmail)!);
         timers.set(
           typingEmail,
           setTimeout(() => {
-            setTypingUsers((prev) => { const next = new Set(prev); next.delete(typingEmail); return next; });
+            setTypingUsers((prev) => prev.filter(u => u.email !== typingEmail));
             timers.delete(typingEmail);
           }, TYPING_CLEAR_MS),
         );
       } else {
-        setTypingUsers((prev) => { const next = new Set(prev); next.delete(typingEmail); return next; });
+        setTypingUsers((prev) => prev.filter(u => u.email !== typingEmail));
         if (timers.has(typingEmail)) { clearTimeout(timers.get(typingEmail)!); timers.delete(typingEmail); }
       }
     });

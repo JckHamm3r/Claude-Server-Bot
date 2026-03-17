@@ -13,6 +13,7 @@ import { NewSessionDialog } from "./new-session-dialog";
 import { SkipPermissionsBanner } from "./skip-permissions-banner";
 import { UnifiedSearchDialog } from "./unified-search-dialog";
 import { ChatInput } from "./chat-input";
+import { TypingIndicator } from "./typing-indicator";
 import { useChatSocket } from "@/hooks/use-chat-socket";
 import { getSocket } from "@/lib/socket";
 import type { ChatMessage } from "@/types/chat";
@@ -600,11 +601,7 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
           />
         )}
 
-        {chat.typingUsers.size > 0 && (
-          <div className="px-6 pb-1 text-caption text-bot-muted italic">
-            {Array.from(chat.typingUsers).map((e) => e.split("@")[0]).join(", ")} {chat.typingUsers.size === 1 ? "is" : "are"} typing…
-          </div>
-        )}
+        <TypingIndicator typingUsers={chat.typingUsers} />
 
         <ChatInput
           ref={chat.chatInputRef}

@@ -13,6 +13,7 @@ import { FilesTab } from "@/components/claude-code/files-tab";
 import { MessageSquare, Bot, ListChecks, Brain, Settings, TerminalSquare, FolderTree } from "lucide-react";
 import { motion } from "framer-motion";
 import { NotificationBell } from "@/components/claude-code/notification-bell";
+import { UserProfileDropdown } from "@/components/user-profile-dropdown";
 import { useUserProfile } from "@/hooks/use-user-profile";
 import { LEVEL_VISIBLE_TABS } from "@/lib/user-profile-constants";
 
@@ -91,7 +92,10 @@ export default function DashboardPage() {
               transition={{ type: "spring", stiffness: 400, damping: 30 }}
             />
           </div>
-          <NotificationBell />
+          <div className="flex items-center gap-2">
+            <NotificationBell />
+            <UserProfileDropdown />
+          </div>
         </div>
       </div>
 

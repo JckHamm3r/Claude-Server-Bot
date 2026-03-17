@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
+import db from "./lib/db";
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -13,11 +14,13 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/_next") ||
     pathname === "/login" ||
+    pathname === "/change-password" ||
     pathname === "/favicon.ico" ||
     pathname === "/claude-code.png" ||
     pathname.startsWith("/avatars/") ||
     pathname === "/api/bot-identity" ||
-    pathname === "/api/health/ping"
+    pathname === "/api/health/ping" ||
+    pathname === "/api/users/password/force-change"
   ) {
     return NextResponse.next();
   }
@@ -42,6 +45,19 @@ export async function middleware(request: NextRequest) {
       const safePath = pathname.startsWith("/") && !pathname.startsWith("//") ? pathname : "/";
       loginUrl.searchParams.set("callbackUrl", `${origin}${basePath}${safePath}`);
       return NextResponse.redirect(loginUrl);
+    }
+
+    // Check if user must change password
+    const userEmail = token.email as string;
+    if (userEmail) {
+      const user = db.prepare("SELECT must_change_password FROM users WHERE email = ?").get(userEmail) as
+        | { must_change_password: number }
+        | undefined;
+      
+      if (user?.must_change_password === 1 && pathname !== "/change-password") {
+        const changePasswordUrl = new URL(`${basePath}/change-password`, origin);
+        return NextResponse.redirect(changePasswordUrl);
+      }
     }
 
     // Authenticated: allow /login and /setup through
