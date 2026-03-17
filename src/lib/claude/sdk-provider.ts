@@ -53,6 +53,10 @@ interface SDKSessionState {
   queuedOperations: Map<string, QueuedOperationResolver>; // toolCallId -> resolver
   userEmail: string;
   maxTurns: number;
+  // Sub-agent delegation
+  delegationDepth: number;
+  parentSessionId: string | null;
+  onSubAgentCost: ((costUsd: number) => void) | null;
 }
 
 const sessions = new Map<string, SDKSessionState>();
@@ -154,6 +158,9 @@ function getOrCreate(sessionId: string, userEmail = ""): SDKSessionState {
       queuedOperations: new Map(),
       userEmail,
       maxTurns: 30,
+      delegationDepth: 0,
+      parentSessionId: null,
+      onSubAgentCost: null,
     });
   }
   const state = sessions.get(sessionId)!;
@@ -369,6 +376,27 @@ async function startStreamingSession(
       toolInput: Record<string, unknown>,
       callOpts: { signal: AbortSignal; toolUseID: string },
     ) => {
+      // Auto-allow WebFetch calls to the internal sub-agent delegation endpoint
+      // (localhost-only, so no security risk).
+      if (toolName === "WebFetch") {
+        const url = typeof toolInput.url === "string" ? toolInput.url : "";
+        const port = process.env.PORT ?? "3000";
+        const nextAuthUrl = process.env.NEXTAUTH_URL ?? "";
+        let pathname = "";
+        try {
+          const parsed = new URL(nextAuthUrl);
+          pathname = parsed.pathname.replace(/\/$/, "");
+        } catch {
+          const pathPrefix = process.env.CLAUDE_BOT_PATH_PREFIX ?? "";
+          const slug = process.env.CLAUDE_BOT_SLUG ?? "";
+          if (pathPrefix && slug) pathname = `/${pathPrefix}/${slug}`;
+        }
+        const internalBase = `http://localhost:${port}${pathname}/api/internal/sub-agent`;
+        if (url.startsWith(internalBase)) {
+          return { behavior: "allow" as const, updatedInput: toolInput };
+        }
+      }
+
       // NEW: File lock check for write operations
       if (["Write", "StrReplace", "Delete", "Bash", "Shell"].includes(toolName)) {
         const filePaths = extractFilePathsFromTool(toolName, toolInput);
@@ -941,6 +969,9 @@ export const sdkProvider: ClaudeCodeProvider = {
     if (opts.claudeSessionId && !state.claudeSessionId) {
       state.claudeSessionId = opts.claudeSessionId;
     }
+    if (opts.delegationDepth !== undefined) state.delegationDepth = opts.delegationDepth;
+    if (opts.parentSessionId) state.parentSessionId = opts.parentSessionId;
+    if (opts.onSubAgentCost) state.onSubAgentCost = opts.onSubAgentCost;
   },
 
   sendMessage(sessionId, message, opts) {

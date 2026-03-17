@@ -4,6 +4,7 @@ import { getAppSetting, getPersonalityPrefix } from "./app-settings";
 import { getCustomizationSystemPrompt, getBotSelfIdentityPrompt } from "./customization";
 import { getSecuritySystemPrompt } from "./security-guard";
 import { getMemories } from "./claude-db";
+import { buildAgentToolBlock } from "./agent-tool-injector";
 
 export type InterfaceType = "ui_chat" | "customization_interface" | "system_agent";
 
@@ -14,6 +15,7 @@ interface BuildSystemPromptOpts {
   templateSystemPrompt?: string;
   experienceLevel?: string;
   autoSummary?: boolean;
+  includeAgentTools?: boolean;
 }
 
 function getExperienceLevelInstruction(level: string, autoSummary: boolean): string {
@@ -115,6 +117,7 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
     templateSystemPrompt,
     experienceLevel = "expert",
     autoSummary = true,
+    includeAgentTools = true,
   } = opts;
 
   let systemPrompt: string | undefined;
@@ -169,6 +172,17 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
   systemPrompt = systemPrompt
     ? systemPrompt + "\n\n" + contextSection
     : contextSection;
+
+  // Append agent delegation tools block for ui_chat sessions so Claude can
+  // autonomously invoke specialized agents mid-conversation.
+  if (includeAgentTools && interfaceType === "ui_chat") {
+    const agentToolBlock = buildAgentToolBlock();
+    if (agentToolBlock) {
+      systemPrompt = systemPrompt
+        ? systemPrompt + "\n\n" + agentToolBlock
+        : agentToolBlock;
+    }
+  }
 
   const guardEnabled = getAppSetting("guard_rails_enabled", "true") === "true";
   const securityPrefix = getSecuritySystemPrompt(guardEnabled);

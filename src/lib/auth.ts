@@ -175,6 +175,23 @@ export const authOptions: NextAuthOptions = {
       }
       return session;
     },
+    async redirect({ url, baseUrl }) {
+      const slug = process.env.NEXT_PUBLIC_CLAUDE_BOT_SLUG ?? "";
+      const prefix = process.env.NEXT_PUBLIC_CLAUDE_BOT_PATH_PREFIX ?? "c";
+      const basePath = slug ? `/${prefix}/${slug}` : "";
+      
+      // If redirecting to root, add the basePath
+      if (url === baseUrl || url === `${baseUrl}/`) {
+        return `${baseUrl}${basePath}/`;
+      }
+      
+      // If URL is relative and doesn't include basePath, add it
+      if (url.startsWith("/") && !url.startsWith(basePath)) {
+        return `${baseUrl}${basePath}${url}`;
+      }
+      
+      return url;
+    },
   },
 
   cookies: {

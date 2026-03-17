@@ -15,7 +15,7 @@ import {
 import { setBroadcaster } from "../lib/broadcast";
 import { checkProtectedPath } from "../lib/security-guard";
 import { classifyCommand, isSandboxEnabled } from "../lib/command-sandbox";
-import { cleanupExpiredBlocks } from "../lib/ip-protection";
+import { cleanupExpiredBlocks, syncFail2BanBans } from "../lib/ip-protection";
 import db from "../lib/db";
 import type { HandlerContext, PlanAction } from "./types";
 import { registerSessionHandlers } from "./session-handlers";
@@ -32,6 +32,7 @@ import {
   cancelQueuedOperation,
   getSessionQueuedOperations 
 } from "../lib/file-lock-manager";
+import { setSubAgentStatusEmitter } from "../lib/sub-agent-registry";
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
@@ -321,10 +322,32 @@ export function registerHandlers(io: Server) {
     cleanupExpiredBlocks();
     runRetentionCleanup();
     try { db.pragma("incremental_vacuum"); } catch { /* ignore */ }
+    // Sync fail2ban bans into the app DB (no-op if fail2ban disabled/unavailable)
+    try { syncFail2BanBans(); } catch { /* ignore */ }
   }, 5 * 60_000);
+
+  // Initial fail2ban sync shortly after startup
+  setTimeout(() => {
+    try { syncFail2BanBans(); } catch { /* ignore */ }
+  }, 10_000);
 
   // Initialize file lock manager
   initFileLockManager();
+
+  // Wire sub-agent status emitter so registry changes push real-time status to sessions
+  setSubAgentStatusEmitter((parentSessionId: string, entries) => {
+    io.to(`session:${parentSessionId}`).emit("claude:sub_agent_status", {
+      sessionId: parentSessionId,
+      agents: entries.map((e) => ({
+        id: e.id,
+        agentName: e.agentName,
+        agentIcon: e.agentIcon,
+        task: e.task,
+        status: e.status,
+        error: e.error,
+      })),
+    });
+  });
 
   const provider = getClaudeProvider();
 
@@ -632,7 +655,7 @@ export function registerHandlers(io: Server) {
         }
 
         // S9-03 + S9-04: Clean up listener set and providers for ephemeral sessions
-        const ephemeralPrefixes = ["agent-gen-", "plan-gen-", "plan-step-", "plan-refine-"];
+        const ephemeralPrefixes = ["agent-gen-", "plan-gen-", "plan-step-", "plan-refine-", "sub-agent-"];
         if (ephemeralPrefixes.some((p) => sessionId.startsWith(p))) {
           sessionListeners.delete(sessionId);
           sessionProviders.delete(sessionId);
@@ -682,7 +705,7 @@ export function registerHandlers(io: Server) {
 
         // AI-powered auto-naming on first completed exchange
         if (submitterEmail) {
-          const ephemeralPrefixes = ["agent-gen-", "plan-gen-", "plan-step-", "plan-refine-"];
+          const ephemeralPrefixes = ["agent-gen-", "plan-gen-", "plan-step-", "plan-refine-", "sub-agent-"];
           const isEphemeral = ephemeralPrefixes.some((p) => sessionId.startsWith(p));
           if (!isEphemeral) {
             const session = getSession(sessionId);

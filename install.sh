@@ -934,7 +934,7 @@ screen_confirm() {
 # ─── Prerequisites ───────────────────────────────────────────────────────
 check_and_install_prerequisites() {
   local missing=()
-  local need_node=false need_pnpm=false need_git=false need_openssl=false need_build_tools=false
+  local need_node=false need_pnpm=false need_git=false need_openssl=false need_build_tools=false need_fail2ban=false
 
   # Disk space check first — before any installation consumes space
   local avail_kb
@@ -957,6 +957,11 @@ check_and_install_prerequisites() {
   command -v git &>/dev/null || { need_git=true; missing+=("git"); }
   command -v openssl &>/dev/null || { need_openssl=true; missing+=("openssl"); }
   { command -v make &>/dev/null && command -v g++ &>/dev/null; } || { need_build_tools=true; missing+=("build tools (make, g++)"); }
+
+  # fail2ban — only on Linux/VPS mode
+  if [ "$PLATFORM" != "macos" ] && [ "$PLATFORM" != "wsl" ] && [ "$DEPLOY_MODE" = "vps" ]; then
+    command -v fail2ban-client &>/dev/null || { need_fail2ban=true; missing+=("fail2ban"); }
+  fi
 
   if [ ${#missing[@]} -eq 0 ]; then
     info "All prerequisites satisfied"
@@ -1024,8 +1029,68 @@ check_and_install_prerequisites() {
     info "Build tools installed"
   fi
 
+  if $need_fail2ban; then
+    echo "  Installing fail2ban..."
+    case "$PKG_MGR" in
+      apt) sudo apt-get install -y fail2ban ;;
+      dnf) sudo dnf install -y fail2ban ;;
+      yum) sudo yum install -y epel-release && sudo yum install -y fail2ban ;;
+      *)   warn "Install fail2ban manually for IP-level blocking support" ;;
+    esac
+    command -v fail2ban-client &>/dev/null && info "fail2ban installed" || warn "fail2ban installation may have failed — IP-level blocking will use app-layer only"
+  fi
+
   info "All prerequisites satisfied"
   return 0
+}
+
+# ── Fail2Ban jail setup ──────────────────────────────────────────────────────
+setup_fail2ban() {
+  if ! command -v fail2ban-client &>/dev/null; then return; fi
+  if [ "$PLATFORM" = "macos" ] || [ "$PLATFORM" = "wsl" ]; then return; fi
+
+  local jail_name="octoby-auth"
+  local log_dir="${INSTALL_DIR}/data"
+  local log_file="${log_dir}/auth-fail.log"
+  local filter_conf="/etc/fail2ban/filter.d/${jail_name}.conf"
+  local jail_conf="/etc/fail2ban/jail.d/${jail_name}.conf"
+
+  # Ensure log directory/file exist (the app writes here on auth failures if configured)
+  mkdir -p "$log_dir"
+  touch "$log_file" 2>/dev/null || true
+
+  # Write filter definition
+  sudo tee "$filter_conf" > /dev/null <<FILTER
+[Definition]
+# Matches log lines written by Octoby AI for failed login attempts
+failregex = \[auth\] failed login from <HOST>
+            \[ip-protection\] blocked <HOST>
+ignoreregex =
+FILTER
+
+  # Write jail definition
+  sudo tee "$jail_conf" > /dev/null <<JAIL
+[${jail_name}]
+enabled  = true
+filter   = ${jail_name}
+logpath  = ${log_file}
+maxretry = 10
+findtime = 600
+bantime  = 3600
+action   = iptables-allports[name=${jail_name}, protocol=all]
+JAIL
+
+  # Enable and restart fail2ban
+  if [ -d /run/systemd/system ] 2>/dev/null; then
+    sudo systemctl enable fail2ban --quiet 2>/dev/null || true
+    sudo systemctl restart fail2ban 2>/dev/null || true
+    sleep 2
+    if fail2ban-client ping 2>/dev/null | grep -q pong; then
+      info "fail2ban configured with jail '${jail_name}'"
+    else
+      warn "fail2ban installed but may not be running — check: sudo systemctl status fail2ban"
+    fi
+  fi
 }
 
 # ─── Env generation ──────────────────────────────────────────────────────
@@ -1593,6 +1658,13 @@ run_installation() {
     [ "$PLATFORM" = "macos" ] && setup_launchd || setup_systemd
   else
     info "No system service (start manually: cd $INSTALL_DIR && pnpm start)"
+  fi
+
+  # Phase 11b: Fail2Ban jail setup (VPS only, Linux)
+  if [ "$DEPLOY_MODE" = "vps" ] && [ "$PLATFORM" != "macos" ] && [ "$PLATFORM" != "wsl" ]; then
+    progress_bar 88 "Configuring fail2ban..."
+    echo ""
+    setup_fail2ban
   fi
 
   # Phase 12: Health check

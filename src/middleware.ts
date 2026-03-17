@@ -19,7 +19,8 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/avatars/") ||
     pathname === "/api/bot-identity" ||
     pathname === "/api/health/ping" ||
-    pathname === "/api/users/password/force-change"
+    pathname === "/api/users/password/force-change" ||
+    pathname.includes("/api/internal/sub-agent")
   ) {
     return NextResponse.next();
   }
