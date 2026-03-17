@@ -647,6 +647,7 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
             runStartTime={chat.runStartTime}
             currentUserEmail={currentEmail ?? undefined}
             currentUserInfo={currentUserInfo}
+            aiPaused={chat.aiPaused}
           />
         )}
 
