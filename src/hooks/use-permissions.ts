@@ -1,6 +1,7 @@
 "use client";
 
-import useSWR from "swr";
+import { useState, useEffect } from "react";
+import { apiUrl } from "@/lib/utils";
 
 export interface PlatformPermissions {
   sessions_create: boolean;
@@ -77,27 +78,31 @@ const DEFAULT_PERMISSIONS: EffectivePermissions = {
     models_allowed: [],
     delegation_enabled: true,
     delegation_max_depth: 5,
-    default_model: '',
-    default_template: '',
+    default_model: "",
+    default_template: "",
   },
   prompt: {
-    system_prompt_append: '',
-    default_context: '',
+    system_prompt_append: "",
+    default_context: "",
   },
 };
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
-
 export function usePermissions() {
-  const basePath = typeof window !== 'undefined'
-    ? (document.querySelector('meta[name="base-path"]') as HTMLMetaElement | null)?.content ?? ''
-    : '';
+  const [data, setData] = useState<{ permissions: EffectivePermissions; isAdmin: boolean } | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
 
-  const { data, error, isLoading } = useSWR<{ permissions: EffectivePermissions; isAdmin: boolean }>(
-    `${basePath}/api/groups/my-permissions`,
-    fetcher,
-    { revalidateOnFocus: false, dedupingInterval: 60000 }
-  );
+  useEffect(() => {
+    let cancelled = false;
+    fetch(apiUrl("/api/groups/my-permissions"))
+      .then((r) => {
+        if (!r.ok) throw new Error(`${r.status}`);
+        return r.json() as Promise<{ permissions: EffectivePermissions; isAdmin: boolean }>;
+      })
+      .then((d) => { if (!cancelled) { setData(d); setIsLoading(false); } })
+      .catch((err) => { if (!cancelled) { setError(err instanceof Error ? err : new Error(String(err))); setIsLoading(false); } });
+    return () => { cancelled = true; };
+  }, []);
 
   const permissions = data?.permissions ?? DEFAULT_PERMISSIONS;
   const isAdmin = data?.isAdmin ?? false;

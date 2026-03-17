@@ -1,6 +1,7 @@
 "use client";
 
-import useSWR from "swr";
+import { useState, useEffect, useCallback } from "react";
+import { apiUrl } from "@/lib/utils";
 
 export interface UserGroup {
   id: string;
@@ -14,21 +15,32 @@ export interface UserGroup {
   member_count: number;
 }
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
-
 export function useGroups() {
-  const basePath = typeof window !== 'undefined'
-    ? (document.querySelector('meta[name="base-path"]') as HTMLMetaElement | null)?.content ?? ''
-    : '';
+  const [groups, setGroups] = useState<UserGroup[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
 
-  const { data, error, isLoading, mutate } = useSWR<{ groups: UserGroup[] }>(
-    `${basePath}/api/groups`,
-    fetcher,
-    { revalidateOnFocus: false }
-  );
+  const mutate = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const res = await fetch(apiUrl("/api/groups"));
+      if (!res.ok) throw new Error(`Failed to fetch groups: ${res.status}`);
+      const data = await res.json() as { groups: UserGroup[] };
+      setGroups(data.groups ?? []);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error(String(err)));
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    mutate();
+  }, [mutate]);
 
   return {
-    groups: data?.groups ?? [],
+    groups,
     isLoading,
     error,
     mutate,
