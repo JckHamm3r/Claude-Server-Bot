@@ -1,5 +1,6 @@
 import { getActiveAgents } from "./claude-db";
 import { MAX_DELEGATION_DEPTH } from "./sub-agent-runner";
+import { randomUUID } from "crypto";
 
 /**
  * Builds the <agent-delegation> block appended to session system prompts.
@@ -10,8 +11,8 @@ export function buildAgentToolBlock(): string {
   const agents = getActiveAgents();
   if (agents.length === 0) return "";
 
-  const port = process.env.PORT ?? "3000";
   const secret = getOrCreateInternalSecret();
+  const baseUrl = getSubAgentBaseUrl();
 
   const agentList = agents
     .map((a) => `- **${a.name}** ${a.icon ? `(${a.icon})` : ""}: ${a.description}`.trim())
@@ -28,7 +29,7 @@ ${agentList}
 
 Use the WebFetch tool to POST to the internal delegation API:
 
-URL: http://localhost:${port}/api/internal/sub-agent
+URL: ${baseUrl}
 Method: POST
 Headers: Content-Type: application/json, X-Internal-Secret: ${secret}
 Body (JSON):
@@ -44,7 +45,7 @@ The response will be JSON: { "success": true/false, "result": "...", "error": ".
 
 ## How to list agents dynamically
 
-GET http://localhost:${port}/api/internal/sub-agent
+GET ${baseUrl}
 Headers: X-Internal-Secret: ${secret}
 
 ## Rules
@@ -67,8 +68,36 @@ let _internalSecret: string | null = null;
 
 export function getOrCreateInternalSecret(): string {
   if (!_internalSecret) {
-    const { randomUUID } = require("crypto") as typeof import("crypto");
     _internalSecret = randomUUID();
   }
   return _internalSecret;
+}
+
+// ── Base URL helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Returns the localhost URL to the sub-agent delegation endpoint.
+ * Handles both development (no slug prefix) and production (slug-based path).
+ *
+ * In production the custom server (server.ts) uses slug-based routing and the
+ * app is reachable at http(s)://host:port/<prefix>/<slug>/api/...
+ * For sub-agent calls we always want to use localhost with the same path
+ * structure so the request stays within the process.
+ */
+export function getSubAgentBaseUrl(): string {
+  const port = process.env.PORT ?? "3000";
+  // In production, NEXTAUTH_URL contains the full public base path including slug.
+  // Extract its pathname to reconstruct the localhost URL.
+  const nextAuthUrl = process.env.NEXTAUTH_URL ?? "";
+  let pathname = "";
+  try {
+    const parsed = new URL(nextAuthUrl);
+    pathname = parsed.pathname.replace(/\/$/, ""); // strip trailing slash
+  } catch {
+    // fallback: use env vars directly
+    const pathPrefix = process.env.CLAUDE_BOT_PATH_PREFIX ?? "";
+    const slug = process.env.CLAUDE_BOT_SLUG ?? "";
+    if (pathPrefix && slug) pathname = `/${pathPrefix}/${slug}`;
+  }
+  return `http://localhost:${port}${pathname}/api/internal/sub-agent`;
 }

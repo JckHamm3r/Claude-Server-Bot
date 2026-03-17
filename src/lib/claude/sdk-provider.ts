@@ -381,7 +381,17 @@ async function startStreamingSession(
       if (toolName === "WebFetch") {
         const url = typeof toolInput.url === "string" ? toolInput.url : "";
         const port = process.env.PORT ?? "3000";
-        const internalBase = `http://localhost:${port}/api/internal/sub-agent`;
+        const nextAuthUrl = process.env.NEXTAUTH_URL ?? "";
+        let pathname = "";
+        try {
+          const parsed = new URL(nextAuthUrl);
+          pathname = parsed.pathname.replace(/\/$/, "");
+        } catch {
+          const pathPrefix = process.env.CLAUDE_BOT_PATH_PREFIX ?? "";
+          const slug = process.env.CLAUDE_BOT_SLUG ?? "";
+          if (pathPrefix && slug) pathname = `/${pathPrefix}/${slug}`;
+        }
+        const internalBase = `http://localhost:${port}${pathname}/api/internal/sub-agent`;
         if (url.startsWith(internalBase)) {
           return { behavior: "allow" as const, updatedInput: toolInput };
         }
