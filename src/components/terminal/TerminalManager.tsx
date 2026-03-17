@@ -44,6 +44,10 @@ export function TerminalManager({ isAdmin }: TerminalManagerProps) {
   const primaryPaneRef = useRef<TerminalPaneHandle>(null);
   const lineCountRef = useRef(0);
 
+  // Stable refs so socket handlers can read latest state without being in deps
+  const ownedTabsRef = useRef(ownedTabs);
+  useEffect(() => { ownedTabsRef.current = ownedTabs; }, [ownedTabs]);
+
   const allTabs = useMemo(() => [...ownedTabs, ...sharedTabs], [ownedTabs, sharedTabs]);
 
   // Load terminal sessions from server
@@ -95,7 +99,7 @@ export function TerminalManager({ isAdmin }: TerminalManagerProps) {
       setSplitTabId((s) => (s === tabId ? null : s));
       setActiveTabId((current) => {
         if (current !== tabId) return current;
-        return ownedTabs.find((t) => t.id !== tabId)?.id ?? null;
+        return ownedTabsRef.current.find((t) => t.id !== tabId)?.id ?? null;
       });
     };
 
@@ -159,15 +163,6 @@ export function TerminalManager({ isAdmin }: TerminalManagerProps) {
       if (!initialized) loadSessions();
     }, 5000);
 
-    // Global Ctrl+R handler for history search
-    const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.key === "r" && activeTabId) {
-        e.preventDefault();
-        setShowHistorySearch(true);
-      }
-    };
-    window.addEventListener("keydown", handleGlobalKeyDown);
-
     return () => {
       socket.off("terminal:sessions", handleSessions);
       socket.off("terminal:created", handleCreated);
@@ -180,9 +175,11 @@ export function TerminalManager({ isAdmin }: TerminalManagerProps) {
       socket.off("terminal:error", handleError);
       socket.off("connect", handleReconnect);
       clearTimeout(initTimeout);
-      window.removeEventListener("keydown", handleGlobalKeyDown);
     };
-  }, [isAdmin, loadSessions, activeTabId, ownedTabs]);
+    // Only re-run when admin status or loadSessions identity changes, not on every
+    // tab switch or state update — that would re-register all listeners each time
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, loadSessions]);
 
   const markActivity = useCallback((tabId: string) => {
     setActivityMap((prev) => ({ ...prev, [tabId]: true }));
@@ -192,6 +189,18 @@ export function TerminalManager({ isAdmin }: TerminalManagerProps) {
       setActivityMap((prev) => ({ ...prev, [tabId]: false }));
     }, ACTIVITY_DEBOUNCE_MS);
   }, []);
+
+  // Global Ctrl+R handler — kept in its own effect so it always sees current activeTabId
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === "r" && activeTabId) {
+        e.preventDefault();
+        setShowHistorySearch(true);
+      }
+    };
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, [activeTabId]);
 
   const handleNewTab = useCallback(() => {
     const socket = getSocket();
@@ -255,12 +264,7 @@ export function TerminalManager({ isAdmin }: TerminalManagerProps) {
   }
 
   return (
-    <div className="flex flex-col h-full bg-[#0a0a10] overflow-hidden" onKeyDown={(e) => {
-      if (e.ctrlKey && e.key === 'r') {
-        e.preventDefault();
-        if (activeTabId) setShowHistorySearch(true);
-      }
-    }}>
+    <div className="flex flex-col h-full bg-[#0a0a10] overflow-hidden">
       {/* Toolbar */}
       <div className="flex items-center justify-between px-4 py-2 bg-bot-surface/80 backdrop-blur-md border-b border-bot-border/30 shrink-0">
         <div className="flex items-center gap-2">

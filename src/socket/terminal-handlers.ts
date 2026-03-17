@@ -248,16 +248,11 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
           return;
         }
 
-        // If already has a live PTY for this tab, detach old socket listeners only
+        // If already has a live PTY for this tab, just join the watcher set
         const existingPty = terminalPtyProcesses.get(tabId);
         if (existingPty) {
-          // Just add this socket to the tab's listener set and replay scrollback
           const sockets = getOrCreateTabSocketSet(tabId);
           sockets.add(socket.id);
-
-          const scrollback = scrollbackBuffers.get(tabId)
-            ?? JSON.parse(session.scrollback_json || "[]") as string[];
-          socket.emit("terminal:scrollback", { tabId, lines: scrollback });
           socket.emit("terminal:attached", { tabId });
           return;
         }
@@ -319,9 +314,10 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
         ptyProcess.onExit(() => {
           flushScrollback(tabId);
           terminalPtyProcesses.delete(tabId);
+          // Read watchers BEFORE deleting so we can notify them
+          const watching = tabSocketMap.get(tabId);
           tabSocketMap.delete(tabId);
           lineCounters.delete(tabId);
-          const watching = tabSocketMap.get(tabId);
           if (watching) {
             for (const sid of watching) {
               io.to(sid).emit("terminal:closed", { tabId });
@@ -329,15 +325,11 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
           }
         });
 
-        // Replay scrollback only if we have an active in-memory buffer
-        // (means this is a reconnect to a session that already had output).
-        // On a fresh PTY spawn (new session or server restart), don't replay
-        // stale DB scrollback as it pushes new output off screen.
+        // Seed in-memory scrollback buffer from DB for history search on reconnect.
+        // We do not replay scrollback to the client terminal — the PTY output stream
+        // is live and replaying stale escape sequences causes visual corruption.
         const activeBuffer = scrollbackBuffers.get(tabId);
-        if (activeBuffer && activeBuffer.length > 0) {
-          socket.emit("terminal:scrollback", { tabId, lines: activeBuffer });
-        } else {
-          // Seed the in-memory buffer from DB so future reconnects have scrollback
+        if (!activeBuffer || activeBuffer.length === 0) {
           const storedLines = JSON.parse(session.scrollback_json || "[]") as string[];
           if (storedLines.length > 0) {
             scrollbackBuffers.set(tabId, storedLines);
