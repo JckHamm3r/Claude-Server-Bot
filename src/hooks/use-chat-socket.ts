@@ -181,6 +181,7 @@ export function useChatSocket({
   const [aiPausedBy, setAiPausedBy] = useState<string | null>(null);
 
   // ── Refs ───────────────────────────────────────────────────────────────
+  const aiPausedRef = useRef(false);
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
   const chatInputRef = useRef<ChatInputHandle>(null);
   const lastUserMsgRef = useRef<string>("");
@@ -204,6 +205,10 @@ export function useChatSocket({
   useEffect(() => {
     autoAcceptRef.current = autoAccept;
   }, [autoAccept]);
+
+  useEffect(() => {
+    aiPausedRef.current = aiPaused;
+  }, [aiPaused]);
 
   useEffect(() => {
     onSessionRemovedRef.current = onSessionRemoved;
@@ -279,11 +284,27 @@ export function useChatSocket({
   const drainPending = useCallback(() => {
     const sessionId = activeSessionRef.current?.id;
     if (!sessionId) return;
-    if (pendingQueueRef.current.length > 0) {
-      const [next, ...rest] = pendingQueueRef.current;
-      syncQueue(rest);
-      sendImmediate(next, sessionId);
+    if (pendingQueueRef.current.length === 0) return;
+
+    // When AI is paused, flush queued messages as chat-only (no AI response expected)
+    if (aiPausedRef.current) {
+      for (const content of pendingQueueRef.current) {
+        const msg: ChatMessage = {
+          id: crypto.randomUUID(),
+          sender_type: "admin",
+          content,
+          timestamp: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, msg]);
+        socketRef.current?.emit("claude:message", { sessionId, content });
+      }
+      syncQueue([]);
+      return;
     }
+
+    const [next, ...rest] = pendingQueueRef.current;
+    syncQueue(rest);
+    sendImmediate(next, sessionId);
   }, [sendImmediate, syncQueue]);
 
   const clearEditRecoveryTimer = useCallback(() => {
@@ -936,6 +957,19 @@ export function useChatSocket({
       if (activeSessionRef.current?.id !== sessionId) return;
       setAiPaused(paused);
       setAiPausedBy(pausedBy);
+
+      const label = pausedBy ? pausedBy.split("@")[0] : "Someone";
+      const content = paused
+        ? `**AI paused** by ${label} — messages will not be sent to the AI. Type \`/chat\` to resume.`
+        : `**AI resumed** by ${label} — responses are active again.`;
+      const msg: ChatMessage = {
+        id: "chat-toggle-" + Date.now(),
+        sender_type: "claude",
+        content,
+        parsed: { type: "text", content },
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, msg]);
     });
 
     socket.on("claude:chat_broadcast", ({ sessionId, message, fromSocketId }: { sessionId: string; message: ChatMessage; fromSocketId: string }) => {
@@ -1037,13 +1071,29 @@ export function useChatSocket({
   const handleSend = useCallback(
     (content: string, attachments?: string[]) => {
       if (!activeSession) return;
+
+      // When AI is paused, add message locally and send to server for
+      // persistence/broadcast but do NOT set isRunning (no AI response expected).
+      if (aiPausedRef.current) {
+        const msg: ChatMessage = {
+          id: crypto.randomUUID(),
+          sender_type: "admin",
+          content,
+          timestamp: new Date().toISOString(),
+          metadata: attachments?.length ? { attachments } : undefined,
+        };
+        setMessages((prev) => [...prev, msg]);
+        emit("claude:message", { sessionId: activeSession.id, content, attachments });
+        return;
+      }
+
       if (isRunning) {
         syncQueue([...pendingQueueRef.current, content]);
         return;
       }
       sendImmediate(content, activeSession.id, attachments);
     },
-    [activeSession, isRunning, sendImmediate, syncQueue],
+    [activeSession, isRunning, sendImmediate, syncQueue, emit],
   );
 
   const handleInterrupt = useCallback(() => {
