@@ -377,6 +377,7 @@ export interface ClaudeAgent {
   allowed_tools: string[];
   status: "active" | "disabled" | "archived";
   current_version: number;
+  use_count: number;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -402,6 +403,7 @@ function rowToAgent(row: Record<string, unknown>): ClaudeAgent {
     allowed_tools: safeJsonParse(row.allowed_tools, [] as string[]),
     status: row.status as "active" | "disabled" | "archived",
     current_version: row.current_version as number,
+    use_count: (row.use_count as number) ?? 0,
     created_by: row.created_by as string,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
@@ -486,6 +488,10 @@ export function updateAgent(
 
 export function deleteAgent(id: string): void {
   db.prepare("DELETE FROM agents WHERE id = ?").run(id);
+}
+
+export function incrementAgentUseCount(id: string): void {
+  db.prepare("UPDATE agents SET use_count = use_count + 1 WHERE id = ?").run(id);
 }
 
 export function getAgentVersions(agentId: string): ClaudeAgentVersion[] {

@@ -134,6 +134,7 @@ for (const migration of [
   "ALTER TABLE users ADD COLUMN last_name TEXT NOT NULL DEFAULT ''",
   "ALTER TABLE users ADD COLUMN avatar_url TEXT",
   "ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE agents ADD COLUMN use_count INTEGER NOT NULL DEFAULT 0",
 ]) {
   try { db.exec(migration); } catch { /* column already exists */ }
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
 import { getSocket } from "@/lib/socket";
+import { cn } from "@/lib/utils";
 
 export interface TerminalPaneHandle {
   focus: () => void;
@@ -240,7 +241,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, TerminalPaneProps>(
     return (
       <div
         ref={containerRef}
-        className={className}
+        className={cn(className, "border border-bot-accent/10 rounded-sm")}
         style={{ background: "#0a0a10", width: "100%", height: "100%" }}
       />
     );

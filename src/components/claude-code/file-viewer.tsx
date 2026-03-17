@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Save, Eye, Code2, Loader2, AlertCircle,
-  CheckCircle2, Clock, FileText, X,
+  CheckCircle2, Clock, FileText, X, Trash2,
 } from "lucide-react";
 import { cn, apiUrl } from "@/lib/utils";
 import { MonacoEditor, getMonacoLanguage } from "./monaco-editor";
@@ -16,9 +16,10 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 interface FileViewerProps {
   filePath: string | null;
   onClose?: () => void;
+  onFileDeleted?: (path: string) => void;
 }
 
-export function FileViewer({ filePath, onClose }: FileViewerProps) {
+export function FileViewer({ filePath, onClose, onFileDeleted }: FileViewerProps) {
   const [content, setContent] = useState("");
   const [originalContent, setOriginalContent] = useState("");
   const [mimeType, setMimeType] = useState("");
@@ -29,6 +30,9 @@ export function FileViewer({ filePath, onClose }: FileViewerProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("editor");
   const [fileSize, setFileSize] = useState<number | null>(null);
   const [modified, setModified] = useState<number | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const isDirty = content !== originalContent;
   const isMarkdown = mimeType.includes("markdown") ||
@@ -36,6 +40,11 @@ export function FileViewer({ filePath, onClose }: FileViewerProps) {
     (filePath?.endsWith(".markdown") ?? false);
 
   const prevPath = useRef<string | null>(null);
+
+  useEffect(() => {
+    setConfirmDelete(false);
+    setDeleteError(null);
+  }, [filePath]);
 
   useEffect(() => {
     if (!filePath) {
@@ -111,6 +120,30 @@ export function FileViewer({ filePath, onClose }: FileViewerProps) {
     setSaveState("idle");
     setSaveError(null);
   }, [originalContent]);
+
+  const handleDelete = useCallback(async () => {
+    if (!filePath) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(apiUrl("/api/claude-code/files/manage"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", path: filePath }),
+      });
+      const data = await res.json() as { ok?: boolean; error?: string };
+      if (data.ok) {
+        onFileDeleted?.(filePath);
+        onClose?.();
+      } else {
+        setDeleteError(data.error ?? "Delete failed");
+        setDeleting(false);
+      }
+    } catch (err) {
+      setDeleteError(String(err));
+      setDeleting(false);
+    }
+  }, [filePath, onFileDeleted, onClose]);
 
   if (!filePath) {
     return (
@@ -223,6 +256,20 @@ export function FileViewer({ filePath, onClose }: FileViewerProps) {
             {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : "Save"}
           </button>
 
+          {/* Delete */}
+          <button
+            onClick={() => { setConfirmDelete((v) => !v); setDeleteError(null); }}
+            className={cn(
+              "rounded-md p-1.5 transition-all duration-200",
+              confirmDelete
+                ? "text-bot-red bg-bot-red/15 hover:bg-bot-red/25"
+                : "text-bot-muted hover:text-bot-red hover:bg-bot-red/10",
+            )}
+            title="Delete file"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+
           {/* Close */}
           {onClose && (
             <button
@@ -234,6 +281,41 @@ export function FileViewer({ filePath, onClose }: FileViewerProps) {
           )}
         </div>
       </div>
+
+      {/* Delete error */}
+      {deleteError && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-bot-red/10 border-b border-bot-red/20 text-bot-red text-caption shrink-0">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          {deleteError}
+          <button onClick={() => setDeleteError(null)} className="ml-auto text-bot-red/70 hover:text-bot-red">✕</button>
+        </div>
+      )}
+
+      {/* Delete confirmation bar */}
+      {confirmDelete && !deleteError && (
+        <div className="flex items-center gap-3 px-4 py-2 bg-bot-red/10 border-b border-bot-red/20 shrink-0">
+          <AlertCircle className="h-3.5 w-3.5 text-bot-red shrink-0" />
+          <span className="text-caption text-bot-text flex-1 min-w-0 truncate">
+            Delete <span className="font-semibold">{filePath?.split("/").pop()}</span>? This cannot be undone.
+          </span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={() => { setConfirmDelete(false); setDeleteError(null); }}
+              disabled={deleting}
+              className="px-3 py-1 rounded-lg border border-bot-border/30 text-caption text-bot-muted hover:text-bot-text hover:bg-bot-elevated/40 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="px-3 py-1 rounded-lg bg-bot-red/15 border border-bot-red/30 text-caption text-bot-red hover:bg-bot-red/25 transition-colors font-medium disabled:opacity-50"
+            >
+              {deleting ? "Deleting…" : "Delete"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Save error */}
       {saveError && (

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Pencil, Trash2, Archive, History, Power, PowerOff, Bot } from "lucide-react";
+import { Plus, Pencil, Trash2, Archive, History, Power, PowerOff, Bot, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ClaudeAgent } from "@/lib/claude-db";
 
@@ -185,9 +185,15 @@ function AgentCard({ agent, onEdit, onDelete, onToggleStatus, onArchive, onViewV
 
       <div className="flex items-center justify-between mt-auto">
         <ModelBadge model={agent.model} />
-        <span className="text-[10px] text-bot-muted/50">
-          {new Date(agent.updated_at).toLocaleDateString()}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1 text-[10px] text-bot-accent/60">
+            <Zap className="h-3 w-3" />
+            {agent.use_count}
+          </span>
+          <span className="text-[10px] text-bot-muted/50">
+            {new Date(agent.updated_at).toLocaleDateString()}
+          </span>
+        </div>
       </div>
 
       <div className="absolute inset-x-0 bottom-0 flex items-center justify-end gap-1 rounded-b-2xl border-t border-bot-border/20 glass px-3 py-2 opacity-0 transition-all duration-200 group-hover:opacity-100">

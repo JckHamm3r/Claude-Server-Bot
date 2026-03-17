@@ -1,5 +1,5 @@
 import { getClaudeProvider } from "./claude";
-import { getActiveAgents } from "./claude-db";
+import { getActiveAgents, incrementAgentUseCount } from "./claude-db";
 import { registerSubAgent, updateSubAgentStatus } from "./sub-agent-registry";
 import { randomUUID } from "crypto";
 
@@ -45,6 +45,8 @@ export async function runSubAgent(opts: SubAgentOptions): Promise<SubAgentResult
       error: `Agent "${opts.agentName}" not found or not active. Available agents: ${names || "none"}`,
     };
   }
+
+  incrementAgentUseCount(agent.id);
 
   const provider = getClaudeProvider();
   const subAgentId = randomUUID();

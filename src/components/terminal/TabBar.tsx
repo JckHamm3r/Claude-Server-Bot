@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Plus, X, FolderOpen, Columns2 } from "lucide-react";
+import { Plus, X, FolderOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface TerminalSessionTab {
@@ -16,26 +16,26 @@ interface TabBarProps {
   tabs: TerminalSessionTab[];
   activeTabId: string | null;
   activityMap: Record<string, boolean>;
-  splitTabId: string | null;
   maxTabs: number;
   onSelectTab: (id: string) => void;
   onNewTab: () => void;
   onCloseTab: (id: string) => void;
   onRenameTab: (id: string, name: string) => void;
-  onSplitToggle: () => void;
+  compact?: boolean;
+  focused?: boolean;
 }
 
 export function TabBar({
   tabs,
   activeTabId,
   activityMap,
-  splitTabId,
   maxTabs,
   onSelectTab,
   onNewTab,
   onCloseTab,
   onRenameTab,
-  onSplitToggle,
+  compact,
+  focused = true,
 }: TabBarProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -66,17 +66,20 @@ export function TabBar({
     if (!cwd) return "";
     const home = process.env.HOME ?? "/root";
     const shortened = cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd;
-    // Show only last 2 segments
     const parts = shortened.split("/").filter(Boolean);
     if (parts.length <= 2) return shortened;
     return `…/${parts.slice(-2).join("/")}`;
   };
 
   return (
-    <div className="flex items-center gap-0.5 px-2 py-1 bg-[#0a0a10] border-b border-bot-border/30 overflow-x-auto shrink-0 min-h-[36px]">
+    <div className={cn(
+      "flex items-center gap-0.5 overflow-x-auto shrink-0",
+      "bg-bot-surface/50 backdrop-blur-sm border-b border-bot-border/20",
+      compact ? "px-1.5 py-0.5 min-h-[30px]" : "px-2 py-1 min-h-[36px]",
+      !focused && "opacity-60",
+    )}>
       {tabs.map((tab) => {
         const isActive = tab.id === activeTabId;
-        const isSplit = tab.id === splitTabId;
         const isEditing = editingId === tab.id;
         const hasActivity = activityMap[tab.id];
 
@@ -86,18 +89,21 @@ export function TabBar({
             onClick={() => onSelectTab(tab.id)}
             onDoubleClick={(e) => startEdit(tab, e)}
             className={cn(
-              "group relative flex items-center gap-1.5 rounded-md px-2.5 py-1 cursor-pointer transition-all shrink-0 min-w-0 max-w-[180px]",
-              isActive || isSplit
-                ? "bg-bot-elevated/70 border border-bot-border/50 text-bot-text"
-                : "text-bot-muted hover:text-bot-text/80 hover:bg-bot-elevated/30 border border-transparent"
+              "group relative flex items-center gap-1.5 rounded-md cursor-pointer transition-all shrink-0 min-w-0 max-w-[180px]",
+              compact ? "px-2 py-0.5" : "px-2.5 py-1",
+              isActive
+                ? "bg-bot-elevated/80 border border-bot-accent/25 text-bot-accent shadow-[0_0_10px_1px_rgb(var(--bot-glow)/0.08)]"
+                : "text-bot-muted hover:text-bot-text/80 hover:bg-bot-elevated/40 border border-transparent",
             )}
           >
-            {/* Activity indicator */}
-            {hasActivity && (
+            {isActive && (
+              <span className="absolute bottom-0 left-1.5 right-1.5 h-[2px] rounded-full gradient-accent" />
+            )}
+
+            {hasActivity && !isActive && (
               <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-bot-green animate-pulse" />
             )}
 
-            {/* Tab label */}
             {isEditing ? (
               <input
                 ref={editInputRef}
@@ -113,61 +119,46 @@ export function TabBar({
                 style={{ maxWidth: 120 }}
               />
             ) : (
-              <span className="text-[11px] font-medium truncate">{tab.name}</span>
+              <span className={cn(
+                "font-medium truncate",
+                compact ? "text-[10px]" : "text-[11px]",
+                isActive && "text-bot-accent",
+              )}>{tab.name}</span>
             )}
 
-            {/* CWD badge */}
-            {tab.cwd && !isEditing && (
-              <span className="flex items-center gap-0.5 text-[9px] text-bot-muted shrink-0 opacity-70">
+            {tab.cwd && !isEditing && !compact && (
+              <span className="flex items-center gap-0.5 text-[9px] text-bot-accent/40 shrink-0">
                 <FolderOpen className="h-2.5 w-2.5" />
                 <span className="truncate max-w-[60px]">{formatCwd(tab.cwd)}</span>
               </span>
             )}
 
-            {/* Close button */}
             {!tab.is_default && (
               <button
                 onClick={(e) => { e.stopPropagation(); onCloseTab(tab.id); }}
                 className={cn(
                   "ml-0.5 rounded p-0.5 transition-colors shrink-0",
                   "text-bot-muted opacity-0 group-hover:opacity-100",
-                  "hover:text-bot-red hover:bg-bot-red/10"
+                  "hover:text-bot-red hover:bg-bot-red/10",
                 )}
               >
-                <X className="h-2.5 w-2.5" />
+                <X className={cn(compact ? "h-2 w-2" : "h-2.5 w-2.5")} />
               </button>
             )}
           </div>
         );
       })}
 
-      {/* New tab button */}
       {tabs.length < maxTabs && (
         <button
           onClick={onNewTab}
-          className="flex items-center gap-1 rounded-md px-2 py-1 text-bot-muted hover:text-bot-text hover:bg-bot-elevated/30 transition-colors shrink-0"
+          className={cn(
+            "flex items-center gap-1 rounded-md text-bot-muted hover:text-bot-accent hover:bg-bot-accent/10 transition-colors shrink-0",
+            compact ? "px-1.5 py-0.5" : "px-2 py-1",
+          )}
           title="New terminal tab"
         >
-          <Plus className="h-3.5 w-3.5" />
-        </button>
-      )}
-
-      {/* Spacer */}
-      <div className="flex-1" />
-
-      {/* Split pane toggle */}
-      {tabs.length >= 2 && (
-        <button
-          onClick={onSplitToggle}
-          title={splitTabId ? "Close split" : "Split pane"}
-          className={cn(
-            "flex items-center gap-1 rounded-md px-2 py-1 text-[10px] transition-colors shrink-0",
-            splitTabId
-              ? "text-bot-accent bg-bot-accent/10 border border-bot-accent/30"
-              : "text-bot-muted hover:text-bot-text hover:bg-bot-elevated/30"
-          )}
-        >
-          <Columns2 className="h-3.5 w-3.5" />
+          <Plus className={cn(compact ? "h-3 w-3" : "h-3.5 w-3.5")} />
         </button>
       )}
     </div>
