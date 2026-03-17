@@ -6,6 +6,7 @@ export type NotificationEventType =
   | "plan_failed"
   | "command_error"
   | "session_limit_reached"
+  | "session_invited"
   | "user_added"
   | "user_removed"
   | "kill_all_triggered"
@@ -28,6 +29,7 @@ export const NOTIFICATION_EVENT_LABELS: Record<NotificationEventType, string> = 
   plan_failed: "Plan failed",
   command_error: "Command error",
   session_limit_reached: "Session limit reached",
+  session_invited: "Invited to session",
   user_added: "User added",
   user_removed: "User removed",
   kill_all_triggered: "Kill-all triggered",

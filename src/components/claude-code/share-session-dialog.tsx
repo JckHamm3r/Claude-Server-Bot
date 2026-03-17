@@ -15,9 +15,10 @@ interface ShareSessionDialogProps {
   sessionId: string;
   sessionName: string | null;
   onClose: () => void;
+  readOnly?: boolean;
 }
 
-export function ShareSessionDialog({ sessionId, sessionName, onClose }: ShareSessionDialogProps) {
+export function ShareSessionDialog({ sessionId, sessionName, onClose, readOnly = false }: ShareSessionDialogProps) {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
   const [loading, setLoading] = useState(true);
@@ -107,24 +108,26 @@ export function ShareSessionDialog({ sessionId, sessionName, onClose }: ShareSes
         </div>
 
         <div className="p-5 space-y-5">
-          <form onSubmit={handleInvite} className="flex gap-2">
-            <input
-              type="email"
-              value={inviteEmail}
-              onChange={(e) => setInviteEmail(e.target.value)}
-              placeholder="user@example.com"
-              className="flex-1 rounded-lg border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text placeholder-bot-muted outline-none focus:border-bot-accent transition-colors"
-              disabled={inviting}
-            />
-            <button
-              type="submit"
-              disabled={!inviteEmail.trim() || inviting}
-              className="flex items-center gap-1.5 rounded-lg bg-bot-accent px-3 py-2 text-caption font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors"
-            >
-              {inviting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
-              Invite
-            </button>
-          </form>
+          {!readOnly && (
+            <form onSubmit={handleInvite} className="flex gap-2">
+              <input
+                type="email"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder="user@example.com"
+                className="flex-1 rounded-lg border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text placeholder-bot-muted outline-none focus:border-bot-accent transition-colors"
+                disabled={inviting}
+              />
+              <button
+                type="submit"
+                disabled={!inviteEmail.trim() || inviting}
+                className="flex items-center gap-1.5 rounded-lg bg-bot-accent px-3 py-2 text-caption font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors"
+              >
+                {inviting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
+                Invite
+              </button>
+            </form>
+          )}
 
           {error && (
             <p className="text-caption text-bot-red bg-bot-red/10 rounded-lg px-3 py-2">{error}</p>
@@ -152,24 +155,26 @@ export function ShareSessionDialog({ sessionId, sessionName, onClose }: ShareSes
                         {p.role} · Added {new Date(p.invited_at).toLocaleDateString()}
                       </p>
                     </div>
-                    <button
-                      onClick={() => handleRemove(p.user_email)}
-                      disabled={removingEmail === p.user_email}
-                      className={cn(
-                        "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-caption font-medium transition-colors",
-                        removingEmail === p.user_email
-                          ? "opacity-50 cursor-not-allowed"
-                          : "text-bot-muted hover:text-bot-red hover:bg-bot-red/10"
-                      )}
-                      title="Remove participant"
-                    >
-                      {removingEmail === p.user_email ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <UserMinus className="h-3.5 w-3.5" />
-                      )}
-                      Remove
-                    </button>
+                    {!readOnly && (
+                      <button
+                        onClick={() => handleRemove(p.user_email)}
+                        disabled={removingEmail === p.user_email}
+                        className={cn(
+                          "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-caption font-medium transition-colors",
+                          removingEmail === p.user_email
+                            ? "opacity-50 cursor-not-allowed"
+                            : "text-bot-muted hover:text-bot-red hover:bg-bot-red/10"
+                        )}
+                        title="Remove participant"
+                      >
+                        {removingEmail === p.user_email ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <UserMinus className="h-3.5 w-3.5" />
+                        )}
+                        Remove
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -177,7 +182,10 @@ export function ShareSessionDialog({ sessionId, sessionName, onClose }: ShareSes
           </div>
 
           <p className="text-caption text-bot-muted/60">
-            Participants can view and interact with this session. Only the owner can rename, delete, or manage participants.
+            {readOnly
+              ? "You are a guest collaborator. Only the session owner can manage participants."
+              : "Participants can view and interact with this session. Only the owner can rename, delete, or manage participants."
+            }
           </p>
         </div>
       </div>

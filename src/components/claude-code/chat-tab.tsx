@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
-import { Users, MessageCircleOff, MessageCircle } from "lucide-react";
+import { Users, MessageCircleOff, MessageCircle, UserPlus, X } from "lucide-react";
 import type { ClaudeSession } from "@/lib/claude-db";
 import { DEFAULT_MODEL, AVAILABLE_MODELS, getModelLabel } from "@/lib/models";
 import { apiUrl } from "@/lib/utils";
@@ -73,6 +73,8 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
   const [activeHighlight, setActiveHighlight] = useState<string | null>(null);
 
   const [botAvatarUrl, setBotAvatarUrl] = useState<string | null>(null);
+  const [participantCount, setParticipantCount] = useState(0);
+  const [inviteToast, setInviteToast] = useState<{ sessionId: string; sessionName: string | null; invitedBy: string } | null>(null);
 
   const handleSessionRemoved = useCallback((sessionId: string) => {
     setActiveSession((current) => {
@@ -108,6 +110,37 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
     };
     socket.on("bot:identity_updated", handleIdentityUpdate);
     return () => { socket.off("bot:identity_updated", handleIdentityUpdate); };
+  }, []);
+
+  // Track participant count for the Share button badge
+  useEffect(() => {
+    const socket = getSocket();
+    const handleParticipants = ({ sessionId, participants }: { sessionId: string; participants: { user_email: string }[] }) => {
+      if (activeSession?.id === sessionId) {
+        setParticipantCount(participants.length);
+      }
+    };
+    socket.on("claude:session_participants", handleParticipants);
+    // Fetch participant count when active session changes (owner only)
+    if (activeSession && currentEmail && activeSession.created_by === currentEmail) {
+      socket.emit("claude:list_session_participants", { sessionId: activeSession.id });
+    } else {
+      setParticipantCount(0);
+    }
+    return () => { socket.off("claude:session_participants", handleParticipants); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSession?.id, currentEmail]);
+
+  // Show a toast when this user is invited to a session
+  useEffect(() => {
+    const socket = getSocket();
+    const handleInvited = ({ sessionId, sessionName, invitedBy }: { sessionId: string; sessionName: string | null; invitedBy: string }) => {
+      setInviteToast({ sessionId, sessionName, invitedBy });
+      const timer = setTimeout(() => setInviteToast(null), 6000);
+      return () => clearTimeout(timer);
+    };
+    socket.on("claude:session_invited", handleInvited);
+    return () => { socket.off("claude:session_invited", handleInvited); };
   }, []);
 
   // Sync activeSession when the sessions list changes (e.g. server-side rename)
@@ -172,7 +205,11 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
     setActiveSession(session);
     chat.emit("claude:set_active_session", { sessionId: session.id });
     try { localStorage.setItem(ACTIVE_SESSION_KEY, session.id); } catch { /* ignore */ }
-  }, [chat]);
+    // Clear the "new invite" badge once the user opens the session
+    if (session.is_new_invite) {
+      setSessions((prev) => prev.map((s) => s.id === session.id ? { ...s, is_new_invite: false } : s));
+    }
+  }, [chat, setSessions]);
 
   // Auto-restore active session from localStorage after session list loads
   useEffect(() => {
@@ -572,6 +609,7 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
           messages={chat.messages}
           activeSession={activeSession}
           canShare={!!activeSession && !!currentEmail && activeSession.created_by === currentEmail}
+          participantCount={participantCount}
         />
 
         {!chat.connected && (
@@ -695,6 +733,36 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
             setActiveHighlight(activeId);
           }}
         />
+      )}
+
+      {inviteToast && (
+        <div className="fixed bottom-5 right-5 z-[200] flex items-start gap-3 rounded-xl border border-bot-accent/30 bg-bot-surface shadow-float px-4 py-3 animate-scaleIn max-w-sm">
+          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-bot-accent/15">
+            <UserPlus className="h-4 w-4 text-bot-accent" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-body font-semibold text-bot-text">Session invite</p>
+            <p className="text-caption text-bot-muted mt-0.5 truncate">
+              <span className="font-medium text-bot-text">{inviteToast.invitedBy}</span>{" "}invited you to{" "}
+              <button
+                className="font-medium text-bot-accent underline underline-offset-2 hover:text-bot-accent/80 transition-colors"
+                onClick={() => {
+                  const target = sessions.find((s) => s.id === inviteToast.sessionId);
+                  if (target) handleSelectSession(target);
+                  setInviteToast(null);
+                }}
+              >
+                {inviteToast.sessionName ?? "a session"}
+              </button>
+            </p>
+          </div>
+          <button
+            onClick={() => setInviteToast(null)}
+            className="shrink-0 rounded-md p-1 text-bot-muted hover:text-bot-text hover:bg-bot-elevated/50 transition-colors"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
       )}
     </div>
   );

@@ -434,8 +434,24 @@ export function useChatSocket({
     });
 
     socket.on("claude:sessions", ({ sessions: s }: { sessions: ClaudeSession[] }) => {
-      setSessions(s);
+      setSessions((prev) => {
+        // Preserve is_new_invite flag for sessions already in the list
+        const prevMap = new Map(prev.map((p) => [p.id, p]));
+        return s.map((sess) => {
+          const existing = prevMap.get(sess.id);
+          if (existing?.is_new_invite) return { ...sess, is_new_invite: true };
+          return sess;
+        });
+      });
       setLoadingSessions(false);
+    });
+
+    socket.on("claude:session_invited", ({ sessionId, invitedBy }: { sessionId: string; sessionName: string | null; invitedBy: string }) => {
+      // Mark the newly invited session so the sidebar can show a "New" indicator
+      setSessions((prev) =>
+        prev.map((s) => (s.id === sessionId ? { ...s, is_new_invite: true } : s)),
+      );
+      void invitedBy;
     });
 
     socket.on("claude:session_status", ({ sessionId, status }: { sessionId: string; status: string }) => {
@@ -1047,6 +1063,7 @@ export function useChatSocket({
       socket.off("claude:session_status");
       socket.off("claude:session_renamed");
       socket.off("claude:session_removed");
+      socket.off("claude:session_invited");
       clearEditRecoveryTimer();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

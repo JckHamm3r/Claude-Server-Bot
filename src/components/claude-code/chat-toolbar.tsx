@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Square, RotateCcw, Trash2, Zap, Search, Download, ChevronDown, ClipboardCopy, Check, Share2 } from "lucide-react";
+import { Square, RotateCcw, Trash2, Zap, Search, Download, ChevronDown, ClipboardCopy, Check, Share2, Users } from "lucide-react";
 import { cn, apiUrl } from "@/lib/utils";
 import { ModelSelector } from "./model-selector";
 import { ShareSessionDialog } from "./share-session-dialog";
@@ -27,6 +27,7 @@ interface ChatToolbarProps {
   onCompact?: () => void;
   activeSession?: ClaudeSession | null;
   canShare?: boolean;
+  participantCount?: number;
 }
 
 function formatTokenCount(n: number): string {
@@ -176,6 +177,7 @@ export function ChatToolbar({
   onCompact,
   activeSession,
   canShare = false,
+  participantCount = 0,
 }: ChatToolbarProps) {
   const [shareOpen, setShareOpen] = useState(false);
   return (
@@ -239,11 +241,27 @@ export function ChatToolbar({
         {canShare && activeSession && (
           <button
             onClick={() => setShareOpen(true)}
-            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated/50 transition-all duration-200"
+            className="relative flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated/50 transition-all duration-200"
             title="Share session"
           >
             <Share2 className="h-3.5 w-3.5" />
             <span className="hidden xl:inline">Share</span>
+            {participantCount > 0 && (
+              <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-bot-accent px-1 text-[10px] font-bold text-white shadow-glow-sm">
+                {participantCount}
+              </span>
+            )}
+          </button>
+        )}
+
+        {!canShare && activeSession?.shared_by && (
+          <button
+            onClick={() => setShareOpen(true)}
+            className="relative flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated/50 transition-all duration-200"
+            title="View session participants"
+          >
+            <Users className="h-3.5 w-3.5" />
+            <span className="hidden xl:inline">Participants</span>
           </button>
         )}
 
@@ -302,6 +320,7 @@ export function ChatToolbar({
         sessionId={activeSession.id}
         sessionName={activeSession.name}
         onClose={() => setShareOpen(false)}
+        readOnly={!canShare}
       />
     )}
   </>

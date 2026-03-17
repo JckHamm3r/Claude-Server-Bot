@@ -586,6 +586,24 @@ export function registerSessionHandlers(ctx: HandlerContext) {
       socket.emit("claude:session_participants", { sessionId, participants });
       // Push real-time update to the invited user's connected sockets
       pushSessionsToUser(inviteEmail);
+      // Notify the invited user with a dedicated event and in-app notification
+      const invitedSession = getSession(sessionId);
+      const sessionLabel = invitedSession?.name ?? "a session";
+      for (const [socketId, info] of ctx.connectedUsers.entries()) {
+        if (info.email === inviteEmail) {
+          io.to(socketId).emit("claude:session_invited", {
+            sessionId,
+            sessionName: invitedSession?.name ?? null,
+            invitedBy: email,
+          });
+        }
+      }
+      dispatchNotification(
+        "session_invited",
+        inviteEmail,
+        "You've been invited to a session",
+        `${email} invited you to join "${sessionLabel}". Open your session list to get started.`,
+      ).catch(() => {});
     } catch {
       socket.emit("claude:error", { sessionId, message: "Failed to invite user" });
     }
