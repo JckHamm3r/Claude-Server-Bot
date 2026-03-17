@@ -26,6 +26,16 @@ const ACTIVE_SESSION_KEY = "claude:activeSessionId";
 export function ChatTab({ isWidget = false }: ChatTabProps) {
   const { status: sessionStatus, data: sessionData } = useSession();
   const currentEmail = sessionData?.user?.email ?? null;
+  const userObj = sessionData?.user as { firstName?: string; lastName?: string; email?: string } | undefined;
+  const userInitials = (() => {
+    const first = userObj?.firstName?.trim();
+    const last = userObj?.lastName?.trim();
+    if (first && last) return (first[0] + last[0]).toUpperCase();
+    if (first) return first[0].toUpperCase();
+    const email = userObj?.email ?? "";
+    const local = email.split("@")[0] ?? "";
+    return (local[0] ?? "U").toUpperCase();
+  })();
   const [sessions, setSessions] = useState<ClaudeSession[]>([]);
   const [activeSession, setActiveSession] = useState<ClaudeSession | null>(null);
   const [showNewDialog, setShowNewDialog] = useState(false);
@@ -621,6 +631,7 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
             onFillStarter={(msg) => chat.chatInputRef.current?.setValue(msg)}
             onRetry={chat.handleRetryLast}
             runStartTime={chat.runStartTime}
+            userInitials={userInitials}
           />
         )}
 

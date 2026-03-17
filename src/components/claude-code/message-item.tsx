@@ -31,6 +31,7 @@ interface MessageItemProps {
   isInteractive?: boolean;
   botAvatarUrl?: string | null;
   experienceLevel?: string;
+  userInitials?: string;
 }
 
 function CopyButton({ text, size = "sm" }: { text: string; size?: "sm" | "xs" }) {
@@ -238,6 +239,7 @@ export const MessageItem = memo(function MessageItem({
   isInteractive,
   botAvatarUrl,
   experienceLevel,
+  userInitials = "U",
 }: MessageItemProps) {
   const isUser = message.sender_type === "admin";
   const [isEditing, setIsEditing] = useState(false);
@@ -429,7 +431,7 @@ export const MessageItem = memo(function MessageItem({
             </div>
           </div>
           <div className="mt-1 h-8 w-8 shrink-0 rounded-full bg-bot-accent/20 flex items-center justify-center border border-bot-accent/30">
-            <span className="text-caption font-semibold text-bot-accent">U</span>
+            <span className="text-[10px] font-semibold text-bot-accent uppercase leading-none">{userInitials}</span>
           </div>
         </div>
       );
@@ -517,7 +519,7 @@ export const MessageItem = memo(function MessageItem({
           </div>
         </div>
         <div className="mt-1 h-8 w-8 shrink-0 rounded-full bg-bot-accent/20 flex items-center justify-center border border-bot-accent/30">
-          <span className="text-caption font-semibold text-bot-accent">U</span>
+          <span className="text-[10px] font-semibold text-bot-accent uppercase leading-none">{userInitials}</span>
         </div>
       </div>
     );

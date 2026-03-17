@@ -38,6 +38,7 @@ interface MessageListProps {
   onSendStarter?: (message: string) => void;
   onFillStarter?: (message: string) => void;
   runStartTime?: number | null;
+  userInitials?: string;
 }
 
 type Segment =
@@ -176,6 +177,7 @@ export function MessageList({
   onSendStarter,
   onFillStarter,
   runStartTime,
+  userInitials,
 }: MessageListProps) {
   const userProfile = useUserProfile();
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -351,6 +353,7 @@ export function MessageList({
                   }
                   botAvatarUrl={botAvatarUrl}
                   experienceLevel={userProfile.experience_level}
+                  userInitials={userInitials}
                 />
               </div>
             );
