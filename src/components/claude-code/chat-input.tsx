@@ -13,6 +13,7 @@ interface ChatInputProps {
   onSend: (message: string, attachments?: string[]) => void;
   disabled?: boolean;
   isRunning?: boolean;
+  aiPaused?: boolean;
   pendingCount?: number;
   pendingQueue?: string[];
   onEditQueueItem?: (index: number, newContent: string) => void;
@@ -23,6 +24,7 @@ interface ChatInputProps {
 }
 
 const SLASH_COMMANDS = [
+  { cmd: "/chat",    args: "",           desc: "Toggle AI responses — pause to chat freely, resume to re-enable AI" },
   { cmd: "/compact", args: "[focus]",    desc: "Compact conversation history to save context" },
   { cmd: "/clear",   args: "",           desc: "Clear conversation context and start fresh" },
   { cmd: "/help",    args: "",           desc: "Show available commands" },
@@ -44,6 +46,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   onSend,
   disabled,
   isRunning,
+  aiPaused,
   pendingCount = 0,
   pendingQueue = [],
   onEditQueueItem,
@@ -351,9 +354,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     }
   };
 
-  const willQueue = isRunning && !disabled;
+  const willQueue = isRunning && !disabled && !aiPaused;
   const placeholder = disabled
     ? "Connecting..."
+    : aiPaused
+    ? "AI paused — chat freely. Type /chat to resume AI."
     : willQueue
     ? "Type to queue next message..."
     : "Message Octoby... (/ for commands, @ for files)";
@@ -480,7 +485,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             aria-controls={slashOpen ? "slash-palette" : atOpen ? "file-palette" : undefined}
             aria-activedescendant={slashOpen ? `slash-option-${slashIndex}` : atOpen ? `file-option-${atIndex}` : undefined}
             className={`flex-1 resize-none rounded-xl border px-4 py-3 text-body text-bot-text placeholder:text-bot-muted/50 outline-none transition-all duration-200 ${
-              willQueue
+              aiPaused
+                ? "border-bot-blue/30 bg-bot-blue/5 focus:border-bot-blue/60 focus:shadow-[0_0_12px_2px_rgb(var(--bot-blue)/0.15)]"
+                : willQueue
                 ? "border-bot-amber/30 bg-bot-elevated/40 focus:border-bot-amber/60 focus:shadow-[0_0_12px_2px_rgb(var(--bot-amber)/0.15)]"
                 : "border-bot-border/40 bg-bot-elevated/40 focus:border-bot-accent/60 focus:shadow-glow-sm"
             } disabled:opacity-50`}
@@ -490,12 +497,14 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             onClick={submit}
             disabled={disabled || (!value.trim() && attachments.length === 0)}
             className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-40 active:scale-90 ${
-              willQueue
+              aiPaused
+                ? "bg-bot-blue text-white hover:brightness-110 shadow-[0_0_12px_2px_rgb(var(--bot-blue)/0.2)]"
+                : willQueue
                 ? "bg-bot-amber text-white hover:brightness-110 shadow-[0_0_12px_2px_rgb(var(--bot-amber)/0.2)]"
                 : "gradient-accent text-white hover:brightness-110 shadow-glow-sm hover:shadow-glow-md"
             }`}
-            title={willQueue ? "Queue message" : "Send"}
-            aria-label={willQueue ? "Queue message" : "Send message"}
+            title={aiPaused ? "Send (AI paused)" : willQueue ? "Queue message" : "Send"}
+            aria-label={aiPaused ? "Send message (AI paused)" : willQueue ? "Queue message" : "Send message"}
           >
             {willQueue ? <Clock className="h-4 w-4" /> : <Send className="h-4 w-4" />}
           </button>

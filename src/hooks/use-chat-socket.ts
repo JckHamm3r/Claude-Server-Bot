@@ -121,6 +121,8 @@ export interface UseChatSocketReturn {
   pendingQueue: string[];
   loadingMessages: boolean;
   runtimeLimited: boolean;
+  aiPaused: boolean;
+  aiPausedBy: string | null;
 
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   setSessionModel: React.Dispatch<React.SetStateAction<string>>;
@@ -182,8 +184,11 @@ export function useChatSocket({
   const [pendingQueue, setPendingQueue] = useState<string[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [runtimeLimited, setRuntimeLimited] = useState(false);
+  const [aiPaused, setAiPaused] = useState(false);
+  const [aiPausedBy, setAiPausedBy] = useState<string | null>(null);
 
   // ── Refs ───────────────────────────────────────────────────────────────
+  const aiPausedRef = useRef(false);
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
   const chatInputRef = useRef<ChatInputHandle>(null);
   const lastUserMsgRef = useRef<string>("");
@@ -207,6 +212,10 @@ export function useChatSocket({
   useEffect(() => {
     autoAcceptRef.current = autoAccept;
   }, [autoAccept]);
+
+  useEffect(() => {
+    aiPausedRef.current = aiPaused;
+  }, [aiPaused]);
 
   useEffect(() => {
     onSessionRemovedRef.current = onSessionRemoved;
@@ -282,11 +291,27 @@ export function useChatSocket({
   const drainPending = useCallback(() => {
     const sessionId = activeSessionRef.current?.id;
     if (!sessionId) return;
-    if (pendingQueueRef.current.length > 0) {
-      const [next, ...rest] = pendingQueueRef.current;
-      syncQueue(rest);
-      sendImmediate(next, sessionId);
+    if (pendingQueueRef.current.length === 0) return;
+
+    // When AI is paused, flush queued messages as chat-only (no AI response expected)
+    if (aiPausedRef.current) {
+      for (const content of pendingQueueRef.current) {
+        const msg: ChatMessage = {
+          id: crypto.randomUUID(),
+          sender_type: "admin",
+          content,
+          timestamp: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, msg]);
+        socketRef.current?.emit("claude:message", { sessionId, content });
+      }
+      syncQueue([]);
+      return;
     }
+
+    const [next, ...rest] = pendingQueueRef.current;
+    syncQueue(rest);
+    sendImmediate(next, sessionId);
   }, [sendImmediate, syncQueue]);
 
   const clearEditRecoveryTimer = useCallback(() => {
@@ -944,6 +969,31 @@ export function useChatSocket({
       setMessages((prev) => [...prev, msg]);
     });
 
+    socket.on("claude:chat_toggled", ({ sessionId, paused, pausedBy }: { sessionId: string; paused: boolean; pausedBy: string | null }) => {
+      if (activeSessionRef.current?.id !== sessionId) return;
+      setAiPaused(paused);
+      setAiPausedBy(pausedBy);
+
+      const label = pausedBy ? pausedBy.split("@")[0] : "Someone";
+      const content = paused
+        ? `**AI paused** by ${label} — messages will not be sent to the AI. Type \`/chat\` to resume.`
+        : `**AI resumed** by ${label} — responses are active again.`;
+      const msg: ChatMessage = {
+        id: "chat-toggle-" + Date.now(),
+        sender_type: "claude",
+        content,
+        parsed: { type: "text", content },
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, msg]);
+    });
+
+    socket.on("claude:chat_broadcast", ({ sessionId, message, fromSocketId }: { sessionId: string; message: ChatMessage; fromSocketId: string }) => {
+      if (activeSessionRef.current?.id !== sessionId) return;
+      if (fromSocketId === socket.id) return;
+      setMessages((prev) => [...prev, message]);
+    });
+
     socket.on("security:warn", ({ type: warnType, message: warnMessage }: { type: string; message: string }) => {
       const msg: ChatMessage = {
         id: crypto.randomUUID(),
@@ -992,6 +1042,8 @@ export function useChatSocket({
       socket.off("claude:compacting");
       socket.off("claude:compact_done");
       socket.off("security:warn");
+      socket.off("claude:chat_toggled");
+      socket.off("claude:chat_broadcast");
       socket.off("claude:session_status");
       socket.off("claude:session_renamed");
       socket.off("claude:session_removed");
@@ -1010,6 +1062,9 @@ export function useChatSocket({
     setIsCompacting(false);
     isCompactingRef.current = false;
     autoCompactFiredRef.current = false;
+    setAiPaused(false);
+    setAiPausedBy(null);
+    emit("claude:get_chat_state", { sessionId: activeSession.id });
     if (!freshSessionsRef.current.has(activeSession.id)) {
       emit("claude:get_messages", { sessionId: activeSession.id });
       emit("claude:get_usage", { sessionId: activeSession.id });
@@ -1032,13 +1087,29 @@ export function useChatSocket({
   const handleSend = useCallback(
     (content: string, attachments?: string[]) => {
       if (!activeSession) return;
+
+      // When AI is paused, add message locally and send to server for
+      // persistence/broadcast but do NOT set isRunning (no AI response expected).
+      if (aiPausedRef.current) {
+        const msg: ChatMessage = {
+          id: crypto.randomUUID(),
+          sender_type: "admin",
+          content,
+          timestamp: new Date().toISOString(),
+          metadata: attachments?.length ? { attachments } : undefined,
+        };
+        setMessages((prev) => [...prev, msg]);
+        emit("claude:message", { sessionId: activeSession.id, content, attachments });
+        return;
+      }
+
       if (isRunning) {
         syncQueue([...pendingQueueRef.current, content]);
         return;
       }
       sendImmediate(content, activeSession.id, attachments);
     },
-    [activeSession, isRunning, sendImmediate, syncQueue],
+    [activeSession, isRunning, sendImmediate, syncQueue, emit],
   );
 
   const handleInterrupt = useCallback(() => {
@@ -1211,6 +1282,7 @@ export function useChatSocket({
     contextUsage, isCompacting,
     sessionModel, hasError, pendingInteractions, runStartTime, pendingCount,
     pendingQueue, loadingMessages, runtimeLimited,
+    aiPaused, aiPausedBy,
     setMessages, setSessionModel, setSessionUsage, setIsRunning,
     setCurrentActivity, setLoadingMessages,
     activeSessionRef, initializedSessionsRef, freshSessionsRef, chatInputRef,

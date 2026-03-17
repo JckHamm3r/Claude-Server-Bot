@@ -20,6 +20,17 @@ import { getAppSetting } from "../lib/app-settings";
 import { checkBotConfigRequest } from "../lib/security-guard";
 import { dispatchNotification } from "../lib/notifications";
 
+// Per-session AI chat pause state
+const aiPausedSessions = new Map<string, { paused: boolean; pausedAt: string | null; pausedBy: string | null }>();
+
+export function isAiPaused(sessionId: string): boolean {
+  return aiPausedSessions.get(sessionId)?.paused ?? false;
+}
+
+export function getAiPauseState(sessionId: string): { paused: boolean; pausedAt: string | null; pausedBy: string | null } {
+  return aiPausedSessions.get(sessionId) ?? { paused: false, pausedAt: null, pausedBy: null };
+}
+
 interface BudgetResult {
   exceeded: boolean;
   warning: boolean;
@@ -197,6 +208,23 @@ export function registerMessageHandlers(ctx: HandlerContext) {
           saveMessage(sessionId, "admin", content, email, "chat");
         }
 
+        // When AI is paused, save the message but don't forward to Claude.
+        // Broadcast it to other participants so everyone sees it in real time.
+        if (isAiPaused(sessionId)) {
+          io.to(`session:${sessionId}`).emit("claude:chat_broadcast", {
+            sessionId,
+            message: {
+              id: crypto.randomUUID(),
+              sender_type: "admin",
+              sender_id: email,
+              content,
+              timestamp: new Date().toISOString(),
+            },
+            fromSocketId: socket.id,
+          });
+          return;
+        }
+
         ctx.sessionCommandSubmitter.set(sessionId, email);
         io.to(`session:${sessionId}`).emit("claude:command_started", { sessionId, submittedBy: email });
         const sessionProvider = ctx.getSessionProvider(sessionId);
@@ -338,6 +366,77 @@ export function registerMessageHandlers(ctx: HandlerContext) {
       } catch (err) {
         socket.emit("claude:error", { message: String(err) });
       }
+    },
+  );
+
+  // ── AI chat toggle (pause/resume) ──────────────────────────────────
+
+  socket.on(
+    "claude:toggle_chat",
+    ({ sessionId }: { sessionId: string }) => {
+      if (!canAccessSession(sessionId, email)) {
+        socket.emit("claude:error", { sessionId, message: "Access denied" });
+        return;
+      }
+
+      const current = aiPausedSessions.get(sessionId);
+      const wasPaused = current?.paused ?? false;
+      const nowPaused = !wasPaused;
+
+      if (nowPaused) {
+        aiPausedSessions.set(sessionId, {
+          paused: true,
+          pausedAt: new Date().toISOString(),
+          pausedBy: email,
+        });
+      } else {
+        const pausedAt = current?.pausedAt ?? null;
+        aiPausedSessions.set(sessionId, { paused: false, pausedAt: null, pausedBy: null });
+
+        // On resume: collect messages sent during the pause and feed them
+        // to Claude as context so it knows what was discussed.
+        if (pausedAt) {
+          const allMessages = getMessages(sessionId);
+          const pausedMessages = allMessages.filter(
+            (m) => m.sender_type === "admin" && m.timestamp > pausedAt,
+          );
+
+          if (pausedMessages.length > 0) {
+            const recap = pausedMessages
+              .map((m) => `[${m.sender_id ?? "user"}]: ${m.content}`)
+              .join("\n");
+            const contextMessage =
+              `[System: While you were paused, the following conversation happened between users. ` +
+              `Please acknowledge it briefly and continue assisting.]\n\n${recap}`;
+
+            ctx.sessionCommandSubmitter.set(sessionId, email);
+            io.to(`session:${sessionId}`).emit("claude:command_started", { sessionId, submittedBy: email });
+            const sessionProvider = ctx.getSessionProvider(sessionId);
+            ctx.setSessionStatus(sessionId, "running");
+            ctx.ensureSessionListener(sessionId);
+            sessionProvider.sendMessage(sessionId, contextMessage);
+          }
+        }
+      }
+
+      io.to(`session:${sessionId}`).emit("claude:chat_toggled", {
+        sessionId,
+        paused: nowPaused,
+        pausedBy: nowPaused ? email : null,
+      });
+    },
+  );
+
+  socket.on(
+    "claude:get_chat_state",
+    ({ sessionId }: { sessionId: string }) => {
+      if (!canAccessSession(sessionId, email)) return;
+      const state = getAiPauseState(sessionId);
+      socket.emit("claude:chat_toggled", {
+        sessionId,
+        paused: state.paused,
+        pausedBy: state.pausedBy,
+      });
     },
   );
 }

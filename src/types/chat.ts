@@ -3,6 +3,7 @@ import type { ParsedOutput } from "@/lib/claude/provider";
 export interface ChatMessage {
   id: string;
   sender_type: "admin" | "claude";
+  sender_id?: string | null;
   content?: string;
   parsed?: ParsedOutput;
   timestamp: string;

@@ -15,6 +15,12 @@ import { ToolCallBlock } from "./tool-call-block";
 import { UserQuestionCard } from "./user-question-card";
 import type { ChatMessage } from "@/types/chat";
 
+export interface UserDisplayInfo {
+  initials: string;
+  displayName: string;
+  avatarUrl?: string | null;
+}
+
 interface MessageItemProps {
   message: ChatMessage;
   onSelectOption?: (sessionId: string, choice: string) => void;
@@ -31,6 +37,7 @@ interface MessageItemProps {
   isInteractive?: boolean;
   botAvatarUrl?: string | null;
   experienceLevel?: string;
+  userInfo?: UserDisplayInfo;
 }
 
 function CopyButton({ text, size = "sm" }: { text: string; size?: "sm" | "xs" }) {
@@ -222,6 +229,26 @@ function TokenBadge({ metadata }: { metadata?: Record<string, unknown> }) {
   );
 }
 
+function UserAvatar({ initials, displayName, avatarUrl }: { initials: string; displayName: string; avatarUrl?: string | null }) {
+  return (
+    <div className="flex flex-col items-center gap-0.5 shrink-0">
+      <div className="mt-1 h-8 w-8 rounded-full bg-bot-accent/20 flex items-center justify-center border border-bot-accent/30 overflow-hidden">
+        {avatarUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={avatarUrl} alt={displayName} className="h-full w-full object-cover" />
+        ) : (
+          <span className="text-[10px] font-semibold text-bot-accent uppercase leading-none">{initials}</span>
+        )}
+      </div>
+      {displayName && (
+        <span className="text-[9px] text-bot-muted/60 max-w-[3rem] truncate leading-none" title={displayName}>
+          {displayName}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export const MessageItem = memo(function MessageItem({
   message,
   onSelectOption,
@@ -238,10 +265,18 @@ export const MessageItem = memo(function MessageItem({
   isInteractive,
   botAvatarUrl,
   experienceLevel,
+  userInfo,
 }: MessageItemProps) {
   const isUser = message.sender_type === "admin";
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState("");
+
+  const senderEmail = message.sender_id ?? "";
+  const fallbackInitial = (senderEmail.split("@")[0]?.[0] ?? "?").toUpperCase();
+  const fallbackName = senderEmail.split("@")[0] ?? "";
+  const displayInitials = userInfo?.initials || fallbackInitial;
+  const displayName = userInfo?.displayName || fallbackName;
+  const userAvatarUrl = userInfo?.avatarUrl;
 
 
   if (message.parsed) {
@@ -428,9 +463,7 @@ export const MessageItem = memo(function MessageItem({
               </button>
             </div>
           </div>
-          <div className="mt-1 h-8 w-8 shrink-0 rounded-full bg-bot-accent/20 flex items-center justify-center border border-bot-accent/30">
-            <span className="text-caption font-semibold text-bot-accent">U</span>
-          </div>
+          <UserAvatar initials={displayInitials} displayName={displayName} avatarUrl={userAvatarUrl} />
         </div>
       );
     }
@@ -516,9 +549,7 @@ export const MessageItem = memo(function MessageItem({
             </span>
           </div>
         </div>
-        <div className="mt-1 h-8 w-8 shrink-0 rounded-full bg-bot-accent/20 flex items-center justify-center border border-bot-accent/30">
-          <span className="text-caption font-semibold text-bot-accent">U</span>
-        </div>
+        <UserAvatar initials={displayInitials} displayName={displayName} avatarUrl={userAvatarUrl} />
       </div>
     );
   }
