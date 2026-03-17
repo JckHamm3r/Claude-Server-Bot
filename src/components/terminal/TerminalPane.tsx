@@ -43,6 +43,25 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, TerminalPaneProps>(
         import("@xterm/addon-fit"),
       ]);
 
+      const container = containerRef.current;
+      if (!container) return;
+
+      // Wait until the container is visible before initializing xterm.
+      // xterm opened in a 0-width container gets stuck at cols=1.
+      await new Promise<void>((resolve) => {
+        if (container.offsetWidth > 10) { resolve(); return; }
+        let attempts = 0;
+        const check = setInterval(() => {
+          attempts++;
+          if ((containerRef.current?.offsetWidth ?? 0) > 10 || attempts > 40) {
+            clearInterval(check);
+            resolve();
+          }
+        }, 150);
+      });
+
+      if (!containerRef.current || termRef.current) return; // Re-check after await
+
       const term = new Terminal({
         cursorBlink: true,
         fontSize: 13,
@@ -89,9 +108,21 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, TerminalPaneProps>(
         const el = containerRef.current;
         if (el && el.offsetWidth > 10 && el.offsetHeight > 10) {
           attachSent = true;
-          try { fitAddon.fit(); } catch { /* ignore */ }
+          try {
+            fitAddon.fit();
+            // Force xterm to recompute its viewport with the actual dimensions
+            const computedCols = Math.max(1, Math.floor(el.offsetWidth / 7)); // ~7px per char
+            const computedRows = Math.max(1, Math.floor(el.offsetHeight / 17)); // ~17px per line
+            const actualCols = term.cols > 1 ? term.cols : computedCols;
+            const actualRows = term.rows > 1 ? term.rows : computedRows;
+            if (term.cols < 10) {
+              // xterm opened in hidden container and got wrong cols — force resize
+              term.resize(actualCols, actualRows);
+              fitAddon.fit();
+            }
+          } catch { /* ignore */ }
           const { cols, rows } = term;
-          socket.emit("terminal:attach", { tabId, cols, rows });
+          socket.emit("terminal:attach", { tabId, cols: Math.max(cols, 80), rows: Math.max(rows, 24) });
         } else if (fitAttempts < MAX_FIT_ATTEMPTS) {
           setTimeout(tryFit, 150);
         } else {
