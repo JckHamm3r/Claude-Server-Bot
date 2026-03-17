@@ -8,7 +8,6 @@ import {
   getAgentVersions,
   createPlan,
   getPlan,
-  getSession,
   updatePlanStatus,
   listPlansForUser,
   addPlanStep,
@@ -373,13 +372,14 @@ Be specific. Each step should be atomic and independently executable. Return onl
       updatePlanStatus(planId, "executing");
       socket.emit("claude:plan_executing", { planId });
 
-      const planSession = getSession(plan.session_id);
-      const skipPerms = planSession?.skip_permissions ?? false;
-
-      // Reuse a single session for all steps — the SDK maintains context
-      // via session resume, so we don't need to re-feed prior results each time.
+      // Plan steps are user-approved, so always run with skipPermissions to
+      // avoid the execution hanging indefinitely on tool permission prompts.
       const planSessionId = `plan-step-${planId}-${Date.now()}`;
-      provider.createSession(planSessionId, { skipPermissions: skipPerms });
+      provider.createSession(planSessionId, {
+        skipPermissions: true,
+        model: DEFAULT_MODEL,
+        maxTurns: 200,
+      });
 
       const cleanupPlanSession = () => {
         provider.offOutput(planSessionId);
@@ -492,6 +492,16 @@ Be specific. Each step should be atomic and independently executable. Return onl
     if (cb) cb("skip");
   });
 
+
+  socket.on("claude:rollback_stop", ({ planId }: { planId: string }) => {
+    const cb = ctx.planResumeCallbacks.get(planId);
+    if (cb) cb("cancel");
+  });
+
+  socket.on("claude:rollback_continue", ({ planId }: { planId: string }) => {
+    const cb = ctx.planResumeCallbacks.get(planId);
+    if (cb) cb("skip");
+  });
 
   socket.on("claude:cancel_plan", ({ planId }: { planId: string }) => {
     try {
