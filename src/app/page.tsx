@@ -10,19 +10,21 @@ import { MemoryTab } from "@/components/claude-code/memory-tab";
 import { SettingsPanel } from "@/components/claude-code/settings-panel";
 import { TerminalTab } from "@/components/claude-code/terminal-tab";
 import { FilesTab } from "@/components/claude-code/files-tab";
-import { MessageSquare, Bot, ListChecks, Brain, Settings, TerminalSquare, FolderTree } from "lucide-react";
+import { JobsTab } from "@/components/claude-code/jobs-tab";
+import { MessageSquare, Bot, ListChecks, Brain, Settings, TerminalSquare, FolderTree, Timer } from "lucide-react";
 import { motion } from "framer-motion";
 import { NotificationBell } from "@/components/claude-code/notification-bell";
 import { UserProfileDropdown } from "@/components/user-profile-dropdown";
 import { useUserProfile } from "@/hooks/use-user-profile";
 import { LEVEL_VISIBLE_TABS } from "@/lib/user-profile-constants";
 
-type TabKey = "chat" | "agents" | "plan" | "memory" | "settings" | "terminal" | "files";
+type TabKey = "chat" | "agents" | "plan" | "jobs" | "memory" | "settings" | "terminal" | "files";
 
 const ALL_TABS: { key: TabKey; label: string; icon: typeof MessageSquare; adminOnly?: boolean }[] = [
   { key: "chat", label: "Chat", icon: MessageSquare },
   { key: "agents", label: "Agents", icon: Bot },
   { key: "plan", label: "Plan Mode", icon: ListChecks },
+  { key: "jobs", label: "Jobs", icon: Timer, adminOnly: true },
   { key: "memory", label: "Memory", icon: Brain },
   { key: "files", label: "Files", icon: FolderTree, adminOnly: true },
   { key: "settings", label: "Settings", icon: Settings },
@@ -104,6 +106,7 @@ export default function DashboardPage() {
         {activeTab === "chat" && <ChatTab />}
         {activeTab === "agents" && <AgentsTab />}
         {activeTab === "plan" && <PlanModeTab />}
+        {activeTab === "jobs" && <JobsTab />}
         {activeTab === "memory" && <MemoryTab />}
         {activeTab === "settings" && <SettingsPanel />}
         {activeTab === "files" && <FilesTab />}
