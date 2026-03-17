@@ -38,6 +38,7 @@ interface MessageItemProps {
   botAvatarUrl?: string | null;
   experienceLevel?: string;
   userInfo?: UserDisplayInfo;
+  aiPaused?: boolean;
 }
 
 function CopyButton({ text, size = "sm" }: { text: string; size?: "sm" | "xs" }) {
@@ -266,6 +267,7 @@ export const MessageItem = memo(function MessageItem({
   botAvatarUrl,
   experienceLevel,
   userInfo,
+  aiPaused,
 }: MessageItemProps) {
   const isUser = message.sender_type === "admin";
   const [isEditing, setIsEditing] = useState(false);
@@ -411,7 +413,7 @@ export const MessageItem = memo(function MessageItem({
     }
   }
 
-  const isStreaming = message.parsed?.type === "streaming" && isLatest;
+  const isStreaming = message.parsed?.type === "streaming" && isLatest && !aiPaused;
   const content = message.content ?? message.parsed?.content ?? "";
   // Don't append cursor to the markdown string — it can corrupt code fences mid-stream.
   // Render it as a separate element after ReactMarkdown instead.

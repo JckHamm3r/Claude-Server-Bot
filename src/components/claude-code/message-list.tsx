@@ -40,6 +40,7 @@ interface MessageListProps {
   runStartTime?: number | null;
   currentUserEmail?: string;
   currentUserInfo?: { initials: string; displayName: string; avatarUrl?: string | null };
+  aiPaused?: boolean;
 }
 
 type Segment =
@@ -180,6 +181,7 @@ export function MessageList({
   runStartTime,
   currentUserEmail,
   currentUserInfo,
+  aiPaused,
 }: MessageListProps) {
   const userProfile = useUserProfile();
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -344,6 +346,7 @@ export function MessageList({
                   onRetry={msg.parsed?.type === "error" && msg.parsed.retryable ? onRetry : undefined}
                   isLatest={isLastMsg && msg.id === messages[messages.length - 1]?.id}
                   isRunning={isRunning}
+                  aiPaused={aiPaused}
                   isInteractive={
                     pendingInteractions?.has(msg.id)
                     || (
@@ -365,7 +368,7 @@ export function MessageList({
             );
           })}
 
-          {isRunning && !currentActivity && (() => {
+          {isRunning && !aiPaused && !currentActivity && (() => {
             const lastType = messages[messages.length - 1]?.parsed?.type;
             return lastType !== "streaming";
           })() && (
@@ -388,7 +391,7 @@ export function MessageList({
 
       <ActivityStrip
         activity={currentActivity ?? null}
-        isRunning={(isRunning ?? false) && messages[messages.length - 1]?.parsed?.type !== "streaming"}
+        isRunning={(isRunning ?? false) && !aiPaused && messages[messages.length - 1]?.parsed?.type !== "streaming"}
         runStartTime={runStartTime ?? null}
       />
     </div>
