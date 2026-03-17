@@ -23,6 +23,7 @@ import { registerMessageHandlers } from "./message-handlers";
 import { registerSecurityHandlers } from "./security-handlers";
 import { registerPresenceHandlers } from "./presence-handlers";
 import { registerPlanHandlers } from "./plan-handlers";
+import { registerTerminalHandlers, reconcileTmuxSessions, shutdownTerminals } from "./terminal-handlers";
 import { 
   lockEventEmitter, 
   initFileLockManager, 
@@ -289,6 +290,9 @@ export function shutdownAllSessions() {
     ptyProcesses.delete(id);
   }
 
+  // Shutdown persistent terminal sessions
+  shutdownTerminals();
+
   // Clear intervals
   if (metricsInterval) clearInterval(metricsInterval);
   if (cleanupInterval) clearInterval(cleanupInterval);
@@ -298,6 +302,9 @@ export function registerHandlers(io: Server) {
   // Clear any existing intervals to prevent duplicates on re-register
   if (metricsInterval) clearInterval(metricsInterval);
   if (cleanupInterval) clearInterval(cleanupInterval);
+
+  // Reconcile tmux sessions for persistent terminals
+  reconcileTmuxSessions().catch(err => console.error("[terminal] reconcile error:", err));
   metricsInterval = setInterval(() => {
     if (Date.now() - lastMetricsFlush > 60_000) {
       flushMetrics();
@@ -750,6 +757,7 @@ export function registerHandlers(io: Server) {
     registerSecurityHandlers(ctx);
     registerPresenceHandlers(ctx);
     registerPlanHandlers(ctx);
+    registerTerminalHandlers(ctx);
 
     // File lock handlers
     socket.on("file:cancel_queued_operation", async ({ queueId }: { queueId: string }) => {

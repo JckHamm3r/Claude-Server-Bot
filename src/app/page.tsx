@@ -107,7 +107,12 @@ export default function DashboardPage() {
         {activeTab === "memory" && <MemoryTab />}
         {activeTab === "settings" && <SettingsPanel />}
         {activeTab === "files" && <FilesTab />}
-        {activeTab === "terminal" && <TerminalTab isAdmin={isAdmin} />}
+        {/* Keep TerminalTab mounted always (when admin) so xterm instances and PTYs stay alive */}
+        {isAdmin && (
+          <div className="h-full" style={{ display: activeTab === "terminal" ? "flex" : "none", flexDirection: "column" }}>
+            <TerminalTab isAdmin={isAdmin} />
+          </div>
+        )}
       </div>
     </div>
   );

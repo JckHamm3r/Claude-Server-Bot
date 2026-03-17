@@ -1,0 +1,253 @@
+"use client";
+
+import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
+import { getSocket } from "@/lib/socket";
+
+export interface TerminalPaneHandle {
+  focus: () => void;
+  fit: () => void;
+  getLineCount: () => number;
+}
+
+interface TerminalPaneProps {
+  tabId: string;
+  onOutput?: (data: string) => void;
+  onActivity?: () => void;
+  onCwd?: (cwd: string) => void;
+  onClose?: () => void;
+  className?: string;
+}
+
+export const TerminalPane = forwardRef<TerminalPaneHandle, TerminalPaneProps>(
+  ({ tabId, onOutput, onActivity, onCwd, onClose, className }, ref) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const termRef = useRef<any>(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fitAddonRef = useRef<any>(null);
+    const lineCountRef = useRef(0);
+    const autoNameSentRef = useRef(false);
+
+    useImperativeHandle(ref, () => ({
+      focus: () => termRef.current?.focus(),
+      fit: () => fitAddonRef.current?.fit(),
+      getLineCount: () => lineCountRef.current,
+    }));
+
+    const initTerminal = useCallback(async () => {
+      if (!containerRef.current || termRef.current) return;
+      const attachedRef = { current: false };
+
+      const [{ Terminal }, { FitAddon }] = await Promise.all([
+        import("@xterm/xterm"),
+        import("@xterm/addon-fit"),
+      ]);
+
+      const container = containerRef.current;
+      if (!container) return;
+
+      // Wait until the container is visible before initializing xterm.
+      // xterm opened in a 0-width container gets stuck at cols=1.
+      await new Promise<void>((resolve) => {
+        if (container.offsetWidth > 10) { resolve(); return; }
+        let attempts = 0;
+        const check = setInterval(() => {
+          attempts++;
+          if ((containerRef.current?.offsetWidth ?? 0) > 10 || attempts > 40) {
+            clearInterval(check);
+            resolve();
+          }
+        }, 150);
+      });
+
+      if (!containerRef.current || termRef.current) return; // Re-check after await
+
+      const term = new Terminal({
+        cursorBlink: true,
+        fontSize: 13,
+        fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, Monaco, "Courier New", monospace',
+        theme: {
+          background: "#0a0a10",
+          foreground: "#c9d1d9",
+          cursor: "#58a6ff",
+          black: "#0d1117",
+          red: "#ff7b72",
+          green: "#3fb950",
+          yellow: "#d29922",
+          blue: "#58a6ff",
+          magenta: "#bc8cff",
+          cyan: "#39c5cf",
+          white: "#b1bac4",
+          brightBlack: "#6e7681",
+          brightRed: "#ffa198",
+          brightGreen: "#56d364",
+          brightYellow: "#e3b341",
+          brightBlue: "#79c0ff",
+          brightMagenta: "#d2a8ff",
+          brightCyan: "#56d4dd",
+          brightWhite: "#f0f6fc",
+        },
+        scrollback: 2000,
+        allowTransparency: true,
+      });
+
+      const fitAddon = new FitAddon();
+      term.loadAddon(fitAddon);
+      fitAddonRef.current = fitAddon;
+
+      term.open(containerRef.current);
+
+      // Use a polling approach to wait for container to have real dimensions.
+      // The container may be in a display:none parent initially (tab not active).
+      let fitAttempts = 0;
+      let attachSent = false;
+      const MAX_FIT_ATTEMPTS = 20;
+      const tryFit = () => {
+        if (attachSent) return; // Guard: only attach once
+        fitAttempts++;
+        const el = containerRef.current;
+        if (el && el.offsetWidth > 10 && el.offsetHeight > 10) {
+          attachSent = true;
+          try {
+            fitAddon.fit();
+            // Force xterm to recompute its viewport with the actual dimensions
+            const computedCols = Math.max(1, Math.floor(el.offsetWidth / 7)); // ~7px per char
+            const computedRows = Math.max(1, Math.floor(el.offsetHeight / 17)); // ~17px per line
+            const actualCols = term.cols > 1 ? term.cols : computedCols;
+            const actualRows = term.rows > 1 ? term.rows : computedRows;
+            if (term.cols < 10) {
+              // xterm opened in hidden container and got wrong cols — force resize
+              term.resize(actualCols, actualRows);
+              fitAddon.fit();
+            }
+          } catch { /* ignore */ }
+          const { cols, rows } = term;
+          socket.emit("terminal:attach", { tabId, cols: Math.max(cols, 80), rows: Math.max(rows, 24) });
+        } else if (fitAttempts < MAX_FIT_ATTEMPTS) {
+          setTimeout(tryFit, 150);
+        } else {
+          attachSent = true;
+          // Fallback: attach with default dimensions
+          socket.emit("terminal:attach", { tabId, cols: 80, rows: 24 });
+        }
+      };
+      setTimeout(tryFit, 100);
+      termRef.current = term;
+
+      // Track line count for bookmarks
+      term.onLineFeed(() => {
+        lineCountRef.current++;
+      });
+
+      const socket = getSocket();
+
+      const handleOutput = ({ tabId: tid, data }: { tabId: string; data: string }) => {
+        if (tid !== tabId) return;
+        term.write(data);
+        onOutput?.(data);
+        onActivity?.();
+      };
+
+      const handleScrollback = ({ tabId: tid, lines }: { tabId: string; lines: string[] }) => {
+        if (tid !== tabId) return;
+        if (attachedRef.current) return; // Only show scrollback on first attach
+        attachedRef.current = true;
+        if (lines.length > 0) {
+          term.write("\r\n\x1b[90m── scrollback ──\x1b[0m\r\n");
+          term.write(lines.join("\r\n"));
+          term.write("\r\n");
+        }
+      };
+
+      const handleAttached = ({ tabId: tid }: { tabId: string }) => {
+        if (tid !== tabId) return;
+        const wasAlreadyAttached = attachedRef.current;
+        if (!wasAlreadyAttached) {
+          attachedRef.current = true;
+          // Force a resize to ensure PTY dimensions match the rendered terminal
+          try {
+            if (fitAddonRef.current) {
+              fitAddonRef.current.fit();
+            }
+            const { cols, rows } = term;
+            if (cols > 1) {
+              socket.emit("terminal:resize", { tabId, cols, rows });
+            }
+          } catch { /* ignore */ }
+        }
+      };
+
+      const handleClosed = ({ tabId: tid }: { tabId: string }) => {
+        if (tid !== tabId) return;
+        term.write("\r\n\x1b[90m[session ended]\x1b[0m\r\n");
+        onClose?.();
+      };
+
+      const handleCwd = ({ tabId: tid, cwd }: { tabId: string; cwd: string }) => {
+        if (tid !== tabId) return;
+        onCwd?.(cwd);
+      };
+
+      socket.on("terminal:output", handleOutput);
+      socket.on("terminal:scrollback", handleScrollback);
+      socket.on("terminal:attached", handleAttached);
+      socket.on("terminal:closed", handleClosed);
+      socket.on("terminal:cwd", handleCwd);
+
+      // Forward keyboard input
+      term.onData((data) => {
+        socket.emit("terminal:input", { tabId, data });
+
+        // Auto-name: capture the first typed command (first Enter press)
+        if (!autoNameSentRef.current && data === "\r") {
+          autoNameSentRef.current = true;
+          // Read current input from terminal buffer isn't trivial; we just send a signal
+          // The backend will handle auto-naming if name is still default
+          // We'll let the frontend supply name from terminal title or CWD
+        }
+      });
+
+      // Resize observer — also fires when parent becomes visible
+      const resizeObserver = new ResizeObserver(() => {
+        const el = containerRef.current;
+        if (el && el.offsetWidth > 10) {
+          try {
+            fitAddon.fit();
+            const { cols, rows } = term;
+            socket.emit("terminal:resize", { tabId, cols, rows });
+          } catch { /* ignore */ }
+        }
+      });
+      if (containerRef.current) resizeObserver.observe(containerRef.current);
+
+      return () => {
+        socket.off("terminal:output", handleOutput);
+        socket.off("terminal:scrollback", handleScrollback);
+        socket.off("terminal:attached", handleAttached);
+        socket.off("terminal:closed", handleClosed);
+        socket.off("terminal:cwd", handleCwd);
+        socket.emit("terminal:detach", { tabId });
+        resizeObserver.disconnect();
+        term.dispose();
+        termRef.current = null;
+        fitAddonRef.current = null;
+      };
+    }, [tabId, onOutput, onActivity, onCwd, onClose]);
+
+    useEffect(() => {
+      let cleanup: (() => void) | undefined;
+      initTerminal().then((fn) => { cleanup = fn; });
+      return () => { cleanup?.(); };
+    }, [initTerminal]);
+
+    return (
+      <div
+        ref={containerRef}
+        className={className}
+        style={{ background: "#0a0a10", width: "100%", height: "100%" }}
+      />
+    );
+  }
+);
+
+TerminalPane.displayName = "TerminalPane";
