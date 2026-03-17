@@ -72,9 +72,9 @@ export const EXPERIENCE_LEVELS: {
 
 // Which tabs each level can see (experts see all)
 export const LEVEL_VISIBLE_TABS: Record<ExperienceLevel, string[]> = {
-  beginner: ["chat", "settings"],
-  intermediate: ["chat", "agents", "plan", "memory", "settings"],
-  expert: ["chat", "agents", "plan", "jobs", "memory", "files", "settings", "terminal"],
+  beginner: ["chat"],
+  intermediate: ["chat", "agents", "plan", "memory"],
+  expert: ["chat", "agents", "plan", "jobs", "memory", "files", "terminal"],
 };
 
 // Which settings sections each level can see
@@ -89,6 +89,6 @@ export const LEVEL_VISIBLE_SETTINGS: Record<ExperienceLevel, string[]> = {
     "general", "bot_identity", "customization", "rate_limits",
     "users", "project", "activity_log", "backup", "database",
     "system", "updates", "domains", "packages", "smtp", "notifications",
-    "security", "api_key", "templates", "budgets",
+    "security", "api_key", "templates", "budgets", "secrets",
   ],
 };

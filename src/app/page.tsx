@@ -21,14 +21,13 @@ import { LEVEL_VISIBLE_TABS } from "@/lib/user-profile-constants";
 type TabKey = "chat" | "agents" | "plan" | "jobs" | "memory" | "settings" | "terminal" | "files";
 
 const ALL_TABS: { key: TabKey; label: string; icon: typeof MessageSquare; adminOnly?: boolean }[] = [
-  { key: "chat", label: "Chat", icon: MessageSquare },
-  { key: "agents", label: "Agents", icon: Bot },
-  { key: "plan", label: "Plan Mode", icon: ListChecks },
-  { key: "jobs", label: "Jobs", icon: Timer, adminOnly: true },
-  { key: "memory", label: "Memory", icon: Brain },
-  { key: "files", label: "Files", icon: FolderTree, adminOnly: true },
-  { key: "settings", label: "Settings", icon: Settings },
-  { key: "terminal", label: "Terminal", icon: TerminalSquare, adminOnly: true },
+  { key: "chat",     label: "Chat",      icon: MessageSquare },
+  { key: "plan",     label: "Plan Mode", icon: ListChecks },
+  { key: "agents",   label: "Agents",    icon: Bot },
+  { key: "memory",   label: "Memory",    icon: Brain },
+  { key: "files",    label: "Files",     icon: FolderTree, adminOnly: true },
+  { key: "terminal", label: "Terminal",  icon: TerminalSquare, adminOnly: true },
+  { key: "jobs",     label: "Jobs",      icon: Timer, adminOnly: true },
 ];
 
 export default function DashboardPage() {
@@ -49,16 +48,18 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const el = tabRefs.current[activeTab];
-    if (el) {
-      const parent = el.parentElement;
-      if (parent) {
-        const parentRect = parent.getBoundingClientRect();
-        const elRect = el.getBoundingClientRect();
-        setIndicatorStyle({
-          left: elRect.left - parentRect.left,
-          width: elRect.width,
-        });
-      }
+    if (!el) {
+      setIndicatorStyle({ left: 0, width: 0 });
+      return;
+    }
+    const parent = el.parentElement;
+    if (parent) {
+      const parentRect = parent.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      setIndicatorStyle({
+        left: elRect.left - parentRect.left,
+        width: elRect.width,
+      });
     }
   }, [activeTab]);
 
@@ -96,6 +97,18 @@ export default function DashboardPage() {
           </div>
           <div className="flex items-center gap-2">
             <NotificationBell />
+            <button
+              onClick={() => setActiveTab("settings")}
+              className={cn(
+                "p-2 rounded-lg transition-colors",
+                activeTab === "settings"
+                  ? "text-bot-accent bg-bot-accent/10"
+                  : "text-bot-muted hover:text-bot-text hover:bg-bot-elevated/40",
+              )}
+              title="Settings"
+            >
+              <Settings className="h-[18px] w-[18px]" />
+            </button>
             <UserProfileDropdown />
           </div>
         </div>

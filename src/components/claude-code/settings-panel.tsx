@@ -13,10 +13,33 @@ import {
   Upload,
   Skull,
   RefreshCw,
-  ChevronDown,
   ChevronRight,
   Database,
   HardDrive,
+  X,
+  Search,
+  Settings,
+  Bell,
+  Bot,
+  Palette,
+  FileText,
+  Users,
+  Shield,
+  Gauge,
+  Wallet,
+  Key,
+  Lock,
+  Monitor,
+  Server,
+  Cog,
+  Package,
+  ArrowUpCircle,
+  FolderOpen,
+  Globe,
+  Mail,
+  Archive,
+  ScrollText,
+  type LucideIcon,
 } from "lucide-react";
 
 import { DomainsSection } from "@/components/claude-code/settings/domains-section";
@@ -28,6 +51,7 @@ import { CustomizationSection } from "@/components/claude-code/settings/customiz
 import { ServicesSection } from "@/components/claude-code/settings/services-section";
 import { PackagesSection } from "@/components/claude-code/settings/packages-section";
 import { SystemServiceManagerSection } from "@/components/claude-code/settings/system-service-manager-section";
+import { SecretsSection } from "@/components/claude-code/settings/secrets-section";
 import { useUserProfile, invalidateProfileCache } from "@/hooks/use-user-profile";
 
 type SectionKey =
@@ -51,7 +75,8 @@ type SectionKey =
   | "security"
   | "api_key"
   | "templates"
-  | "budgets";
+  | "budgets"
+  | "secrets";
 
 export function SettingsPanel() {
   const { data: sessionData } = useSession();
@@ -63,6 +88,7 @@ export function SettingsPanel() {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
     new Set(["User", "Bot", "Access & Security", "Server", "Networking & Data"])
   );
+  const [sidebarSearch, setSidebarSearch] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const userProfile = useUserProfile();
   const userExperienceLevel = userProfile.experience_level;
@@ -210,7 +236,7 @@ export function SettingsPanel() {
     const sectionGroups: { label: string; sections: { key: SectionKey }[] }[] = [
       { label: "User", sections: [{ key: "general" }, { key: "notifications" }] },
       { label: "Bot", sections: [{ key: "bot_identity" }, { key: "customization" }, { key: "templates" }] },
-      { label: "Access & Security", sections: [{ key: "users" }, { key: "security" }, { key: "rate_limits" }, { key: "budgets" }, { key: "api_key" }] },
+      { label: "Access & Security", sections: [{ key: "users" }, { key: "security" }, { key: "rate_limits" }, { key: "budgets" }, { key: "api_key" }, { key: "secrets" }] },
       { label: "Server", sections: [{ key: "system" }, { key: "services" }, { key: "service_manager" }, { key: "packages" }, { key: "updates" }, { key: "project" }] },
       { label: "Networking & Data", sections: [{ key: "domains" }, { key: "smtp" }, { key: "backup" }, { key: "database" }, { key: "activity_log" }] },
     ];
@@ -516,54 +542,55 @@ export function SettingsPanel() {
     );
   }
 
-  type SectionDef = { key: SectionKey; label: string; adminOnly?: boolean };
+  type SectionDef = { key: SectionKey; label: string; adminOnly?: boolean; expertAdminOnly?: boolean; icon: LucideIcon };
   type SectionGroup = { label: string; sections: SectionDef[] };
 
   const sectionGroups: SectionGroup[] = [
     {
       label: "User",
       sections: [
-        { key: "general", label: "General" },
-        { key: "notifications", label: "Notifications" },
+        { key: "general", label: "General", icon: Settings },
+        { key: "notifications", label: "Notifications", icon: Bell },
       ],
     },
     {
       label: "Bot",
       sections: [
-        { key: "bot_identity", label: "Bot Identity", adminOnly: true },
-        { key: "customization", label: "Customization", adminOnly: true },
-        { key: "templates", label: "Templates", adminOnly: true },
+        { key: "bot_identity", label: "Bot Identity", adminOnly: true, icon: Bot },
+        { key: "customization", label: "Customization", adminOnly: true, icon: Palette },
+        { key: "templates", label: "Templates", adminOnly: true, icon: FileText },
       ],
     },
     {
       label: "Access & Security",
       sections: [
-        { key: "users", label: "Users", adminOnly: true },
-        { key: "security", label: "Security", adminOnly: true },
-        { key: "rate_limits", label: "Rate Limits", adminOnly: true },
-        { key: "budgets", label: "Budgets", adminOnly: true },
-        { key: "api_key", label: "API Key (SDK)", adminOnly: true },
+        { key: "users", label: "Users", adminOnly: true, icon: Users },
+        { key: "security", label: "Security", adminOnly: true, icon: Shield },
+        { key: "rate_limits", label: "Rate Limits", adminOnly: true, icon: Gauge },
+        { key: "budgets", label: "Budgets", adminOnly: true, icon: Wallet },
+        { key: "api_key", label: "API Key (SDK)", adminOnly: true, icon: Key },
+        { key: "secrets", label: "Secrets", expertAdminOnly: true, icon: Lock },
       ],
     },
     {
       label: "Server",
       sections: [
-        { key: "system", label: "System", adminOnly: true },
-        { key: "services", label: "Services", adminOnly: true },
-        { key: "service_manager", label: "Service Manager", adminOnly: true },
-        { key: "packages", label: "Packages", adminOnly: true },
-        { key: "updates", label: "Updates", adminOnly: true },
-        { key: "project", label: "Project", adminOnly: true },
+        { key: "system", label: "System", adminOnly: true, icon: Monitor },
+        { key: "services", label: "Services", adminOnly: true, icon: Server },
+        { key: "service_manager", label: "Service Manager", adminOnly: true, icon: Cog },
+        { key: "packages", label: "Packages", adminOnly: true, icon: Package },
+        { key: "updates", label: "Updates", adminOnly: true, icon: ArrowUpCircle },
+        { key: "project", label: "Project", adminOnly: true, icon: FolderOpen },
       ],
     },
     {
       label: "Networking & Data",
       sections: [
-        { key: "domains", label: "Domains", adminOnly: true },
-        { key: "smtp", label: "Email / SMTP", adminOnly: true },
-        { key: "backup", label: "Backup & Restore", adminOnly: true },
-        { key: "database", label: "Database", adminOnly: true },
-        { key: "activity_log", label: "Activity Log", adminOnly: true },
+        { key: "domains", label: "Domains", adminOnly: true, icon: Globe },
+        { key: "smtp", label: "Email / SMTP", adminOnly: true, icon: Mail },
+        { key: "backup", label: "Backup & Restore", adminOnly: true, icon: Archive },
+        { key: "database", label: "Database", adminOnly: true, icon: Database },
+        { key: "activity_log", label: "Activity Log", adminOnly: true, icon: ScrollText },
       ],
     },
   ];
@@ -586,59 +613,122 @@ export function SettingsPanel() {
     .map((g) => ({
       ...g,
       sections: g.sections.filter(
-        (s) => (!s.adminOnly || isAdmin) && visibleLevelSections.includes(s.key)
+        (s) =>
+          (!s.adminOnly || isAdmin) &&
+          (!s.expertAdminOnly || (isAdmin && userExperienceLevel === "expert")) &&
+          visibleLevelSections.includes(s.key)
       ),
     }))
     .filter((g) => g.sections.length > 0);
 
+  const searchTerm = sidebarSearch.trim().toLowerCase();
+
+  const searchFilteredGroups = visibleGroups
+    .map((g) => ({
+      ...g,
+      sections: searchTerm
+        ? g.sections.filter((s) => s.label.toLowerCase().includes(searchTerm))
+        : g.sections,
+    }))
+    .filter((g) => g.sections.length > 0);
+
+  function highlightMatch(label: string) {
+    if (!searchTerm) return <span>{label}</span>;
+    const idx = label.toLowerCase().indexOf(searchTerm);
+    if (idx === -1) return <span>{label}</span>;
+    return (
+      <span>
+        {label.slice(0, idx)}
+        <span className="text-bot-accent font-semibold">{label.slice(idx, idx + searchTerm.length)}</span>
+        {label.slice(idx + searchTerm.length)}
+      </span>
+    );
+  }
+
   return (
     <div className="flex h-full overflow-hidden">
       {/* Sidebar */}
-      <div className="w-52 shrink-0 border-r border-bot-border/30 bg-bot-surface/60 backdrop-blur-sm flex flex-col py-2 overflow-y-auto px-1.5">
-        {visibleGroups.map((group) => {
-          const isExpanded = expandedGroups.has(group.label);
-          return (
-            <div key={group.label} className="mb-1">
+      <div className="w-52 shrink-0 border-r border-bot-border/30 bg-bot-surface/60 backdrop-blur-sm flex flex-col overflow-hidden">
+        {/* Search */}
+        <div className="px-2.5 py-2.5 border-b border-bot-border/20">
+          <div className="relative flex items-center">
+            <Search className="absolute left-2.5 h-3.5 w-3.5 text-bot-muted/50 pointer-events-none" />
+            <input
+              type="text"
+              value={sidebarSearch}
+              onChange={(e) => setSidebarSearch(e.target.value)}
+              placeholder="Search settings..."
+              className="w-full rounded-lg bg-bot-elevated/50 border border-bot-border/30 pl-8 pr-7 py-1.5 text-[12px] text-bot-text placeholder:text-bot-muted/40 outline-none focus:border-bot-accent/40 focus:bg-bot-elevated/80 transition-all"
+            />
+            {sidebarSearch && (
               <button
-                onClick={() =>
-                  setExpandedGroups((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(group.label)) next.delete(group.label);
-                    else next.add(group.label);
-                    return next;
-                  })
-                }
-                className="w-full flex items-center justify-between px-3 pt-3 pb-1 group"
+                onClick={() => setSidebarSearch("")}
+                className="absolute right-2 text-bot-muted/50 hover:text-bot-muted transition-colors"
               >
-                <span className="text-[11px] uppercase tracking-wider font-semibold text-bot-muted/60 group-hover:text-bot-muted transition-colors">
-                  {group.label}
-                </span>
-                {isExpanded
-                  ? <ChevronDown className="w-3 h-3 text-bot-muted/40 group-hover:text-bot-muted transition-colors" />
-                  : <ChevronRight className="w-3 h-3 text-bot-muted/40 group-hover:text-bot-muted transition-colors" />
-                }
+                <X className="h-3.5 w-3.5" />
               </button>
-              {isExpanded && (
-                <div className="space-y-0.5">
-                  {group.sections.map((s) => (
-                    <button
-                      key={s.key}
-                      onClick={() => setActiveSection(s.key)}
-                      className={cn(
-                        "w-full text-left px-3.5 py-2 rounded-lg text-body transition-all duration-200",
-                        activeSection === s.key
-                          ? "bg-bot-accent/10 text-bot-accent font-medium shadow-glow-sm"
-                          : "text-bot-muted hover:text-bot-text hover:bg-bot-elevated/40",
-                      )}
-                    >
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
+            )}
+          </div>
+        </div>
+
+        {/* Groups */}
+        <div className="flex-1 overflow-y-auto py-1 px-1.5">
+          {searchFilteredGroups.length === 0 && (
+            <p className="px-3 py-4 text-[12px] text-bot-muted/50 text-center">No results</p>
+          )}
+          {searchFilteredGroups.map((group, gi) => {
+            const isExpanded = searchTerm ? true : expandedGroups.has(group.label);
+            return (
+              <div key={group.label} className={cn("mb-0.5", gi > 0 && "mt-1")}>
+                <button
+                  onClick={() => {
+                    if (searchTerm) return;
+                    setExpandedGroups((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(group.label)) next.delete(group.label);
+                      else next.add(group.label);
+                      return next;
+                    });
+                  }}
+                  className="w-full flex items-center justify-between px-2.5 py-1 group cursor-pointer"
+                >
+                  <span className="text-[10px] uppercase tracking-widest font-semibold text-bot-muted/50 group-hover:text-bot-muted/70 transition-colors">
+                    {group.label}
+                  </span>
+                  {!searchTerm && (
+                    <ChevronRight
+                      className="h-3 w-3 text-bot-muted/30 group-hover:text-bot-muted/50 transition-all duration-200"
+                      style={{ transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)" }}
+                    />
+                  )}
+                </button>
+                {isExpanded && (
+                  <div className="space-y-px">
+                    {group.sections.map((s) => {
+                      const Icon = s.icon;
+                      const isActive = activeSection === s.key;
+                      return (
+                        <button
+                          key={s.key}
+                          onClick={() => setActiveSection(s.key)}
+                          className={cn(
+                            "w-full text-left flex items-center gap-2.5 pl-3 pr-2 py-1.5 rounded-lg text-[13px] transition-all duration-150",
+                            isActive
+                              ? "bg-bot-accent/8 text-bot-accent font-medium border-l-2 border-bot-accent pl-[10px]"
+                              : "text-bot-muted hover:text-bot-text hover:bg-bot-elevated/30 border-l-2 border-transparent",
+                          )}
+                        >
+                          <Icon className="h-3.5 w-3.5 shrink-0 opacity-80" />
+                          {highlightMatch(s.label)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Content */}
@@ -1191,6 +1281,9 @@ export function SettingsPanel() {
 
         {/* ── API Key ── */}
         {activeSection === "api_key" && <ApiKeySection />}
+
+        {/* ── Secrets ── */}
+        {activeSection === "secrets" && <SecretsSection />}
 
       </div>
     </div>
