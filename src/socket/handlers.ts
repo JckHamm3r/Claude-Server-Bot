@@ -26,7 +26,6 @@ import { registerPlanHandlers } from "./plan-handlers";
 import { 
   lockEventEmitter, 
   initFileLockManager, 
-  shutdownFileLockManager,
   cancelQueuedOperation,
   getSessionQueuedOperations 
 } from "../lib/file-lock-manager";

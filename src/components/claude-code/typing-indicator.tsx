@@ -2,7 +2,6 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import { User } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 interface TypingUser {
   email: string;

@@ -11,7 +11,6 @@ import {
   removeFileLock,
   getFileLock,
   getSessionLocks,
-  removeSessionLocks,
   removeStaleLocks,
   createQueuedOperation,
   getNextQueuedOperation,
@@ -118,7 +117,7 @@ export async function acquireLock(
   }
 
   // Lock exists, prepare locked by info
-  let lockedBy = {
+  const lockedBy = {
     userEmail: existingLock?.user_email ?? "unknown",
     userName: "Unknown User",
     sessionId: existingLock?.session_id ?? "",

@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { X, Upload, Link as LinkIcon, Check, AlertCircle } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { cn, apiUrl } from "@/lib/utils";
 
 interface ChangeAvatarModalProps {
@@ -15,7 +15,6 @@ interface ChangeAvatarModalProps {
 export function ChangeAvatarModal({
   open,
   onClose,
-  currentAvatar,
   onAvatarChange,
 }: ChangeAvatarModalProps) {
   const [activeTab, setActiveTab] = useState<"upload" | "url">("upload");

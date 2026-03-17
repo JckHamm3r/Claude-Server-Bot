@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { X, Clock, User, File } from "lucide-react";
 
 interface QueuedOperation {
@@ -25,7 +25,7 @@ interface QueueStatusIndicatorProps {
   onCancel: (queueId: string) => void;
 }
 
-export default function QueueStatusIndicator({ sessionId, operations, onCancel }: QueueStatusIndicatorProps) {
+export default function QueueStatusIndicator({ operations, onCancel }: QueueStatusIndicatorProps) {
   const [expanded, setExpanded] = useState(false);
 
   const queuedOps = operations.filter((op) => op.status === "queued");

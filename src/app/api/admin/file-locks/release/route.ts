@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
-import { getFileLock, removeFileLock } from "@/lib/claude-db";
+import { getFileLock } from "@/lib/claude-db";
 import { releaseLock } from "@/lib/file-lock-manager";
 
 const NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET || "";

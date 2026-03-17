@@ -473,13 +473,6 @@ async function startStreamingSession(
   };
   lockEventEmitter.on("queue_executing", queueExecutingHandler);
 
-  // Clean up listener when session closes
-  const originalCleanup = cleanupSession;
-  const cleanupWithLockListener = (s: SDKSessionState) => {
-    lockEventEmitter.off("queue_executing", queueExecutingHandler);
-    originalCleanup(s);
-  };
-
   // Start output processing in background
   processOutputStream(state, queryFn, options, sessionId).catch((err) => {
     console.error(`[sdk] Stream processing error for session ${sessionId}:`, err);

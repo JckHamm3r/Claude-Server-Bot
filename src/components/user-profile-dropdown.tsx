@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { User, LogOut, KeyRound, Image as ImageIcon } from "lucide-react";
-import { cn, apiUrl } from "@/lib/utils";
+import { apiUrl } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChangeAvatarModal } from "./modals/change-avatar-modal";
 import { ChangePasswordModal } from "./modals/change-password-modal";
