@@ -65,6 +65,18 @@ export interface ClassifyResult {
   warning?: string;
 }
 
+export interface GroupAiPermissions {
+  commands_allowed: string[];
+  commands_blocked: string[];
+  shell_access: boolean;
+  full_trust_allowed: boolean;
+  directories_allowed: string[];
+  directories_blocked: string[];
+  filetypes_allowed: string[];
+  filetypes_blocked: string[];
+  read_only: boolean;
+}
+
 /**
  * Detect dangerous `rm` invocations: any `rm` with both recursive and force
  * flags, or `rm` targeting /, ~, ./, ../, or *.
@@ -269,7 +281,11 @@ function classifySingleCommand(normalized: string, originalDisplay: string): Cla
   return { category: "restricted", displayName: originalDisplay };
 }
 
-export function classifyCommand(command: string, options?: { skipPermissions?: boolean }): ClassifyResult {
+export function classifyCommand(
+  command: string,
+  options?: { skipPermissions?: boolean },
+  groupAiPerms?: { commands_allowed: string[]; commands_blocked: string[]; shell_access: boolean; } | null
+): ClassifyResult {
   if (!command || typeof command !== "string") {
     return { category: "safe", displayName: "unknown" };
   }
@@ -279,6 +295,20 @@ export function classifyCommand(command: string, options?: { skipPermissions?: b
   }
 
   const normalized = command.trim().toLowerCase();
+
+  // Group permission checks
+  if (groupAiPerms?.shell_access === false) {
+    return { category: "blocked", displayName: command, reason: "Shell access is disabled for your group" };
+  }
+
+  if (groupAiPerms?.commands_blocked?.length) {
+    for (const blocked of groupAiPerms.commands_blocked) {
+      const lb = blocked.toLowerCase().trim();
+      if (lb && normalized.includes(lb)) {
+        return { category: "custom_blocked", displayName: command, reason: "Blocked by group policy" };
+      }
+    }
+  }
 
   // Dangerous patterns are checked before the whitelist (S2-03).
   // If the command matches both, we return whitelisted with a warning.
@@ -319,6 +349,28 @@ export function classifyCommand(command: string, options?: { skipPermissions?: b
     }
   } catch {
     // ignore parse errors
+  }
+
+  // Group allowed commands: upgrade restricted/dangerous to whitelisted
+  if (!dangerousMatch && groupAiPerms?.commands_allowed?.length) {
+    for (const allowed of groupAiPerms.commands_allowed) {
+      const la = allowed.toLowerCase().trim();
+      if (la && (normalized === la || normalized.startsWith(la + " "))) {
+        // Pre-check category to see if it would be restricted/dangerous
+        const segments = splitCompoundCommand(normalized);
+        let wouldBeRestricted = false;
+        for (const seg of segments) {
+          const r = classifySingleCommand(seg, command);
+          if (r.category === "restricted" || r.category === "dangerous") {
+            wouldBeRestricted = true;
+            break;
+          }
+        }
+        if (wouldBeRestricted) {
+          return { category: "whitelisted", displayName: command };
+        }
+      }
+    }
   }
 
   // If dangerous and not whitelisted, block it

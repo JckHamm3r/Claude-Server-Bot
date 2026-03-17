@@ -16,6 +16,7 @@ import {
   getUpload,
   getUserSettings,
 } from "../lib/claude-db";
+import db from "../lib/db";
 import { logActivity } from "../lib/activity-log";
 import { getAppSetting } from "../lib/app-settings";
 import { checkBotConfigRequest } from "../lib/security-guard";
@@ -264,6 +265,87 @@ export function registerMessageHandlers(ctx: HandlerContext) {
           return;
           }
           // If agentName/task could not be parsed, fall through to normal message handling
+        }
+
+        // ── /remember slash command ───────────────────────────────────────────
+        // Server-side fallback: intercept before the message reaches Claude.
+        if (content.trim().match(/^\/remember(\s|$)/i)) {
+          const rememberText = content.trim().slice("/remember".length).trim();
+
+          const emitLocal = (text: string) => {
+            io.to(`session:${sessionId}`).emit("claude:output", {
+              sessionId,
+              parsed: { type: "text", content: text },
+              submittedBy: email,
+            });
+            io.to(`session:${sessionId}`).emit("claude:output", {
+              sessionId,
+              parsed: { type: "done" },
+              submittedBy: email,
+            });
+          };
+
+          if (!rememberText) {
+            emitLocal("Usage: `/remember <something to remember>`");
+            return;
+          }
+
+          const apiKey = getAppSetting("anthropic_api_key", "") || process.env.ANTHROPIC_API_KEY || "";
+          if (!apiKey) {
+            emitLocal("No Anthropic API key configured. Set it in Admin > Settings.");
+            return;
+          }
+
+          saveMessage(sessionId, "admin", content, email, "chat");
+          ctx.setSessionStatus(sessionId, "running");
+          io.to(`session:${sessionId}`).emit("claude:command_started", { sessionId, submittedBy: email });
+
+          try {
+            const res = await fetch("https://api.anthropic.com/v1/messages", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "x-api-key": apiKey,
+                "anthropic-version": "2023-06-01",
+              },
+              body: JSON.stringify({
+                model: "claude-haiku-4-5-20251001",
+                max_tokens: 512,
+                messages: [{
+                  role: "user",
+                  content: `You are a knowledge-base curator. Extract a single memory item from the user's freeform text.\n\nRules:\n- Title: concise noun phrase (3–8 words) describing what should be remembered.\n- Content: the factual information to remember, cleaned up for clarity. Preserve all details.\n- Do not add information that wasn't implied by the original.\n- Return ONLY valid JSON with exactly two fields: "title" (string) and "content" (string). No explanation.\n\nText to remember:\n${rememberText}\n\nReturn JSON:`,
+                }],
+              }),
+              signal: AbortSignal.timeout(20000),
+            });
+
+            if (!res.ok) {
+              const errText = await res.text();
+              emitLocal(`Failed to save memory: API error ${res.status}`);
+              console.error("[/remember] AI API error:", errText);
+            } else {
+              const data = await res.json() as { content?: { type: string; text: string }[] };
+              const rawText = data?.content?.[0]?.text?.trim() ?? "";
+              const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+              if (!jsonMatch) throw new Error("AI did not return valid JSON");
+
+              const parsed = JSON.parse(jsonMatch[0]) as { title?: string; content?: string };
+              if (!parsed.title || !parsed.content) throw new Error("Missing title or content");
+
+              const memory = db.prepare(
+                "INSERT INTO memories (title, content, created_by) VALUES (?, ?, ?) RETURNING id, title, content, created_by, created_at, updated_at"
+              ).get(parsed.title.trim(), parsed.content.trim(), email) as { title: string; content: string };
+
+              emitLocal(`Saved to memory: **${memory.title}**\n\n${memory.content}`);
+            }
+          } catch (err) {
+            console.error("[/remember] Error:", err);
+            emitLocal(`Failed to save memory: ${err instanceof Error ? err.message : "Unknown error"}`);
+          }
+
+          ctx.setSessionStatus(sessionId, "idle");
+          io.to(`session:${sessionId}`).emit("claude:command_done", { sessionId });
+          return;
         }
 
         // Process attachments: separate images for --input-file, text for inline

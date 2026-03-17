@@ -1,5 +1,6 @@
 import path from "path";
 import { getAppSetting } from "./app-settings";
+import type { GroupAiPermissions } from "./command-sandbox";
 
 // Protected paths — Claude should never access these
 export const PROTECTED_PATHS = [
@@ -91,14 +92,41 @@ function normalizePath(p: string): string {
   return path.normalize(p).replace(/\\/g, "/");
 }
 
+function matchesGlob(pattern: string, filePath: string): boolean {
+  if (!pattern) return false;
+  const norm = filePath.replace(/\\/g, "/");
+  const pat = pattern.replace(/\\/g, "/");
+  if (pat.endsWith("/**")) {
+    const prefix = pat.slice(0, -3);
+    return norm.startsWith(prefix + "/") || norm === prefix;
+  }
+  if (pat.endsWith("/*")) {
+    const prefix = pat.slice(0, -2);
+    return norm.startsWith(prefix + "/") && !norm.slice(prefix.length + 1).includes("/");
+  }
+  if (pat.startsWith("*.")) {
+    return norm.endsWith(pat.slice(1));
+  }
+  return norm === pat || norm.startsWith(pat + "/");
+}
+
 // Check if a tool use targets a protected path
 export function checkProtectedPath(
   toolName: string,
-  toolInput: unknown
+  toolInput: unknown,
+  groupPerms?: GroupAiPermissions | null
 ): { blocked: boolean; reason?: string } {
   if (!toolInput || typeof toolInput !== "object") return { blocked: false };
 
   const input = toolInput as Record<string, unknown>;
+
+  // Group read-only: block all write/modify tools
+  if (groupPerms?.read_only === true) {
+    const writingTools = ["Write", "StrReplace", "Delete"];
+    if (writingTools.includes(toolName)) {
+      return { blocked: true, reason: "Group policy: read-only mode - file modifications are not allowed" };
+    }
+  }
 
   const pathValues: string[] = [];
 
@@ -123,6 +151,62 @@ export function checkProtectedPath(
           blocked: true,
           reason: `Access to protected path blocked: ${pathValue}`,
         };
+      }
+    }
+  }
+
+  // Group permission directory/filetype checks (skip for shell/bash — covered by command checks)
+  if (groupPerms && toolName !== "Bash" && toolName !== "Shell") {
+    // Collect the primary file path from the input (first non-command path field)
+    let filePath: string | null = null;
+    for (const key of ["file_path", "path"]) {
+      if (typeof input[key] === "string") {
+        filePath = normalizePath(input[key] as string);
+        break;
+      }
+    }
+
+    if (filePath) {
+      // Check blocked directories
+      if (groupPerms.directories_blocked?.length) {
+        for (const dir of groupPerms.directories_blocked) {
+          if (matchesGlob(dir, filePath)) {
+            return { blocked: true, reason: `Access to blocked directory: ${filePath}` };
+          }
+        }
+      }
+
+      // Check allowed directories (if list is non-empty, path must be inside one)
+      if (groupPerms.directories_allowed?.length) {
+        const inAllowed = groupPerms.directories_allowed.some(dir => matchesGlob(dir, filePath!));
+        if (!inAllowed) {
+          return { blocked: true, reason: "Outside allowed directories for your group" };
+        }
+      }
+
+      // Derive extension
+      const ext = filePath.includes(".") ? "." + filePath.split(".").pop()!.toLowerCase() : "";
+
+      // Check blocked file types
+      if (ext && groupPerms.filetypes_blocked?.length) {
+        const blocked = groupPerms.filetypes_blocked.some(ft => {
+          const n = ft.startsWith(".") ? ft.toLowerCase() : "." + ft.toLowerCase();
+          return ext === n;
+        });
+        if (blocked) {
+          return { blocked: true, reason: `File type blocked by group policy: ${ext}` };
+        }
+      }
+
+      // Check allowed file types (if list is non-empty, extension must be in it)
+      if (ext && groupPerms.filetypes_allowed?.length) {
+        const allowed = groupPerms.filetypes_allowed.some(ft => {
+          const n = ft.startsWith(".") ? ft.toLowerCase() : "." + ft.toLowerCase();
+          return ext === n;
+        });
+        if (!allowed) {
+          return { blocked: true, reason: `File type not in allowed list for your group: ${ext}` };
+        }
       }
     }
   }

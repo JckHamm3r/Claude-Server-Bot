@@ -24,6 +24,38 @@ const DENYLIST_PREFIXES = ["NEXT_PUBLIC_"];
 
 const KEY_REGEX = /^[A-Z_][A-Z0-9_]*$/;
 
+type SecretType = "secret" | "api_key" | "variable";
+
+interface SecretMetaRow {
+  key: string;
+  type: SecretType;
+  description: string;
+}
+
+/** Known installer-seeded keys with their canonical type and description. */
+const DEFAULT_TYPES: Record<string, { type: SecretType; description: string }> = {
+  ANTHROPIC_API_KEY: { type: "api_key", description: "Anthropic API key for Claude" },
+  PORT: { type: "variable", description: "Server listening port" },
+  CLAUDE_BOT_NAME: { type: "variable", description: "Bot display name" },
+  CLAUDE_PROJECT_ROOT: { type: "variable", description: "Working directory for Claude sessions" },
+};
+
+/** Infer a type from the key name when no metadata row exists. */
+function inferType(key: string): { type: SecretType; description: string } {
+  if (DEFAULT_TYPES[key]) return DEFAULT_TYPES[key];
+  if (/API_?KEY|APIKEY/i.test(key)) return { type: "api_key", description: "" };
+  if (/SECRET|PASSWORD|PASSWD|TOKEN|HASH|PRIVATE/i.test(key)) return { type: "secret", description: "" };
+  return { type: "variable", description: "" };
+}
+
+/** Mask a value: show first 4 and last 4 chars. Handles short values gracefully. */
+function maskValue(value: string): string {
+  const v = value.trim();
+  if (!v) return "";
+  if (v.length <= 8) return `${"*".repeat(v.length)}`;
+  return `${v.slice(0, 4)}...${ v.slice(-4)}`;
+}
+
 function isDenied(key: string): boolean {
   if (DENYLIST.has(key)) return true;
   return DENYLIST_PREFIXES.some((p) => key.startsWith(p));
@@ -89,17 +121,67 @@ function deleteEnvLine(lines: string[], key: string): string[] {
   return lines.filter((l) => !l.trim().startsWith(`${key}=`));
 }
 
-// GET /api/settings/secrets — list keys (never values)
-export async function GET() {
+function getMetadata(key: string): SecretMetaRow {
+  const row = db
+    .prepare("SELECT key, type, description FROM secret_metadata WHERE key = ?")
+    .get(key) as SecretMetaRow | undefined;
+  if (row) return row;
+
+  // Auto-classify and persist
+  const inferred = inferType(key);
+  db.prepare(
+    "INSERT OR IGNORE INTO secret_metadata (key, type, description) VALUES (?, ?, ?)"
+  ).run(key, inferred.type, inferred.description);
+  return { key, type: inferred.type, description: inferred.description };
+}
+
+// GET /api/settings/secrets — list keys with metadata and conditional values
+// ?reveal=KEY returns { key, value } for api_key type only
+export async function GET(request: NextRequest) {
   const email = await getExpertAdminEmail();
   if (!email) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  const revealKey = request.nextUrl.searchParams.get("reveal");
 
   const lines = readEnvLines();
   const parsed = parseEnvLines(lines);
 
+  // Handle reveal request
+  if (revealKey) {
+    const upperRevealKey = revealKey.trim().toUpperCase();
+    if (isDenied(upperRevealKey)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    const meta = getMetadata(upperRevealKey);
+    if (meta.type !== "api_key") {
+      return NextResponse.json({ error: "Only API keys can be revealed" }, { status: 403 });
+    }
+    const value = parsed.get(upperRevealKey) ?? "";
+    return NextResponse.json({ key: upperRevealKey, value });
+  }
+
   const vars = Array.from(parsed.entries())
     .filter(([key]) => !isDenied(key))
-    .map(([key, value]) => ({ key, isSet: value.trim().length > 0 }))
+    .map(([key, rawValue]) => {
+      const meta = getMetadata(key);
+      const isSet = rawValue.trim().length > 0;
+
+      const base = {
+        key,
+        isSet,
+        type: meta.type,
+        description: meta.description,
+      };
+
+      if (meta.type === "variable") {
+        return { ...base, value: rawValue };
+      }
+      if (meta.type === "api_key") {
+        return { ...base, maskedValue: isSet ? maskValue(rawValue) : "" };
+      }
+      // secret — no value exposed
+      return base;
+    })
     .sort((a, b) => a.key.localeCompare(b.key));
 
   return NextResponse.json({ vars });
@@ -110,14 +192,14 @@ export async function PUT(request: NextRequest) {
   const email = await getExpertAdminEmail();
   if (!email) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  let body: { key?: string; value?: string };
+  let body: { key?: string; value?: string; type?: string; description?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { key, value } = body;
+  const { key, value, type, description } = body;
   if (!key || typeof key !== "string" || value === undefined || typeof value !== "string") {
     return NextResponse.json({ error: "Missing key or value" }, { status: 400 });
   }
@@ -133,7 +215,14 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "This variable cannot be modified" }, { status: 403 });
   }
 
-  const sanitizedValue = (value ?? "").replace(/[\r\n\x00-\x1F\x7F]/g, "");
+  const validTypes: SecretType[] = ["secret", "api_key", "variable"];
+  const resolvedType: SecretType = (type && validTypes.includes(type as SecretType))
+    ? (type as SecretType)
+    : (getMetadata(upperKey).type ?? "secret");
+
+  const resolvedDescription = typeof description === "string" ? description : "";
+
+  const sanitizedValue = value.replace(/[\r\n\x00-\x1F\x7F]/g, "");
 
   try {
     const lines = readEnvLines();
@@ -144,6 +233,10 @@ export async function PUT(request: NextRequest) {
     console.error("[settings/secrets] write failed:", err);
     return NextResponse.json({ error: "Failed to write configuration" }, { status: 500 });
   }
+
+  db.prepare(
+    "INSERT INTO secret_metadata (key, type, description) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET type = excluded.type, description = excluded.description"
+  ).run(upperKey, resolvedType, resolvedDescription);
 
   return NextResponse.json({ ok: true, requiresRestart: true });
 }
@@ -179,6 +272,8 @@ export async function DELETE(request: NextRequest) {
     console.error("[settings/secrets] delete failed:", err);
     return NextResponse.json({ error: "Failed to update configuration" }, { status: 500 });
   }
+
+  db.prepare("DELETE FROM secret_metadata WHERE key = ?").run(upperKey);
 
   return NextResponse.json({ ok: true, requiresRestart: true });
 }

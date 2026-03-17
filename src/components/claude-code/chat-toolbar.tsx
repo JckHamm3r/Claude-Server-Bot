@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import { Square, RotateCcw, Trash2, Zap, Search, Download, ChevronDown, ClipboardCopy, Check, Share2, Users } from "lucide-react";
 import { cn, apiUrl } from "@/lib/utils";
 import { ModelSelector } from "./model-selector";
@@ -38,6 +39,15 @@ function formatTokenCount(n: number): string {
 
 function ExportDropdown({ sessionId }: { sessionId: string }) {
   const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; right: number } | null>(null);
+
+  useLayoutEffect(() => {
+    if (open && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setDropdownPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+    }
+  }, [open]);
 
   const handleExport = (format: "markdown" | "json") => {
     setOpen(false);
@@ -47,6 +57,7 @@ function ExportDropdown({ sessionId }: { sessionId: string }) {
   return (
     <div className="relative">
       <button
+        ref={buttonRef}
         onClick={() => setOpen(!open)}
         className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-caption font-medium text-bot-muted hover:bg-bot-elevated/50 transition-all duration-200"
         title="Export session"
@@ -55,10 +66,13 @@ function ExportDropdown({ sessionId }: { sessionId: string }) {
         <span className="hidden xl:inline">Export</span>
         <ChevronDown className="h-3 w-3" />
       </button>
-      {open && (
+      {open && dropdownPos && createPortal(
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-xl glass-heavy shadow-float overflow-hidden animate-scaleIn">
+          <div className="fixed inset-0 z-[9998]" onClick={() => setOpen(false)} />
+          <div
+            className="fixed z-[9999] w-44 rounded-xl glass-heavy shadow-float overflow-hidden animate-scaleIn"
+            style={{ top: dropdownPos.top, right: dropdownPos.right }}
+          >
             <button
               onClick={() => handleExport("markdown")}
               className="flex w-full items-center gap-2 px-4 py-2.5 text-caption text-bot-text hover:bg-bot-elevated/40 transition-all duration-150"
@@ -72,7 +86,8 @@ function ExportDropdown({ sessionId }: { sessionId: string }) {
               Export as JSON
             </button>
           </div>
-        </>
+        </>,
+        document.body
       )}
     </div>
   );

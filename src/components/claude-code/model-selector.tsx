@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { AVAILABLE_MODELS } from "@/lib/models";
 import { ChevronDown, Zap, Scale, Brain } from "lucide-react";
@@ -27,6 +28,8 @@ const TIER_COLORS = {
 export function ModelSelector({ value, onChange, compact, disabled }: ModelSelectorProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [dropdownRect, setDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
 
   const selected = AVAILABLE_MODELS.find((m) => m.value === value) ?? AVAILABLE_MODELS[0];
   const Icon = TIER_ICONS[selected.tier];
@@ -39,10 +42,18 @@ export function ModelSelector({ value, onChange, compact, disabled }: ModelSelec
     return () => document.removeEventListener("mousedown", handleClick);
   }, [open]);
 
+  useLayoutEffect(() => {
+    if (open && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setDropdownRect({ top: rect.bottom + 6, left: rect.left, width: rect.width });
+    }
+  }, [open]);
+
   if (compact) {
     return (
       <div className="relative" ref={ref}>
         <button
+          ref={buttonRef}
           type="button"
           onClick={() => !disabled && setOpen((v) => !v)}
           disabled={disabled}
@@ -55,8 +66,8 @@ export function ModelSelector({ value, onChange, compact, disabled }: ModelSelec
           <span>{selected.label}</span>
           <ChevronDown className={cn("h-3 w-3 text-bot-muted/60 transition-transform duration-200", open && "rotate-180")} />
         </button>
-        {open && (
-          <ModelDropdown value={value} onChange={(v) => { onChange(v); setOpen(false); }} />
+        {open && dropdownRect && (
+          <ModelDropdown value={value} onChange={(v) => { onChange(v); setOpen(false); }} rect={dropdownRect} />
         )}
       </div>
     );
@@ -65,6 +76,7 @@ export function ModelSelector({ value, onChange, compact, disabled }: ModelSelec
   return (
     <div className="relative" ref={ref}>
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => !disabled && setOpen((v) => !v)}
         disabled={disabled}
@@ -80,16 +92,19 @@ export function ModelSelector({ value, onChange, compact, disabled }: ModelSelec
         </div>
         <ChevronDown className={cn("h-4 w-4 text-bot-muted/60 shrink-0 transition-transform duration-200", open && "rotate-180")} />
       </button>
-      {open && (
-        <ModelDropdown value={value} onChange={(v) => { onChange(v); setOpen(false); }} />
+      {open && dropdownRect && (
+        <ModelDropdown value={value} onChange={(v) => { onChange(v); setOpen(false); }} rect={dropdownRect} />
       )}
     </div>
   );
 }
 
-function ModelDropdown({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  return (
-    <div className="absolute z-50 left-0 right-0 top-full mt-1.5 rounded-xl border border-bot-border bg-bot-surface shadow-float overflow-hidden">
+function ModelDropdown({ value, onChange, rect }: { value: string; onChange: (v: string) => void; rect: { top: number; left: number; width: number } }) {
+  return createPortal(
+    <div
+      className="fixed z-[9999] rounded-xl border border-bot-border bg-bot-surface shadow-float overflow-hidden"
+      style={{ top: rect.top, left: rect.left, minWidth: rect.width }}
+    >
       {AVAILABLE_MODELS.map((m) => {
         const Icon = TIER_ICONS[m.tier];
         const isSelected = m.value === value;
@@ -118,6 +133,7 @@ function ModelDropdown({ value, onChange }: { value: string; onChange: (v: strin
           </button>
         );
       })}
-    </div>
+    </div>,
+    document.body
   );
 }

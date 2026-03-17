@@ -24,6 +24,7 @@ import {
   addSessionParticipant,
   removeSessionParticipant,
   listSessionParticipants,
+  getUserGroupPermissions,
 } from "../lib/claude-db";
 import { AVAILABLE_MODELS, DEFAULT_MODEL } from "../lib/models";
 import { isSDKAvailable } from "../lib/claude";
@@ -85,6 +86,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         const sessionProvider = ctx.getSessionProvider(sessionId, sessionProviderType);
 
         const userSettings = getUserSettings(email);
+        const groupPerms = isAdmin ? null : getUserGroupPermissions(email);
         const systemPrompt = await buildSystemPrompt({
           interfaceType: interface_type,
           personality: sessionPersonality,
@@ -93,6 +95,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
           experienceLevel: userSettings.experience_level,
           autoSummary: userSettings.auto_summary,
           sessionId,
+          groupPromptAppend: groupPerms?.prompt?.system_prompt_append || undefined,
         });
         if (interface_type === "customization_interface") {
           logActivity("customization_session_started", email, { sessionId });
@@ -347,11 +350,13 @@ export function registerSessionHandlers(ctx: HandlerContext) {
       const hasResumeId = sessionProvider.getClaudeSessionId?.(sessionId) != null;
       if (!hasResumeId) {
         const rejoinSettings = getUserSettings(email);
+        const rejoinGroupPerms = isAdmin ? null : getUserGroupPermissions(email);
         const systemPrompt = await buildSystemPrompt({
           personality: dbSession.personality ?? undefined,
           experienceLevel: rejoinSettings.experience_level,
           autoSummary: rejoinSettings.auto_summary,
           sessionId,
+          groupPromptAppend: rejoinGroupPerms?.prompt?.system_prompt_append || undefined,
         });
         sessionProvider.createSession(sessionId, {
           skipPermissions: dbSession.skip_permissions,

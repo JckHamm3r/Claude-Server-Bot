@@ -102,19 +102,19 @@ export function DomainsSection() {
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h3 className="text-body font-semibold text-bot-text mb-1">Custom Domains</h3>
-        <p className="text-caption text-bot-muted mb-4">
-          Add a domain to automatically configure nginx and SSL.
-        </p>
+    <div className="mx-auto max-w-2xl space-y-6">
+      <h2 className="mb-6 text-subtitle font-bold text-bot-text">Domains</h2>
+      <p className="text-caption text-bot-muted mb-4">
+        Add a domain to automatically configure nginx and SSL.
+      </p>
 
+      <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5 space-y-4">
         {loading ? (
           <p className="text-caption text-bot-muted">Loading…</p>
         ) : domains.length === 0 ? (
           <p className="text-caption text-bot-muted italic">No custom domains configured.</p>
         ) : (
-          <div className="rounded-lg border border-bot-border overflow-hidden mb-4">
+          <div className="rounded-lg border border-bot-border overflow-hidden">
             <table className="w-full text-caption">
               <thead className="bg-bot-surface border-b border-bot-border">
                 <tr>
@@ -187,12 +187,12 @@ export function DomainsSection() {
             value={newHostname}
             onChange={(e) => setNewHostname(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); }}
-            className="flex-1 rounded-lg border border-bot-border bg-bot-elevated px-3 py-1.5 text-caption text-bot-text outline-none focus:border-bot-accent"
+            className="flex-1 rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-caption text-bot-text outline-none focus:border-bot-accent"
           />
           <button
             onClick={handleAdd}
             disabled={adding || !newHostname.trim()}
-            className="flex items-center gap-1 px-3 py-1.5 rounded text-caption font-medium bg-bot-accent text-white hover:opacity-90 disabled:opacity-50"
+            className="flex items-center gap-1 px-4 py-2 rounded-lg text-body font-medium bg-bot-accent text-white hover:opacity-90 disabled:opacity-50"
           >
             {adding ? (
               <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Setting up…</>
@@ -201,13 +201,13 @@ export function DomainsSection() {
             )}
           </button>
         </div>
-
-        {msg && (
-          <p className={`text-caption mt-2 ${msg.ok ? "text-bot-green" : "text-bot-red"}`}>
-            {msg.text}
-          </p>
-        )}
       </div>
+
+      {msg && (
+        <p className={`text-caption mt-2 ${msg.ok ? "text-bot-green" : "text-bot-red"}`}>
+          {msg.text}
+        </p>
+      )}
     </div>
   );
 }

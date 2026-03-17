@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import db from "@/lib/db";
-import { getUserSettings, updateUserSettings } from "@/lib/claude-db";
+import { getUserSettings, updateUserSettings, assignUserToGroup, getGroup } from "@/lib/claude-db";
 
 function generatePassword(): string {
   const len = Math.floor(Math.random() * 47) + 80; // 80–126 chars
@@ -25,8 +25,13 @@ export async function GET() {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const users = db.prepare("SELECT email, is_admin, first_name, last_name, avatar_url, created_at FROM users ORDER BY created_at ASC").all() as Array<{ email: string; is_admin: number; first_name: string; last_name: string; avatar_url: string | null; created_at: string }>;
-  // Attach experience_level from user_settings for each user
+  const users = db.prepare(`
+    SELECT u.email, u.is_admin, u.first_name, u.last_name, u.avatar_url, u.created_at, u.group_id,
+           g.name as group_name, g.color as group_color, g.icon as group_icon
+    FROM users u
+    LEFT JOIN user_groups g ON g.id = u.group_id
+    ORDER BY u.created_at ASC
+  `).all() as Array<{ email: string; is_admin: number; first_name: string; last_name: string; avatar_url: string | null; created_at: string; group_id: string | null; group_name: string | null; group_color: string | null; group_icon: string | null }>;
   const usersWithLevel = users.map((u) => {
     const settings = getUserSettings(u.email);
     return { ...u, experience_level: settings.experience_level };
@@ -47,14 +52,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: { email: string };
+  let body: { email: string; firstName?: string; lastName?: string; groupId?: string | null };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { email } = body;
+  const { email, firstName = '', lastName = '', groupId } = body;
   if (!email || typeof email !== "string") {
     return NextResponse.json({ error: "Missing email" }, { status: 400 });
   }
@@ -64,9 +69,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "User already exists" }, { status: 409 });
   }
 
+  if (groupId !== undefined && groupId !== null) {
+    const grp = getGroup(groupId);
+    if (!grp) return NextResponse.json({ error: "Group not found" }, { status: 404 });
+  }
+
   const password = generatePassword();
   const hash = await bcrypt.hash(password, 12);
-  db.prepare("INSERT INTO users (email, hash, is_admin) VALUES (?, ?, 0)").run(email, hash);
+  db.prepare("INSERT INTO users (email, hash, is_admin, first_name, last_name, group_id) VALUES (?, ?, 0, ?, ?, ?)").run(email, hash, firstName, lastName, groupId ?? null);
 
   return NextResponse.json({ email, password });
 }
@@ -118,14 +128,14 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: { email: string; newEmail?: string; is_admin?: boolean; resetPassword?: boolean; experience_level?: string };
+  let body: { email: string; newEmail?: string; is_admin?: boolean; resetPassword?: boolean; experience_level?: string; first_name?: string; last_name?: string; group_id?: string | null };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { email, newEmail, is_admin, resetPassword, experience_level } = body;
+  const { email, newEmail, is_admin, resetPassword, experience_level, first_name, last_name, group_id } = body;
   if (!email || typeof email !== "string") {
     return NextResponse.json({ error: "Missing email" }, { status: 400 });
   }
@@ -182,6 +192,22 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: "Invalid experience_level" }, { status: 400 });
     }
     updateUserSettings(effectiveEmail, { experience_level });
+  }
+
+  if (first_name !== undefined) {
+    db.prepare("UPDATE users SET first_name = ? WHERE email = ?").run(first_name, effectiveEmail);
+  }
+
+  if (last_name !== undefined) {
+    db.prepare("UPDATE users SET last_name = ? WHERE email = ?").run(last_name, effectiveEmail);
+  }
+
+  if (group_id !== undefined) {
+    if (group_id !== null) {
+      const grp = getGroup(group_id);
+      if (!grp) return NextResponse.json({ error: "Group not found" }, { status: 404 });
+    }
+    assignUserToGroup(effectiveEmail, group_id);
   }
 
   return NextResponse.json({ ok: true, email: effectiveEmail, ...result });

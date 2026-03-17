@@ -527,6 +527,41 @@ const migrations: Record<number, () => void> = {
   7: () => {
     addColumnSafe("sessions", "context_journal", "TEXT");
   },
+  9: () => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS secret_metadata (
+        key         TEXT PRIMARY KEY,
+        type        TEXT NOT NULL DEFAULT 'secret'
+                      CHECK(type IN ('secret', 'api_key', 'variable')),
+        description TEXT NOT NULL DEFAULT '',
+        created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+  },
+  8: () => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS user_groups (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT NOT NULL DEFAULT '',
+        color TEXT NOT NULL DEFAULT '#6366f1',
+        icon TEXT NOT NULL DEFAULT 'shield',
+        is_system INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS group_permissions (
+        group_id TEXT NOT NULL,
+        category TEXT NOT NULL,
+        permission_key TEXT NOT NULL,
+        permission_value TEXT NOT NULL,
+        PRIMARY KEY (group_id, category, permission_key),
+        FOREIGN KEY (group_id) REFERENCES user_groups(id) ON DELETE CASCADE
+      );
+    `);
+    addColumnSafe("users", "group_id", "TEXT REFERENCES user_groups(id) ON DELETE SET NULL");
+  },
 };
 
 const LATEST_SCHEMA_VERSION = Math.max(...Object.keys(migrations).map(Number));
@@ -537,6 +572,97 @@ for (let v = currentVersion + 1; v <= LATEST_SCHEMA_VERSION; v++) {
     setSchemaVersion(v);
     console.log(`[db] Applied migration ${v}`);
   }
+}
+
+// Seed system groups
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { randomUUID } = require('crypto') as { randomUUID: () => string };
+  const existingGroups = db.prepare("SELECT COUNT(*) as count FROM user_groups").get() as { count: number };
+  if (existingGroups.count === 0) {
+    const adminGroupId = randomUUID();
+    const defaultGroupId = randomUUID();
+
+    db.prepare("INSERT OR IGNORE INTO user_groups (id, name, description, color, icon, is_system) VALUES (?, ?, ?, ?, ?, ?)").run(
+      adminGroupId, 'Administrators', 'Full platform access with all permissions enabled', '#ef4444', 'shield', 1
+    );
+    db.prepare("INSERT OR IGNORE INTO user_groups (id, name, description, color, icon, is_system) VALUES (?, ?, ?, ?, ?, ?)").run(
+      defaultGroupId, 'Default', 'Standard user group with sensible defaults', '#6366f1', 'users', 1
+    );
+
+    const defaultPerms: [string, string, string][] = [
+      ['platform', 'sessions_create', 'true'],
+      ['platform', 'sessions_view_others', 'false'],
+      ['platform', 'sessions_collaborate', 'true'],
+      ['platform', 'templates_view', 'true'],
+      ['platform', 'templates_manage', 'false'],
+      ['platform', 'memories_view', 'true'],
+      ['platform', 'memories_manage', 'true'],
+      ['platform', 'files_browse', 'true'],
+      ['platform', 'files_upload', 'true'],
+      ['platform', 'terminal_access', 'true'],
+      ['ai', 'commands_allowed', '[]'],
+      ['ai', 'commands_blocked', '[]'],
+      ['ai', 'shell_access', 'true'],
+      ['ai', 'full_trust_allowed', 'true'],
+      ['ai', 'directories_allowed', '[]'],
+      ['ai', 'directories_blocked', '[]'],
+      ['ai', 'filetypes_allowed', '[]'],
+      ['ai', 'filetypes_blocked', '[]'],
+      ['ai', 'read_only', 'false'],
+      ['session', 'max_active', '0'],
+      ['session', 'max_turns', '0'],
+      ['session', 'models_allowed', '[]'],
+      ['session', 'delegation_enabled', 'true'],
+      ['session', 'delegation_max_depth', '5'],
+      ['session', 'default_model', ''],
+      ['session', 'default_template', ''],
+      ['prompt', 'system_prompt_append', ''],
+      ['prompt', 'default_context', ''],
+    ];
+    const insertPerm = db.prepare("INSERT OR IGNORE INTO group_permissions (group_id, category, permission_key, permission_value) VALUES (?, ?, ?, ?)");
+    for (const [cat, key, val] of defaultPerms) {
+      insertPerm.run(defaultGroupId, cat, key, val);
+    }
+
+    const adminPerms: [string, string, string][] = [
+      ['platform', 'sessions_create', 'true'],
+      ['platform', 'sessions_view_others', 'true'],
+      ['platform', 'sessions_collaborate', 'true'],
+      ['platform', 'templates_view', 'true'],
+      ['platform', 'templates_manage', 'true'],
+      ['platform', 'memories_view', 'true'],
+      ['platform', 'memories_manage', 'true'],
+      ['platform', 'files_browse', 'true'],
+      ['platform', 'files_upload', 'true'],
+      ['platform', 'terminal_access', 'true'],
+      ['ai', 'commands_allowed', '[]'],
+      ['ai', 'commands_blocked', '[]'],
+      ['ai', 'shell_access', 'true'],
+      ['ai', 'full_trust_allowed', 'true'],
+      ['ai', 'directories_allowed', '[]'],
+      ['ai', 'directories_blocked', '[]'],
+      ['ai', 'filetypes_allowed', '[]'],
+      ['ai', 'filetypes_blocked', '[]'],
+      ['ai', 'read_only', 'false'],
+      ['session', 'max_active', '0'],
+      ['session', 'max_turns', '0'],
+      ['session', 'models_allowed', '[]'],
+      ['session', 'delegation_enabled', 'true'],
+      ['session', 'delegation_max_depth', '10'],
+      ['session', 'default_model', ''],
+      ['session', 'default_template', ''],
+      ['prompt', 'system_prompt_append', ''],
+      ['prompt', 'default_context', ''],
+    ];
+    for (const [cat, key, val] of adminPerms) {
+      insertPerm.run(adminGroupId, cat, key, val);
+    }
+
+    console.log('[db] Seeded system groups: Administrators, Default');
+  }
+} catch (err) {
+  console.error('[db] Failed to seed system groups:', err);
 }
 
 // Reset stale statuses on startup (server restart means no session is running)

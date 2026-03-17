@@ -25,6 +25,7 @@ import {
   Palette,
   FileText,
   Users,
+  Users2,
   Shield,
   Gauge,
   Wallet,
@@ -53,6 +54,8 @@ import { ServicesSection } from "@/components/claude-code/settings/services-sect
 import { PackagesSection } from "@/components/claude-code/settings/packages-section";
 import { SystemServiceManagerSection } from "@/components/claude-code/settings/system-service-manager-section";
 import { SecretsSection } from "@/components/claude-code/settings/secrets-section";
+import { UserManagementSection } from "@/components/claude-code/settings/user-management-section";
+import { UserGroupsSection } from "@/components/claude-code/settings/user-groups-section";
 import { useUserProfile, invalidateProfileCache } from "@/hooks/use-user-profile";
 
 type SectionKey =
@@ -60,7 +63,6 @@ type SectionKey =
   | "bot_identity"
   | "customization"
   | "rate_limits"
-  | "users"
   | "project"
   | "activity_log"
   | "backup"
@@ -77,11 +79,12 @@ type SectionKey =
   | "api_key"
   | "templates"
   | "budgets"
-  | "secrets";
+  | "secrets"
+  | "user_management"
+  | "user_groups";
 
 export function SettingsPanel() {
-  const { data: sessionData } = useSession();
-  const currentEmail = sessionData?.user?.email ?? "";
+  useSession();
   const [settings, setSettings] = useState<ClaudeUserSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState(false);
@@ -93,17 +96,6 @@ export function SettingsPanel() {
   const [isAdmin, setIsAdmin] = useState(false);
   const userProfile = useUserProfile();
   const userExperienceLevel = userProfile.experience_level;
-
-  // Users state
-  const [users, setUsers] = useState<{ email: string; is_admin: number; created_at: string; experience_level?: string }[]>([]);
-  const [newEmail, setNewEmail] = useState("");
-  const [addingUser, setAddingUser] = useState(false);
-  const [newUserPassword, setNewUserPassword] = useState<{ email: string; password: string } | null>(null);
-  const [deletingEmail, setDeletingEmail] = useState<string | null>(null);
-  const [editingUser, setEditingUser] = useState<{ email: string; is_admin: number; experience_level?: string } | null>(null);
-  const [editForm, setEditForm] = useState({ email: "", isAdmin: false, experienceLevel: "expert" });
-  const [savingEdit, setSavingEdit] = useState(false);
-  const [editError, setEditError] = useState<string | null>(null);
 
   // Project state
   const [projectRoot, setProjectRoot] = useState(process.env.NEXT_PUBLIC_CLAUDE_PROJECT_ROOT ?? "");
@@ -190,12 +182,6 @@ export function SettingsPanel() {
   }, []);
 
   useEffect(() => {
-    if (activeSection === "users") {
-      fetch(apiUrl("/api/users"))
-        .then((r) => r.json())
-        .then((data) => setUsers(data.users ?? []))
-        .catch(() => {});
-    }
     if (activeSection === "activity_log" && activityEntries.length === 0) {
       loadActivity(0);
     }
@@ -237,7 +223,7 @@ export function SettingsPanel() {
     const sectionGroups: { label: string; sections: { key: SectionKey }[] }[] = [
       { label: "User", sections: [{ key: "general" }, { key: "notifications" }] },
       { label: "Bot", sections: [{ key: "bot_identity" }, { key: "customization" }, { key: "templates" }] },
-      { label: "Access & Security", sections: [{ key: "users" }, { key: "security" }, { key: "rate_limits" }, { key: "budgets" }, { key: "api_key" }, { key: "secrets" }] },
+      { label: "Access & Security", sections: [{ key: "user_management" }, { key: "user_groups" }, { key: "security" }, { key: "rate_limits" }, { key: "budgets" }, { key: "api_key" }, { key: "secrets" }] },
       { label: "Server", sections: [{ key: "system" }, { key: "services" }, { key: "service_manager" }, { key: "packages" }, { key: "updates" }, { key: "project" }] },
       { label: "Networking & Data", sections: [{ key: "domains" }, { key: "smtp" }, { key: "backup" }, { key: "database" }, { key: "activity_log" }] },
     ];
@@ -274,113 +260,6 @@ export function SettingsPanel() {
       socket.off("claude:settings", onDone);
       setSaving(false);
     }, 5000);
-  }
-
-  async function handleAddUser(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newEmail.trim() || addingUser) return;
-    setAddingUser(true);
-    try {
-      const res = await fetch(apiUrl("/api/users"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: newEmail.trim() }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setNewUserPassword({ email: data.email, password: data.password });
-        setNewEmail("");
-        setUsers((prev) => [...prev, { email: data.email, is_admin: 0, created_at: new Date().toISOString(), experience_level: "expert" }]);
-      }
-    } finally {
-      setAddingUser(false);
-    }
-  }
-
-  async function handleDeleteUser(email: string) {
-    if (deletingEmail === email) {
-      try {
-        const res = await fetch(apiUrl("/api/users"), {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email }),
-        });
-        if (res.ok) {
-          setUsers((prev) => prev.filter((u) => u.email !== email));
-        }
-      } catch { /* ignore */ }
-      setDeletingEmail(null);
-    } else {
-      setDeletingEmail(email);
-    }
-  }
-
-  function startEditUser(user: { email: string; is_admin: number; experience_level?: string }) {
-    setEditingUser(user);
-    setEditForm({ email: user.email, isAdmin: Boolean(user.is_admin), experienceLevel: user.experience_level ?? "expert" });
-    setEditError(null);
-    setDeletingEmail(null);
-  }
-
-  async function handleSaveEdit() {
-    if (!editingUser || savingEdit) return;
-    setSavingEdit(true);
-    setEditError(null);
-    try {
-      const patch: Record<string, unknown> = { email: editingUser.email };
-      if (editForm.email.trim() && editForm.email.trim() !== editingUser.email) {
-        patch.newEmail = editForm.email.trim();
-      }
-      if (editForm.isAdmin !== Boolean(editingUser.is_admin)) {
-        patch.is_admin = editForm.isAdmin;
-      }
-      if (editForm.experienceLevel !== (editingUser.experience_level ?? "expert")) {
-        patch.experience_level = editForm.experienceLevel;
-      }
-      const res = await fetch(apiUrl("/api/users"), {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patch),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setEditError(data.error ?? "Failed to update user");
-        return;
-      }
-      setUsers((prev) =>
-        prev.map((u) =>
-          u.email === editingUser.email
-            ? { ...u, email: data.email, is_admin: editForm.isAdmin ? 1 : 0, experience_level: editForm.experienceLevel }
-            : u
-        )
-      );
-      setEditingUser(null);
-    } finally {
-      setSavingEdit(false);
-    }
-  }
-
-  async function handleResetPassword(email: string) {
-    setSavingEdit(true);
-    setEditError(null);
-    try {
-      const res = await fetch(apiUrl("/api/users"), {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, resetPassword: true }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setEditError(data.error ?? "Failed to reset password");
-        return;
-      }
-      if (data.password) {
-        setNewUserPassword({ email: data.email, password: data.password });
-      }
-      setEditingUser(null);
-    } finally {
-      setSavingEdit(false);
-    }
   }
 
   async function handleSaveProject(e: React.FormEvent) {
@@ -565,7 +444,8 @@ export function SettingsPanel() {
     {
       label: "Access & Security",
       sections: [
-        { key: "users", label: "Users", adminOnly: true, icon: Users },
+        { key: "user_management", label: "User Management", adminOnly: true, icon: Users },
+        { key: "user_groups", label: "User Groups", adminOnly: true, icon: Users2 },
         { key: "security", label: "Security", adminOnly: true, icon: Shield },
         { key: "rate_limits", label: "Rate Limits", adminOnly: true, icon: Gauge },
         { key: "budgets", label: "Budgets", adminOnly: true, icon: Wallet },
@@ -602,7 +482,7 @@ export function SettingsPanel() {
     beginner: ["general", "bot_identity", "notifications"],
     intermediate: [
       "general", "bot_identity", "customization", "rate_limits",
-      "users", "project", "notifications", "activity_log",
+      "user_management", "user_groups", "project", "notifications", "activity_log",
       "backup", "database", "system", "services", "packages", "smtp", "budgets", "api_key",
     ],
     expert: allSections.map((s) => s.key),
@@ -898,146 +778,14 @@ export function SettingsPanel() {
           </div>
         )}
 
-        {/* ── Users ── */}
-        {activeSection === "users" && (
-          <div className="mx-auto max-w-2xl">
-            <h2 className="mb-6 text-subtitle font-bold text-bot-text">Users</h2>
-            {newUserPassword && (
-              <div className="mb-6 rounded-lg border border-bot-green/40 bg-bot-green/10 p-4">
-                <p className="text-body font-medium text-bot-green mb-2">{newUserPassword.email}</p>
-                <p className="text-caption text-bot-muted mb-2">Password (shown once only):</p>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 rounded bg-bot-elevated px-3 py-2 font-mono text-caption text-bot-text break-all">{newUserPassword.password}</code>
-                  <button onClick={() => navigator.clipboard.writeText(newUserPassword.password)} className="shrink-0 rounded px-3 py-2 bg-bot-accent text-white text-caption hover:bg-bot-accent/80 transition-colors">Copy</button>
-                </div>
-                <p className="mt-2 text-caption text-bot-red">This password will not be shown again.</p>
-                <button onClick={() => setNewUserPassword(null)} className="mt-2 text-caption text-bot-muted hover:text-bot-text transition-colors">Dismiss</button>
-              </div>
-            )}
-            <form onSubmit={handleAddUser} className="mb-6 flex gap-2">
-              <input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="new@example.com" className="flex-1 rounded-lg border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text placeholder-bot-muted outline-none focus:border-bot-accent" />
-              <button type="submit" disabled={!newEmail.trim() || addingUser} className="rounded-lg bg-bot-accent px-4 py-2 text-body font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors">
-                {addingUser ? "Adding…" : "Add User"}
-              </button>
-            </form>
-            <div className="rounded-lg border border-bot-border overflow-hidden">
-              {users.length === 0 ? (
-                <p className="px-4 py-6 text-center text-body text-bot-muted">No users yet</p>
-              ) : (
-                users.map((user) => (
-                  <div key={user.email} className="border-b border-bot-border last:border-b-0">
-                    {editingUser?.email === user.email ? (
-                      <div className="px-4 py-4 space-y-3 bg-bot-surface/50">
-                        <div className="space-y-2">
-                          <label className="block text-caption font-medium text-bot-muted">Email</label>
-                          <input
-                            type="email"
-                            value={editForm.email}
-                            onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
-                            className="w-full rounded-lg border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent"
-                          />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-body text-bot-text">Admin role</p>
-                            <p className="text-caption text-bot-muted">Grant full administrative privileges</p>
-                          </div>
-                          <button
-                            type="button"
-                            disabled={user.email === currentEmail}
-                            onClick={() => setEditForm((f) => ({ ...f, isAdmin: !f.isAdmin }))}
-                            className={cn(
-                              "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
-                              editForm.isAdmin ? "bg-bot-accent" : "bg-bot-muted/40",
-                              user.email === currentEmail && "opacity-50 cursor-not-allowed"
-                            )}
-                            title={user.email === currentEmail ? "Cannot change your own admin role" : undefined}
-                          >
-                            <span className={cn("inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform", editForm.isAdmin ? "translate-x-4" : "translate-x-1")} />
-                          </button>
-                        </div>
-                        <div className="space-y-2">
-                          <label className="block text-caption font-medium text-bot-muted">Experience Level</label>
-                          <p className="text-caption text-bot-muted/70">Controls how the assistant communicates with this user and which features are shown.</p>
-                          <div className="grid grid-cols-3 gap-2">
-                            {(["beginner", "intermediate", "expert"] as const).map((lvl) => (
-                              <button
-                                key={lvl}
-                                type="button"
-                                onClick={() => setEditForm((f) => ({ ...f, experienceLevel: lvl }))}
-                                className={cn(
-                                  "rounded-lg border px-3 py-2 text-left text-caption transition-all",
-                                  editForm.experienceLevel === lvl
-                                    ? "border-bot-accent bg-bot-accent/10 text-bot-accent"
-                                    : "border-bot-border/40 text-bot-muted hover:border-bot-accent/40 hover:bg-bot-elevated/30"
-                                )}
-                              >
-                                <span className="font-medium capitalize">{lvl}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        {editError && <p className="text-caption text-bot-red">{editError}</p>}
-                        <div className="flex items-center gap-2 pt-1">
-                          <button
-                            onClick={handleSaveEdit}
-                            disabled={savingEdit}
-                            className="rounded-lg bg-bot-accent px-3 py-1.5 text-caption font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors"
-                          >
-                            {savingEdit ? "Saving…" : "Save"}
-                          </button>
-                          <button
-                            onClick={() => setEditingUser(null)}
-                            disabled={savingEdit}
-                            className="rounded-lg border border-bot-border px-3 py-1.5 text-caption font-medium text-bot-muted hover:text-bot-text transition-colors"
-                          >
-                            Cancel
-                          </button>
-                          <div className="flex-1" />
-                          <button
-                            onClick={() => handleResetPassword(user.email)}
-                            disabled={savingEdit}
-                            className="rounded-lg bg-bot-amber/10 px-3 py-1.5 text-caption font-medium text-bot-amber hover:bg-bot-amber/20 disabled:opacity-50 transition-colors"
-                          >
-                            Reset Password
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-between px-4 py-3">
-                        <div>
-                          <p className="text-body text-bot-text">{user.email}</p>
-                          <p className="text-caption text-bot-muted">
-                            {user.is_admin ? "Admin" : "User"}
-                            {" · "}
-                            <span className="capitalize">{user.experience_level ?? "expert"}</span>
-                            {" · Joined "}
-                            {new Date(user.created_at).toLocaleDateString()}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => startEditUser(user)}
-                            className="rounded px-3 py-1.5 text-caption font-medium text-bot-muted hover:text-bot-accent hover:bg-bot-accent/10 transition-colors"
-                          >
-                            Edit
-                          </button>
-                          {user.email !== currentEmail && (
-                            <button
-                              onClick={() => handleDeleteUser(user.email)}
-                              className={cn("rounded px-3 py-1.5 text-caption font-medium transition-colors", deletingEmail === user.email ? "bg-bot-red text-white" : "text-bot-muted hover:text-bot-red hover:bg-bot-red/10")}
-                            >
-                              {deletingEmail === user.email ? "Confirm Delete" : "Delete"}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
+        {/* ── User Management ── */}
+        {activeSection === "user_management" && (
+          <UserManagementSection />
+        )}
+
+        {/* ── User Groups ── */}
+        {activeSection === "user_groups" && (
+          <UserGroupsSection />
         )}
 
         {/* ── Project ── */}
@@ -1072,7 +820,7 @@ export function SettingsPanel() {
         {activeSection === "activity_log" && (
           <div className="mx-auto max-w-3xl">
             <h2 className="mb-6 text-subtitle font-bold text-bot-text">Activity Log</h2>
-            <div className="rounded-lg border border-bot-border overflow-hidden">
+            <div className="rounded-xl border border-bot-border/30 overflow-hidden">
               {activityEntries.length === 0 && !loadingActivity ? (
                 <p className="px-4 py-6 text-center text-body text-bot-muted">No activity recorded yet</p>
               ) : (
@@ -1121,7 +869,7 @@ export function SettingsPanel() {
           <div className="mx-auto max-w-2xl">
             <h2 className="mb-6 text-subtitle font-bold text-bot-text">Backup & Restore</h2>
             <div className="space-y-6">
-              <div className="rounded-lg border border-bot-border bg-bot-surface p-6">
+              <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5">
                 <div className="flex items-start gap-4">
                   <Download className="h-8 w-8 text-bot-accent shrink-0 mt-0.5" />
                   <div className="flex-1">
@@ -1138,7 +886,7 @@ export function SettingsPanel() {
                   </div>
                 </div>
               </div>
-              <div className="rounded-lg border border-bot-border bg-bot-surface p-6">
+              <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5">
                 <div className="flex items-start gap-4">
                   <Upload className="h-8 w-8 text-bot-amber shrink-0 mt-0.5" />
                   <div className="flex-1">
@@ -1171,7 +919,7 @@ export function SettingsPanel() {
             <h2 className="mb-2 text-subtitle font-bold text-bot-text">System</h2>
 
             {/* Health checks */}
-            <div className="rounded-lg border border-bot-border bg-bot-surface p-5">
+            <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5">
               <div className="flex items-center justify-between mb-4">
                 <p className="text-body font-medium text-bot-text">Health Checks</p>
                 <button onClick={runHealthCheck} disabled={loadingHealth} className="flex items-center gap-1.5 text-caption text-bot-muted hover:text-bot-text transition-colors disabled:opacity-50">
@@ -1206,7 +954,7 @@ export function SettingsPanel() {
             </div>
 
             {/* Resource gauges */}
-            <div className="rounded-lg border border-bot-border bg-bot-surface p-5">
+            <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5">
               <p className="text-body font-medium text-bot-text mb-4">Resources</p>
               {resources ? (
                 <div className="space-y-4">
@@ -1413,7 +1161,7 @@ function DatabaseSection() {
       )}
 
       {/* Overview */}
-      <div className="rounded-lg border border-bot-border bg-bot-surface p-5 space-y-4">
+      <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5 space-y-4">
         <div className="flex items-center gap-2 mb-2">
           <HardDrive className="h-5 w-5 text-bot-accent" />
           <p className="text-body font-medium text-bot-text">Storage</p>
@@ -1439,7 +1187,7 @@ function DatabaseSection() {
       </div>
 
       {/* Row counts */}
-      <div className="rounded-lg border border-bot-border bg-bot-surface p-5">
+      <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5">
         <div className="flex items-center gap-2 mb-3">
           <Database className="h-5 w-5 text-bot-accent" />
           <p className="text-body font-medium text-bot-text">Row Counts</p>
@@ -1455,7 +1203,7 @@ function DatabaseSection() {
       </div>
 
       {/* Message retention */}
-      <div className="rounded-lg border border-bot-border bg-bot-surface p-5 space-y-3">
+      <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5 space-y-3">
         <p className="text-body font-medium text-bot-text">Message Retention</p>
         <p className="text-caption text-bot-muted">
           Automatically delete messages from sessions that haven&apos;t been updated in the specified number of days. Set to 0 to keep messages forever.
@@ -1473,7 +1221,7 @@ function DatabaseSection() {
           <button
             onClick={handleSaveRetention}
             disabled={savingRetention}
-            className="rounded-md bg-bot-accent px-3 py-2 text-caption font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors"
+            className="rounded-lg bg-bot-accent px-3 py-2 text-caption font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors"
           >
             {savingRetention ? "Saving..." : "Save"}
           </button>
@@ -1481,7 +1229,7 @@ function DatabaseSection() {
       </div>
 
       {/* Vacuum */}
-      <div className="rounded-lg border border-bot-border bg-bot-surface p-5 space-y-3">
+      <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5 space-y-3">
         <p className="text-body font-medium text-bot-text">VACUUM</p>
         <p className="text-caption text-bot-muted">
           Reclaim disk space from deleted rows. The database is locked during this operation.
@@ -1492,7 +1240,7 @@ function DatabaseSection() {
         <button
           onClick={handleVacuum}
           disabled={vacuuming}
-          className="inline-flex items-center gap-2 rounded-md bg-bot-accent px-4 py-2 text-body font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors"
+          className="inline-flex items-center gap-2 rounded-lg bg-bot-accent px-4 py-2 text-body font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors"
         >
           {vacuuming ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           {vacuuming ? "Running VACUUM..." : "Run VACUUM"}
@@ -1500,13 +1248,13 @@ function DatabaseSection() {
       </div>
 
       {/* Backups */}
-      <div className="rounded-lg border border-bot-border bg-bot-surface p-5 space-y-4">
+      <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5 space-y-4">
         <div className="flex items-center justify-between">
           <p className="text-body font-medium text-bot-text">Database Backups</p>
           <button
             onClick={handleBackup}
             disabled={backingUp}
-            className="inline-flex items-center gap-2 rounded-md bg-bot-accent px-3 py-2 text-caption font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors"
+            className="inline-flex items-center gap-2 rounded-lg bg-bot-accent px-3 py-2 text-caption font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors"
           >
             {backingUp ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
             {backingUp ? "Creating..." : "Create Backup"}
@@ -1578,30 +1326,28 @@ function BudgetSection() {
   };
 
   return (
-    <div className="space-y-6">
-      <h2 className="text-subtitle font-bold text-bot-text">Budget Limits</h2>
+    <div className="mx-auto max-w-2xl space-y-6">
+      <h2 className="mb-6 text-subtitle font-bold text-bot-text">Budget Limits</h2>
       <p className="text-caption text-bot-muted">Set spending limits for Claude usage. Set to 0 to disable.</p>
 
-      <div className="space-y-4">
-        <div>
-          <label className="mb-1 block text-caption font-medium text-bot-muted">Per-session limit (USD)</label>
-          <input type="number" step="0.01" min="0" value={sessionLimit} onChange={(e) => setSessionLimit(e.target.value)}
-            className="w-48 rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent" />
-        </div>
-        <div>
-          <label className="mb-1 block text-caption font-medium text-bot-muted">Daily limit (USD)</label>
-          <input type="number" step="0.01" min="0" value={dailyLimit} onChange={(e) => setDailyLimit(e.target.value)}
-            className="w-48 rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent" />
-        </div>
-        <div>
-          <label className="mb-1 block text-caption font-medium text-bot-muted">Monthly limit (USD)</label>
-          <input type="number" step="0.01" min="0" value={monthlyLimit} onChange={(e) => setMonthlyLimit(e.target.value)}
-            className="w-48 rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent" />
-        </div>
+      <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5">
+        <label className="mb-1 block text-caption font-medium text-bot-muted">Per-session limit (USD)</label>
+        <input type="number" step="0.01" min="0" value={sessionLimit} onChange={(e) => setSessionLimit(e.target.value)}
+          className="w-48 rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent" />
+      </div>
+      <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5">
+        <label className="mb-1 block text-caption font-medium text-bot-muted">Daily limit (USD)</label>
+        <input type="number" step="0.01" min="0" value={dailyLimit} onChange={(e) => setDailyLimit(e.target.value)}
+          className="w-48 rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent" />
+      </div>
+      <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5">
+        <label className="mb-1 block text-caption font-medium text-bot-muted">Monthly limit (USD)</label>
+        <input type="number" step="0.01" min="0" value={monthlyLimit} onChange={(e) => setMonthlyLimit(e.target.value)}
+          className="w-48 rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent" />
       </div>
 
       <button onClick={handleSave} disabled={saving}
-        className="rounded-md bg-bot-accent px-4 py-2 text-body font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors">
+        className="rounded-lg bg-bot-accent px-4 py-2 text-body font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors">
         {saving ? "Saving..." : saved ? "Saved!" : "Save Budget Limits"}
       </button>
     </div>
@@ -1671,13 +1417,13 @@ function ApiKeySection() {
   if (loading) return <div className="text-bot-muted text-caption">Loading...</div>;
 
   return (
-    <div className="space-y-4">
-      <h3 className="text-subtitle font-bold text-bot-text">Anthropic API Key</h3>
+    <div className="mx-auto max-w-2xl space-y-4">
+      <h2 className="mb-6 text-subtitle font-bold text-bot-text">API Key (SDK)</h2>
       <p className="text-caption text-bot-muted">
         Your Anthropic API key is used to communicate with Claude. Get one at console.anthropic.com.
       </p>
 
-      <div className="space-y-3">
+      <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5 space-y-4">
         <div className="flex items-center gap-3">
           <div className={cn(
             "h-2 w-2 rounded-full",
@@ -1692,7 +1438,7 @@ function ApiKeySection() {
           <div className="flex gap-2">
             <button
               onClick={() => setShowInput(true)}
-              className="rounded-md bg-bot-accent px-3 py-1.5 text-caption font-medium text-white hover:bg-bot-accent/80 transition-colors"
+              className="rounded-lg bg-bot-accent px-3 py-1.5 text-caption font-medium text-white hover:bg-bot-accent/80 transition-colors"
             >
               {hasKey ? "Update Key" : "Add API Key"}
             </button>
@@ -1700,7 +1446,7 @@ function ApiKeySection() {
               <button
                 onClick={handleClear}
                 disabled={saving}
-                className="rounded-md border border-bot-red/40 px-3 py-1.5 text-caption font-medium text-bot-red hover:bg-bot-red/10 transition-colors disabled:opacity-50"
+                className="rounded-lg border border-bot-red/40 px-3 py-1.5 text-caption font-medium text-bot-red hover:bg-bot-red/10 transition-colors disabled:opacity-50"
               >
                 Remove Key
               </button>
@@ -1715,19 +1461,19 @@ function ApiKeySection() {
               value={inputKey}
               onChange={(e) => setInputKey(e.target.value)}
               placeholder="sk-ant-..."
-              className="w-full rounded-xl border border-bot-border/40 bg-bot-elevated/40 px-4 py-2.5 text-body text-bot-text placeholder:text-bot-muted/50 outline-none focus:border-bot-accent/50 focus:shadow-glow-sm transition-all duration-200 transition-colors font-mono"
+              className="w-full rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent font-mono"
             />
             <div className="flex gap-2">
               <button
                 onClick={handleSave}
                 disabled={saving || !inputKey.trim()}
-                className="rounded-md bg-bot-accent px-3 py-1.5 text-caption font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors"
+                className="rounded-lg bg-bot-accent px-3 py-1.5 text-caption font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors"
               >
                 {saving ? "Saving…" : "Save"}
               </button>
               <button
                 onClick={() => { setShowInput(false); setInputKey(""); }}
-                className="rounded-md border border-bot-border px-3 py-1.5 text-caption text-bot-muted hover:bg-bot-elevated transition-colors"
+                className="rounded-lg border border-bot-border px-3 py-1.5 text-caption text-bot-muted hover:bg-bot-elevated transition-colors"
               >
                 Cancel
               </button>

@@ -122,12 +122,12 @@ export function TemplatesSection() {
   const isFormOpen = creating || editing !== null;
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-2xl space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-subtitle font-semibold text-bot-text">Session Templates</h2>
+        <h2 className="text-subtitle font-bold text-bot-text">Templates</h2>
         <button
           onClick={startCreate}
-          className="flex items-center gap-1.5 rounded-md bg-bot-accent px-3 py-1.5 text-caption font-medium text-white hover:bg-bot-accent/80 transition-colors"
+          className="flex items-center gap-1.5 rounded-lg bg-bot-accent px-3 py-1.5 text-caption font-medium text-white hover:bg-bot-accent/80 transition-colors"
         >
           <Plus className="h-3.5 w-3.5" />
           New Template
@@ -142,7 +142,7 @@ export function TemplatesSection() {
       )}
 
       {isFormOpen && (
-        <div className="rounded-lg border border-bot-border bg-bot-elevated p-4 space-y-3">
+        <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5 space-y-4">
           <div className="flex items-center justify-between">
             <span className="text-body font-medium text-bot-text">
               {creating ? "New Template" : "Edit Template"}
@@ -158,13 +158,13 @@ export function TemplatesSection() {
               <label className="mb-1 block text-caption font-medium text-bot-muted">Name</label>
               <input type="text" value={formName} onChange={(e) => setFormName(e.target.value)}
                 placeholder="e.g. Code Review"
-                className="w-full rounded-md border border-bot-border bg-bot-bg px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent" />
+                className="w-full rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent" />
             </div>
             <div>
               <label className="mb-1 block text-caption font-medium text-bot-muted">Icon (emoji)</label>
               <input type="text" value={formIcon} onChange={(e) => setFormIcon(e.target.value)}
                 placeholder="e.g. 🔍"
-                className="w-full rounded-md border border-bot-border bg-bot-bg px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent" />
+                className="w-full rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent" />
             </div>
           </div>
 
@@ -172,7 +172,7 @@ export function TemplatesSection() {
             <label className="mb-1 block text-caption font-medium text-bot-muted">Description</label>
             <input type="text" value={formDescription} onChange={(e) => setFormDescription(e.target.value)}
               placeholder="Brief description"
-              className="w-full rounded-md border border-bot-border bg-bot-bg px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent" />
+              className="w-full rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent" />
           </div>
 
           <div>
@@ -180,7 +180,7 @@ export function TemplatesSection() {
             <textarea value={formSystemPrompt} onChange={(e) => setFormSystemPrompt(e.target.value)}
               placeholder="Instructions for Octoby when using this template..."
               rows={4}
-              className="w-full rounded-md border border-bot-border bg-bot-bg px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent resize-none" />
+              className="w-full rounded-md border border-bot-border bg-bot-elevated px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent resize-none" />
           </div>
 
           <div>
@@ -196,11 +196,11 @@ export function TemplatesSection() {
 
           <div className="flex justify-end gap-2 pt-2">
             <button onClick={() => { setCreating(false); setEditing(null); }}
-              className="rounded-md border border-bot-border px-4 py-2 text-body text-bot-muted hover:bg-bot-surface transition-colors">
+              className="rounded-lg border border-bot-border px-4 py-2 text-body text-bot-muted hover:bg-bot-elevated transition-colors">
               Cancel
             </button>
             <button onClick={handleSave} disabled={!formName.trim() || saving}
-              className="rounded-md bg-bot-accent px-4 py-2 text-body font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors">
+              className="rounded-lg bg-bot-accent px-4 py-2 text-body font-medium text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors">
               {saving ? "Saving…" : creating ? "Create" : "Save"}
             </button>
           </div>
@@ -213,7 +213,7 @@ export function TemplatesSection() {
 
       <div className="space-y-2">
         {templates.map((t) => (
-          <div key={t.id} className="flex items-center gap-3 rounded-lg border border-bot-border bg-bot-elevated px-4 py-3 group">
+          <div key={t.id} className="flex items-center gap-3 rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm px-4 py-3 group">
             <span className="text-lg">{t.icon ?? "📋"}</span>
             <div className="min-w-0 flex-1">
               <p className="text-body font-medium text-bot-text">{t.name}</p>

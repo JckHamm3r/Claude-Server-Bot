@@ -57,6 +57,8 @@ interface SDKSessionState {
   delegationDepth: number;
   parentSessionId: string | null;
   onSubAgentCost: ((costUsd: number) => void) | null;
+  // Group permissions (loaded at session creation)
+  groupPermissions?: import("../claude-db").GroupPermissions | null;
 }
 
 const sessions = new Map<string, SDKSessionState>();
@@ -463,6 +465,49 @@ async function startStreamingSession(
       }
 
       // Continue with existing permission logic...
+      // Apply group-level security checks before asking for user approval
+      if (state.groupPermissions && !state.skipPermissions) {
+        // Check guard rails with group permissions (directory/filetype restrictions)
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { checkProtectedPath } = require("../security-guard") as {
+            checkProtectedPath: (toolName: string, toolInput: unknown, groupPerms?: import("../claude-db").GroupPermissions | null) => { blocked: boolean; reason?: string };
+          };
+          const pathCheck = checkProtectedPath(toolName, toolInput, state.groupPermissions);
+          if (pathCheck.blocked) {
+            state.emitter.emit("output", {
+              type: "security_blocked",
+              toolName,
+              reason: pathCheck.reason ?? "Blocked by group policy",
+            } as ParsedOutput);
+            return { behavior: "deny" as const, message: pathCheck.reason ?? "Blocked by group policy" };
+          }
+        } catch { /* ignore security check errors */ }
+
+        // For Bash/Shell tools, check command-level group restrictions
+        if ((toolName === "Bash" || toolName === "Shell") && toolInput.command) {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { classifyCommand } = require("../command-sandbox") as {
+              classifyCommand: (cmd: string, opts?: { skipPermissions?: boolean }, groupAiPerms?: { commands_allowed: string[]; commands_blocked: string[]; shell_access: boolean } | null) => { category: string; reason?: string };
+            };
+            const classification = classifyCommand(
+              String(toolInput.command),
+              {},
+              state.groupPermissions.ai
+            );
+            if (classification.category === "blocked" || classification.category === "custom_blocked") {
+              state.emitter.emit("output", {
+                type: "security_blocked",
+                toolName,
+                reason: classification.reason ?? "Command blocked by group policy",
+              } as ParsedOutput);
+              return { behavior: "deny" as const, message: classification.reason ?? "Command blocked by group policy" };
+            }
+          } catch { /* ignore */ }
+        }
+      }
+
       if (state.allowedTools.has(toolName)) {
         return { behavior: "allow" as const, updatedInput: toolInput };
       }
@@ -985,6 +1030,24 @@ export const sdkProvider: ClaudeCodeProvider = {
     if (opts.delegationDepth !== undefined) state.delegationDepth = opts.delegationDepth;
     if (opts.parentSessionId) state.parentSessionId = opts.parentSessionId;
     if (opts.onSubAgentCost) state.onSubAgentCost = opts.onSubAgentCost;
+
+    // Load group permissions for this user (skip for admins — they bypass group restrictions)
+    if (opts.userEmail && !opts.skipPermissions) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { getUserGroupPermissions, isUserAdmin } = require("../claude-db") as {
+          getUserGroupPermissions: (email: string) => import("../claude-db").GroupPermissions;
+          isUserAdmin: (email: string) => boolean;
+        };
+        if (!isUserAdmin(opts.userEmail)) {
+          state.groupPermissions = getUserGroupPermissions(opts.userEmail);
+        } else {
+          state.groupPermissions = null;
+        }
+      } catch {
+        state.groupPermissions = null;
+      }
+    }
   },
 
   sendMessage(sessionId, message, opts) {

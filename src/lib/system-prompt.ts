@@ -18,6 +18,8 @@ interface BuildSystemPromptOpts {
   includeAgentTools?: boolean;
   /** When set, injects per-session context journal and the save instruction. */
   sessionId?: string;
+  /** Optional text appended after the template/identity block and before project CLAUDE.md. */
+  groupPromptAppend?: string;
 }
 
 function getExperienceLevelInstruction(level: string, autoSummary: boolean): string {
@@ -121,6 +123,7 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
     autoSummary = true,
     includeAgentTools = true,
     sessionId,
+    groupPromptAppend,
   } = opts;
 
   let systemPrompt: string | undefined;
@@ -144,6 +147,14 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
     systemPrompt = systemPrompt
       ? templateSystemPrompt + "\n\n" + systemPrompt
       : templateSystemPrompt;
+  }
+
+  // Inject group-level context/instructions if provided
+  if (groupPromptAppend) {
+    const groupSection = `\n## Group Context\n${groupPromptAppend}`;
+    systemPrompt = systemPrompt
+      ? systemPrompt + "\n\n" + groupSection
+      : groupSection;
   }
 
   // Append CLAUDE.md from project root (if present) so the SDK agent

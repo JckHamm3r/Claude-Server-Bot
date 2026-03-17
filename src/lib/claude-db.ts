@@ -1428,3 +1428,262 @@ export function updateSessionContext(sessionId: string, context: string): void {
 export function clearSessionContext(sessionId: string): void {
   db.prepare("UPDATE sessions SET context_journal = NULL, updated_at = datetime('now') WHERE id = ?").run(sessionId);
 }
+
+// ==================== GROUP MANAGEMENT ====================
+
+export interface UserGroup {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  icon: string;
+  is_system: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GroupPermissions {
+  platform: {
+    sessions_create: boolean;
+    sessions_view_others: boolean;
+    sessions_collaborate: boolean;
+    templates_view: boolean;
+    templates_manage: boolean;
+    memories_view: boolean;
+    memories_manage: boolean;
+    files_browse: boolean;
+    files_upload: boolean;
+    terminal_access: boolean;
+  };
+  ai: {
+    commands_allowed: string[];
+    commands_blocked: string[];
+    shell_access: boolean;
+    full_trust_allowed: boolean;
+    directories_allowed: string[];
+    directories_blocked: string[];
+    filetypes_allowed: string[];
+    filetypes_blocked: string[];
+    read_only: boolean;
+  };
+  session: {
+    max_active: number;
+    max_turns: number;
+    models_allowed: string[];
+    delegation_enabled: boolean;
+    delegation_max_depth: number;
+    default_model: string;
+    default_template: string;
+  };
+  prompt: {
+    system_prompt_append: string;
+    default_context: string;
+  };
+}
+
+export const DEFAULT_GROUP_PERMISSIONS: GroupPermissions = {
+  platform: {
+    sessions_create: true,
+    sessions_view_others: false,
+    sessions_collaborate: true,
+    templates_view: true,
+    templates_manage: false,
+    memories_view: true,
+    memories_manage: true,
+    files_browse: true,
+    files_upload: true,
+    terminal_access: true,
+  },
+  ai: {
+    commands_allowed: [],
+    commands_blocked: [],
+    shell_access: true,
+    full_trust_allowed: true,
+    directories_allowed: [],
+    directories_blocked: [],
+    filetypes_allowed: [],
+    filetypes_blocked: [],
+    read_only: false,
+  },
+  session: {
+    max_active: 0,
+    max_turns: 0,
+    models_allowed: [],
+    delegation_enabled: true,
+    delegation_max_depth: 5,
+    default_model: '',
+    default_template: '',
+  },
+  prompt: {
+    system_prompt_append: '',
+    default_context: '',
+  },
+};
+
+function parsePermValue(value: string, type: 'bool' | 'int' | 'array' | 'string'): boolean | number | string[] | string {
+  if (type === 'bool') return value === 'true';
+  if (type === 'int') return parseInt(value, 10) || 0;
+  if (type === 'array') { try { return JSON.parse(value) as string[]; } catch { return []; } }
+  return value;
+}
+
+export function getGroupPermissions(groupId: string): GroupPermissions {
+  const rows = db.prepare(
+    "SELECT category, permission_key, permission_value FROM group_permissions WHERE group_id = ?"
+  ).all(groupId) as Array<{ category: string; permission_key: string; permission_value: string }>;
+
+  const perms: GroupPermissions = JSON.parse(JSON.stringify(DEFAULT_GROUP_PERMISSIONS));
+
+  for (const row of rows) {
+    const { category, permission_key: key, permission_value: value } = row;
+    if (category === 'platform') {
+      const k = key as keyof GroupPermissions['platform'];
+      if (k in perms.platform) (perms.platform as Record<string, unknown>)[k] = parsePermValue(value, 'bool');
+    } else if (category === 'ai') {
+      if (['commands_allowed', 'commands_blocked', 'directories_allowed', 'directories_blocked', 'filetypes_allowed', 'filetypes_blocked'].includes(key)) {
+        (perms.ai as Record<string, unknown>)[key] = parsePermValue(value, 'array');
+      } else if (['shell_access', 'full_trust_allowed', 'read_only'].includes(key)) {
+        (perms.ai as Record<string, unknown>)[key] = parsePermValue(value, 'bool');
+      }
+    } else if (category === 'session') {
+      if (['models_allowed'].includes(key)) {
+        (perms.session as Record<string, unknown>)[key] = parsePermValue(value, 'array');
+      } else if (['delegation_enabled'].includes(key)) {
+        (perms.session as Record<string, unknown>)[key] = parsePermValue(value, 'bool');
+      } else if (['max_active', 'max_turns', 'delegation_max_depth'].includes(key)) {
+        (perms.session as Record<string, unknown>)[key] = parsePermValue(value, 'int');
+      } else {
+        (perms.session as Record<string, unknown>)[key] = parsePermValue(value, 'string');
+      }
+    } else if (category === 'prompt') {
+      (perms.prompt as Record<string, unknown>)[key] = parsePermValue(value, 'string');
+    }
+  }
+
+  return perms;
+}
+
+export function getUserGroupPermissions(email: string): GroupPermissions {
+  try {
+    const row = db.prepare("SELECT group_id FROM users WHERE email = ?").get(email) as { group_id: string | null } | undefined;
+    if (!row?.group_id) return DEFAULT_GROUP_PERMISSIONS;
+    return getGroupPermissions(row.group_id);
+  } catch {
+    return DEFAULT_GROUP_PERMISSIONS;
+  }
+}
+
+export function getUserGroup(email: string): UserGroup | null {
+  try {
+    const row = db.prepare("SELECT g.* FROM user_groups g JOIN users u ON u.group_id = g.id WHERE u.email = ?").get(email) as UserGroup | undefined;
+    return row ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function listGroups(): Array<UserGroup & { member_count: number }> {
+  try {
+    return db.prepare(`
+      SELECT g.*, COUNT(u.email) as member_count
+      FROM user_groups g
+      LEFT JOIN users u ON u.group_id = g.id
+      GROUP BY g.id
+      ORDER BY g.is_system DESC, g.name ASC
+    `).all() as Array<UserGroup & { member_count: number }>;
+  } catch {
+    return [];
+  }
+}
+
+export function getGroup(id: string): UserGroup | null {
+  try {
+    return db.prepare("SELECT * FROM user_groups WHERE id = ?").get(id) as UserGroup | undefined ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function createGroup(id: string, name: string, description: string, color: string, icon: string): UserGroup {
+  db.prepare(
+    "INSERT INTO user_groups (id, name, description, color, icon, is_system) VALUES (?, ?, ?, ?, ?, 0)"
+  ).run(id, name, description, color, icon);
+  const defaultPerms = Object.entries(DEFAULT_GROUP_PERMISSIONS).flatMap(([cat, keys]) =>
+    Object.entries(keys as Record<string, unknown>).map(([key, val]) => {
+      let strVal: string;
+      if (Array.isArray(val)) strVal = JSON.stringify(val);
+      else strVal = String(val);
+      return [cat, key, strVal];
+    })
+  );
+  const insertPerm = db.prepare("INSERT OR IGNORE INTO group_permissions (group_id, category, permission_key, permission_value) VALUES (?, ?, ?, ?)");
+  for (const [cat, key, val] of defaultPerms) {
+    insertPerm.run(id, cat, key, val);
+  }
+  return getGroup(id)!;
+}
+
+export function updateGroup(id: string, updates: Partial<Pick<UserGroup, 'name' | 'description' | 'color' | 'icon'>>): void {
+  const fields = Object.entries(updates).map(([k]) => `${k} = ?`).join(', ');
+  const values = Object.values(updates);
+  if (fields) {
+    db.prepare(`UPDATE user_groups SET ${fields}, updated_at = datetime('now') WHERE id = ?`).run(...values, id);
+  }
+}
+
+export function deleteGroup(id: string): void {
+  db.prepare("UPDATE users SET group_id = NULL WHERE group_id = ?").run(id);
+  db.prepare("DELETE FROM user_groups WHERE id = ? AND is_system = 0").run(id);
+}
+
+export function setGroupPermission(groupId: string, category: string, key: string, value: string): void {
+  db.prepare(
+    "INSERT INTO group_permissions (group_id, category, permission_key, permission_value) VALUES (?, ?, ?, ?) ON CONFLICT(group_id, category, permission_key) DO UPDATE SET permission_value = excluded.permission_value"
+  ).run(groupId, category, key, value);
+  db.prepare("UPDATE user_groups SET updated_at = datetime('now') WHERE id = ?").run(groupId);
+}
+
+export function setGroupPermissions(groupId: string, permissions: Partial<{
+  [category: string]: Record<string, unknown>;
+}>): void {
+  const stmt = db.prepare(
+    "INSERT INTO group_permissions (group_id, category, permission_key, permission_value) VALUES (?, ?, ?, ?) ON CONFLICT(group_id, category, permission_key) DO UPDATE SET permission_value = excluded.permission_value"
+  );
+  for (const [cat, keys] of Object.entries(permissions)) {
+    for (const [key, val] of Object.entries(keys as Record<string, unknown>)) {
+      let strVal: string;
+      if (Array.isArray(val)) strVal = JSON.stringify(val);
+      else strVal = String(val);
+      stmt.run(groupId, cat, key, strVal);
+    }
+  }
+  db.prepare("UPDATE user_groups SET updated_at = datetime('now') WHERE id = ?").run(groupId);
+}
+
+export function listGroupMembers(groupId: string): Array<{ email: string; first_name: string; last_name: string; is_admin: number; avatar_url: string | null }> {
+  try {
+    return db.prepare("SELECT email, first_name, last_name, is_admin, avatar_url FROM users WHERE group_id = ? ORDER BY email ASC").all(groupId) as Array<{ email: string; first_name: string; last_name: string; is_admin: number; avatar_url: string | null }>;
+  } catch {
+    return [];
+  }
+}
+
+export function assignUserToGroup(email: string, groupId: string | null): void {
+  db.prepare("UPDATE users SET group_id = ? WHERE email = ?").run(groupId, email);
+}
+
+export function cloneGroup(sourceId: string, newId: string, newName: string): UserGroup {
+  const source = getGroup(sourceId);
+  if (!source) throw new Error('Source group not found');
+
+  db.prepare(
+    "INSERT INTO user_groups (id, name, description, color, icon, is_system) VALUES (?, ?, ?, ?, ?, 0)"
+  ).run(newId, newName, source.description, source.color, source.icon);
+
+  db.prepare(`
+    INSERT INTO group_permissions (group_id, category, permission_key, permission_value)
+    SELECT ?, category, permission_key, permission_value FROM group_permissions WHERE group_id = ?
+  `).run(newId, sourceId);
+
+  return getGroup(newId)!;
+}
