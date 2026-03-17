@@ -25,6 +25,7 @@ import { SecuritySection } from "@/components/claude-code/settings/security-sect
 import { TemplatesSection } from "@/components/claude-code/settings/templates-section";
 import { CustomizationSection } from "@/components/claude-code/settings/customization-section";
 import { ServicesSection } from "@/components/claude-code/settings/services-section";
+import { PackagesSection } from "@/components/claude-code/settings/packages-section";
 import { useUserProfile, invalidateProfileCache } from "@/hooks/use-user-profile";
 
 type SectionKey =
@@ -39,6 +40,7 @@ type SectionKey =
   | "database"
   | "system"
   | "services"
+  | "packages"
   | "updates"
   | "domains"
   | "smtp"
@@ -502,6 +504,7 @@ export function SettingsPanel() {
     { key: "database", label: "Database", adminOnly: true },
     { key: "system", label: "System", adminOnly: true },
     { key: "services", label: "Services", adminOnly: true },
+    { key: "packages", label: "Packages", adminOnly: true },
     { key: "updates", label: "Updates", adminOnly: true },
     { key: "domains", label: "Domains", adminOnly: true },
     { key: "smtp", label: "Email / SMTP", adminOnly: true },
@@ -518,7 +521,7 @@ export function SettingsPanel() {
     intermediate: [
       "general", "bot_identity", "customization", "rate_limits",
       "users", "project", "notifications", "activity_log",
-      "backup", "database", "system", "services", "smtp", "budgets", "api_key",
+      "backup", "database", "system", "services", "packages", "smtp", "budgets", "api_key",
     ],
     expert: allSections.map((s) => s.key),
   };
@@ -1064,6 +1067,9 @@ export function SettingsPanel() {
 
         {/* ── Services ── */}
         {activeSection === "services" && <ServicesSection />}
+
+        {/* ── Packages ── */}
+        {activeSection === "packages" && <PackagesSection />}
 
         {/* ── Updates ── */}
         {activeSection === "updates" && (

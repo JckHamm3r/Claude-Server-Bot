@@ -1,6 +1,13 @@
 "use client";
 
-import { Play, X, CheckCheck, XCircle, Loader2, Trash2 } from "lucide-react";
+import {
+  X,
+  CheckCheck,
+  XCircle,
+  Loader2,
+  Trash2,
+  Zap,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ClaudePlan, ClaudePlanStep } from "@/lib/claude-db";
 import { PlanStepCard } from "./plan-step-card";
@@ -28,15 +35,51 @@ interface PlanStepListProps {
 
 const PLAN_STATUS_CONFIG: Record<
   ClaudePlan["status"],
-  { label: string; className: string }
+  { label: string; dot: string; bar: string }
 > = {
-  drafting: { label: "Drafting", className: "bg-bot-amber/15 text-bot-amber border border-bot-amber/30" },
-  reviewing: { label: "Reviewing", className: "bg-blue-500/15 text-blue-400 border border-blue-500/30" },
-  executing: { label: "Executing", className: "bg-bot-accent/15 text-bot-accent border border-bot-accent/30" },
-  completed: { label: "Completed", className: "bg-bot-green/15 text-bot-green border border-bot-green/30" },
-  failed: { label: "Failed", className: "bg-bot-red/15 text-bot-red border border-bot-red/30" },
-  cancelled: { label: "Cancelled", className: "bg-bot-elevated text-bot-muted border border-bot-border" },
+  drafting:  { label: "Drafting",  dot: "bg-bot-amber animate-pulse", bar: "bg-bot-amber/30" },
+  reviewing: { label: "Reviewing", dot: "bg-blue-400",                bar: "bg-blue-400/30" },
+  executing: { label: "Executing", dot: "bg-bot-accent animate-pulse", bar: "bg-bot-accent/40" },
+  completed: { label: "Completed", dot: "bg-bot-green",               bar: "bg-bot-green/30" },
+  failed:    { label: "Failed",    dot: "bg-bot-red",                 bar: "bg-bot-red/30" },
+  cancelled: { label: "Cancelled", dot: "bg-bot-muted",               bar: "bg-bot-muted/20" },
 };
+
+function ProgressBar({ status, steps }: { status: ClaudePlan["status"]; steps: ClaudePlanStep[] }) {
+  if (!steps.length) return null;
+  const total = steps.length;
+  const done = steps.filter((s) => s.status === "completed").length;
+  const failed = steps.filter((s) => s.status === "failed").length;
+  const executing = steps.filter((s) => s.status === "executing").length;
+  const pct = Math.round((done / total) * 100);
+
+  if (status !== "executing" && status !== "completed" && status !== "failed") return null;
+
+  return (
+    <div className="mt-3">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-[10px] font-medium text-bot-muted/60">
+          {done}/{total} steps complete
+          {executing > 0 && ` · ${executing} running`}
+          {failed > 0 && ` · ${failed} failed`}
+        </span>
+        <span className="text-[10px] font-bold text-bot-accent">{pct}%</span>
+      </div>
+      <div className="h-1 w-full overflow-hidden rounded-full bg-bot-elevated">
+        {failed > 0 && (
+          <div
+            className="h-full rounded-full bg-bot-red/60 transition-all duration-500"
+            style={{ width: `${Math.round(((done + failed) / total) * 100)}%` }}
+          />
+        )}
+        <div
+          className="h-full -mt-1 rounded-full bg-bot-green transition-all duration-500"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
 
 export function PlanStepList({
   plan,
@@ -60,97 +103,117 @@ export function PlanStepList({
 }: PlanStepListProps) {
   const steps = (plan.steps ?? []).slice().sort((a, b) => a.step_order - b.step_order);
   const hasApproved = steps.some((s) => s.status === "approved");
-  const hasPending = steps.some((s) => s.status === "pending");
-  const canExecute = hasApproved && plan.status === "reviewing" && !executing;
-  const statusCfg = PLAN_STATUS_CONFIG[plan.status];
+  const hasPending  = steps.some((s) => s.status === "pending");
+  const canExecute  = hasApproved && plan.status === "reviewing" && !executing;
+  const cfg = PLAN_STATUS_CONFIG[plan.status];
+
+  const approvedCount = steps.filter((s) => s.status === "approved").length;
+  const pendingCount  = steps.filter((s) => s.status === "pending").length;
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Plan header */}
-      <div className="flex flex-col gap-2 rounded-lg border border-bot-border bg-bot-surface p-4">
-        <div className="flex items-start justify-between gap-3">
-          <h2 className="text-subtitle font-semibold text-bot-text leading-snug">
-            {plan.goal}
-          </h2>
-          <span
-            className={cn(
-              "shrink-0 rounded-full px-2.5 py-0.5 text-caption font-medium",
-              statusCfg.className,
-            )}
-          >
-            {statusCfg.label}
-          </span>
-        </div>
+    <div className="flex flex-col gap-3">
+      {/* ── Plan header ────────────────────────────────────────────────── */}
+      <div className="rounded-2xl border border-bot-border/40 bg-bot-surface/60 backdrop-blur-sm shadow-elevated overflow-hidden">
+        {/* Status bar */}
+        <div className={cn("h-0.5 w-full", cfg.bar)} />
 
-        {/* Action buttons */}
-        <div className="flex flex-wrap items-center gap-2 pt-1">
-          {hasPending && (
-            <>
-              <button
-                onClick={onApproveAll}
-                className="flex items-center gap-1.5 rounded bg-bot-green/15 px-3 py-1.5 text-caption font-medium text-bot-green hover:bg-bot-green/25 transition-colors"
-              >
-                <CheckCheck className="h-3.5 w-3.5" />
-                Approve All
-              </button>
-              <button
-                onClick={onRejectAll}
-                className="flex items-center gap-1.5 rounded bg-bot-red/15 px-3 py-1.5 text-caption font-medium text-bot-red hover:bg-bot-red/25 transition-colors"
-              >
-                <XCircle className="h-3.5 w-3.5" />
-                Reject All
-              </button>
-            </>
-          )}
-
-          {canExecute && (
-            <button
-              onClick={onExecute}
-              className="flex items-center gap-1.5 rounded bg-bot-accent px-3 py-1.5 text-caption font-medium text-white hover:bg-bot-accent/80 transition-colors"
-            >
-              <Play className="h-3.5 w-3.5" />
-              Execute Approved Steps
-            </button>
-          )}
-
-          {executing && (
-            <div className="flex items-center gap-1.5 text-caption text-bot-accent">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Executing plan…
+        <div className="p-4">
+          <div className="flex items-start justify-between gap-4">
+            <h2 className="text-subtitle font-semibold text-bot-text leading-snug flex-1">
+              {plan.goal}
+            </h2>
+            <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
+              <span className={cn("h-2 w-2 rounded-full", cfg.dot)} />
+              <span className="text-caption font-medium text-bot-muted">{cfg.label}</span>
             </div>
-          )}
+          </div>
 
-          {(plan.status === "reviewing" || plan.status === "executing") && (
-            <button
-              onClick={onCancel}
-              className="flex items-center gap-1.5 rounded border border-bot-border px-3 py-1.5 text-caption text-bot-muted hover:text-bot-red hover:border-bot-red/40 transition-colors"
-            >
-              <X className="h-3.5 w-3.5" />
-              Cancel Plan
-            </button>
-          )}
+          <ProgressBar status={plan.status} steps={steps} />
 
-          {onDelete && !executing && (
-            <button
-              onClick={onDelete}
-              className="flex items-center gap-1.5 rounded border border-bot-border px-3 py-1.5 text-caption text-bot-muted hover:text-bot-red hover:border-bot-red/40 transition-colors ml-auto"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              Delete
-            </button>
-          )}
+          {/* Action row */}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {hasPending && (
+              <>
+                <button
+                  onClick={onApproveAll}
+                  className="flex items-center gap-1.5 rounded-xl border border-bot-green/30 bg-bot-green/10 px-3 py-1.5 text-caption font-semibold text-bot-green hover:bg-bot-green/20 hover:border-bot-green/50 transition-all duration-150"
+                >
+                  <CheckCheck className="h-3.5 w-3.5" />
+                  Approve All
+                  {pendingCount > 0 && (
+                    <span className="ml-0.5 rounded-full bg-bot-green/20 px-1.5 text-[10px] font-bold">
+                      {pendingCount}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={onRejectAll}
+                  className="flex items-center gap-1.5 rounded-xl border border-bot-red/30 bg-bot-red/10 px-3 py-1.5 text-caption font-semibold text-bot-red hover:bg-bot-red/20 hover:border-bot-red/50 transition-all duration-150"
+                >
+                  <XCircle className="h-3.5 w-3.5" />
+                  Reject All
+                </button>
+              </>
+            )}
+
+            {canExecute && (
+              <button
+                onClick={onExecute}
+                className="flex items-center gap-1.5 rounded-xl gradient-accent px-4 py-1.5 text-caption font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.97] transition-all duration-200"
+              >
+                <Zap className="h-3.5 w-3.5" />
+                Execute
+                {approvedCount > 0 && (
+                  <span className="ml-0.5 rounded-full bg-white/20 px-1.5 text-[10px] font-bold">
+                    {approvedCount}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {executing && (
+              <div className="flex items-center gap-1.5 rounded-xl border border-bot-accent/20 bg-bot-accent/8 px-3 py-1.5">
+                <Loader2 className="h-3 w-3 animate-spin text-bot-accent" />
+                <span className="text-caption font-medium text-bot-accent">Running…</span>
+              </div>
+            )}
+
+            <div className="ml-auto flex items-center gap-1.5">
+              {(plan.status === "reviewing" || plan.status === "executing") && (
+                <button
+                  onClick={onCancel}
+                  className="flex items-center gap-1.5 rounded-xl border border-bot-border/50 px-3 py-1.5 text-caption text-bot-muted hover:border-bot-red/40 hover:text-bot-red transition-all duration-150"
+                >
+                  <X className="h-3.5 w-3.5" />
+                  Cancel
+                </button>
+              )}
+              {onDelete && !executing && (
+                <button
+                  onClick={onDelete}
+                  className="flex h-7 w-7 items-center justify-center rounded-xl border border-bot-border/40 text-bot-muted/50 hover:border-bot-red/40 hover:text-bot-red transition-all duration-150"
+                  title="Delete plan"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Steps */}
-      <div className="flex flex-col gap-2">
-        {steps.length === 0 ? (
-          <p className="text-center text-body text-bot-muted py-8">No steps generated yet.</p>
-        ) : (
-          steps.map((step: ClaudePlanStep, idx: number) => {
+      {/* ── Steps ──────────────────────────────────────────────────────── */}
+      {steps.length === 0 ? (
+        <p className="py-8 text-center text-body text-bot-muted/50">No steps yet.</p>
+      ) : (
+        <div className="relative flex flex-col">
+          {/* Vertical connector line */}
+          <div className="absolute left-[19px] top-8 bottom-8 w-px bg-bot-border/40 pointer-events-none" />
+
+          {steps.map((step: ClaudePlanStep, idx: number) => {
             const progress = stepProgress?.get(step.id);
             return (
-              <div key={step.id} className="flex flex-col gap-1">
+              <div key={step.id} className="flex flex-col">
                 <PlanStepCard
                   step={step}
                   stepNumber={idx + 1}
@@ -178,17 +241,13 @@ export function PlanStepList({
                   onRollbackContinue={pausedStepId === step.id ? onRollbackContinue : undefined}
                   paused={pausedStepId === step.id}
                   canRollback={pausedStepId === step.id ? pausedCanRollback : false}
+                  stepProgress={progress}
                 />
-                {progress && (
-                  <pre className="ml-8 max-h-32 overflow-auto rounded border border-bot-border bg-bot-elevated px-3 py-2 font-mono text-caption text-bot-muted whitespace-pre-wrap break-words">
-                    {progress}
-                  </pre>
-                )}
               </div>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      )}
     </div>
   );
 }

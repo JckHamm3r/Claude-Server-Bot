@@ -52,6 +52,7 @@ interface SDKSessionState {
   activeLocks: Map<string, string[]>; // toolCallId -> file paths
   queuedOperations: Map<string, QueuedOperationResolver>; // toolCallId -> resolver
   userEmail: string;
+  maxTurns: number;
 }
 
 const sessions = new Map<string, SDKSessionState>();
@@ -152,6 +153,7 @@ function getOrCreate(sessionId: string, userEmail = ""): SDKSessionState {
       activeLocks: new Map(),
       queuedOperations: new Map(),
       userEmail,
+      maxTurns: 30,
     });
   }
   const state = sessions.get(sessionId)!;
@@ -333,7 +335,7 @@ async function startStreamingSession(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const options: Record<string, any> = {
     model: state.model,
-    maxTurns: 30,
+    maxTurns: state.maxTurns,
     includePartialMessages: true,
     cwd: projectRoot(),
     persistSession: false,
@@ -935,6 +937,7 @@ export const sdkProvider: ClaudeCodeProvider = {
     state.skipPermissions = opts.skipPermissions ?? false;
     if (opts.systemPrompt) state.systemPrompt = opts.systemPrompt;
     if (opts.model) state.model = opts.model;
+    if (opts.maxTurns) state.maxTurns = opts.maxTurns;
     if (opts.claudeSessionId && !state.claudeSessionId) {
       state.claudeSessionId = opts.claudeSessionId;
     }
