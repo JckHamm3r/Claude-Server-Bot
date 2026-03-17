@@ -33,7 +33,7 @@ function isDenied(key: string): boolean {
 async function requireExpertAdmin(): Promise<NextResponse | { email: string }> {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 }) as NextResponse;
   }
   const email = session.user.email;
 
@@ -42,7 +42,7 @@ async function requireExpertAdmin(): Promise<NextResponse | { email: string }> {
     .get(email) as { is_admin: number } | undefined;
 
   if (!user?.is_admin) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 }) as NextResponse;
   }
 
   const settings = db
@@ -51,10 +51,14 @@ async function requireExpertAdmin(): Promise<NextResponse | { email: string }> {
 
   const level = settings?.experience_level ?? "expert";
   if (level !== "expert") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 }) as NextResponse;
   }
 
   return { email };
+}
+
+function isAuthError(v: NextResponse | { email: string }): v is NextResponse {
+  return v instanceof NextResponse;
 }
 
 function readEnvLines(): string[] {
@@ -100,9 +104,9 @@ function deleteEnvLine(lines: string[], key: string): string[] {
 }
 
 // GET /api/settings/secrets — list keys (never values)
-export async function GET() {
+export async function GET(): Promise<NextResponse> {
   const auth = await requireExpertAdmin();
-  if ("error" in auth) return auth;
+  if (isAuthError(auth)) return auth;
 
   const lines = readEnvLines();
   const parsed = parseEnvLines(lines);
@@ -116,9 +120,9 @@ export async function GET() {
 }
 
 // PUT /api/settings/secrets — create or update a var
-export async function PUT(request: NextRequest) {
+export async function PUT(request: NextRequest): Promise<NextResponse> {
   const auth = await requireExpertAdmin();
-  if ("error" in auth) return auth;
+  if (isAuthError(auth)) return auth;
 
   let body: { key?: string; value?: string };
   try {
@@ -159,9 +163,9 @@ export async function PUT(request: NextRequest) {
 }
 
 // DELETE /api/settings/secrets — remove a var
-export async function DELETE(request: NextRequest) {
+export async function DELETE(request: NextRequest): Promise<NextResponse> {
   const auth = await requireExpertAdmin();
-  if ("error" in auth) return auth;
+  if (isAuthError(auth)) return auth;
 
   let body: { key?: string };
   try {
