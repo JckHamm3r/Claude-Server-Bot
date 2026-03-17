@@ -2,31 +2,52 @@
 
 This project is normally installed via `curl | bash` (see `install.sh`). In the Cursor Cloud testing environment the setup script has **not** been run, so you must bootstrap the dev environment yourself before running or testing anything.
 
-## Quick Start (run these first, every time)
+## Cursor Cloud specific instructions
+
+### 1. Bootstrap (run once per session)
 
 ```bash
-# 1. Install dependencies (project uses pnpm, NOT npm)
-pnpm install
-
-# 2. Create .env from the committed test config (if missing)
+pnpm install          # MUST use pnpm — NOT npm install
 cp -n .env.backup .env
-
-# 3. Start the dev server
-npm run dev
+npm run dev           # starts on port 3000
 ```
 
-The dev server will be ready when you see `✓ Ready` in the output. Typical startup time is ~1-2 seconds.
+Wait for `✓ Ready` in the output before proceeding (~1-2 seconds).
 
-## Accessing the App
+### 2. URL structure — READ THIS BEFORE OPENING ANY URL
 
-The app uses a slug-based URL path. You **cannot** access `http://localhost:3000/` directly — it will 404.
+**CRITICAL: Every URL in this app MUST include the base path prefix. `http://localhost:3000/` alone will 404. `http://localhost:3000/login` will 404. There is NO route that works without the full base path.**
 
-| Item | Value |
-|------|-------|
-| **Base URL** | `http://localhost:3000/2z497sunoicl/SqNBw2gJNow2GhTIfu8Jn70fPjk92MPGyJsZeia8vj3h0uuXCFR2miLZhw9klRwa` |
-| **Login page** | `http://localhost:3000/2z497sunoicl/SqNBw2gJNow2GhTIfu8Jn70fPjk92MPGyJsZeia8vj3h0uuXCFR2miLZhw9klRwa/login` |
-| **Admin email** | `admin@dev.local` |
-| **Admin password** | `TestPassword123!` |
+The base path for the test environment is:
+
+```
+/2z497sunoicl/SqNBw2gJNow2GhTIfu8Jn70fPjk92MPGyJsZeia8vj3h0uuXCFR2miLZhw9klRwa
+```
+
+Construct ALL URLs like this:
+
+```
+http://localhost:3000/2z497sunoicl/SqNBw2gJNow2GhTIfu8Jn70fPjk92MPGyJsZeia8vj3h0uuXCFR2miLZhw9klRwa/<page>
+```
+
+Examples:
+- **Login**: `http://localhost:3000/2z497sunoicl/SqNBw2gJNow2GhTIfu8Jn70fPjk92MPGyJsZeia8vj3h0uuXCFR2miLZhw9klRwa/login`
+- **Home/dashboard**: `http://localhost:3000/2z497sunoicl/SqNBw2gJNow2GhTIfu8Jn70fPjk92MPGyJsZeia8vj3h0uuXCFR2miLZhw9klRwa`
+- **Setup wizard**: `http://localhost:3000/2z497sunoicl/SqNBw2gJNow2GhTIfu8Jn70fPjk92MPGyJsZeia8vj3h0uuXCFR2miLZhw9klRwa/setup`
+- **API routes**: `http://localhost:3000/2z497sunoicl/SqNBw2gJNow2GhTIfu8Jn70fPjk92MPGyJsZeia8vj3h0uuXCFR2miLZhw9klRwa/api/...`
+
+**DO NOT** try `http://localhost:3000/`, `http://localhost:3000/login`, or any path without the prefix — they will ALL return 404.
+
+### 3. Admin login credentials
+
+```
+Email:    admin@dev.local
+Password: TestPassword123!
+```
+
+### 4. If port 3000 is busy
+
+Next.js will auto-pick the next free port (3001, 3002, etc.). Read the terminal output for the actual port and substitute it in the URLs above.
 
 ## Key Environment Details
 
@@ -41,7 +62,7 @@ The app uses a slug-based URL path. You **cannot** access `http://localhost:3000
 ## Common Pitfalls
 
 1. **Using `npm install` instead of `pnpm install`** — will fail or produce a mismatched lockfile. Always use `pnpm install`.
-2. **Hitting `http://localhost:3000/` directly** — returns 404. All routes are behind the slug base path.
+2. **Hitting any URL without the full base path prefix** — returns 404. See section 2 above. EVERY route requires the `/2z497sunoicl/SqNBw2gJNow2GhTIfu8Jn70fPjk92MPGyJsZeia8vj3h0uuXCFR2miLZhw9klRwa` prefix.
 3. **Running `npm start` without building first** — production mode requires `npm run build` before `npm start`. Use `npm run dev` for development.
 4. **Port already in use** — if port 3000 is occupied, Next.js auto-picks the next available port. Check the terminal output for the actual port.
 5. **Missing `.env`** — if the `.env` file is missing, copy from `.env.backup`: `cp .env.backup .env`
