@@ -7,7 +7,6 @@ import path from "path";
 
 const ENV_FILE = path.join(process.cwd(), ".env");
 
-// Vars managed by the install script or framework — never editable via UI
 const DENYLIST = new Set([
   "NEXTAUTH_SECRET",
   "NEXTAUTH_URL",
@@ -30,35 +29,22 @@ function isDenied(key: string): boolean {
   return DENYLIST_PREFIXES.some((p) => key.startsWith(p));
 }
 
-async function requireExpertAdmin(): Promise<NextResponse | { email: string }> {
+async function getExpertAdminEmail(): Promise<string | null> {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 }) as NextResponse;
-  }
+  if (!session?.user?.email) return null;
   const email = session.user.email;
 
   const user = db
     .prepare("SELECT is_admin FROM users WHERE email = ?")
     .get(email) as { is_admin: number } | undefined;
-
-  if (!user?.is_admin) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 }) as NextResponse;
-  }
+  if (!user?.is_admin) return null;
 
   const settings = db
     .prepare("SELECT experience_level FROM user_settings WHERE email = ?")
     .get(email) as { experience_level: string } | undefined;
+  if ((settings?.experience_level ?? "expert") !== "expert") return null;
 
-  const level = settings?.experience_level ?? "expert";
-  if (level !== "expert") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 }) as NextResponse;
-  }
-
-  return { email };
-}
-
-function isAuthError(v: NextResponse | { email: string }): v is NextResponse {
-  return v instanceof NextResponse;
+  return email;
 }
 
 function readEnvLines(): string[] {
@@ -104,9 +90,9 @@ function deleteEnvLine(lines: string[], key: string): string[] {
 }
 
 // GET /api/settings/secrets — list keys (never values)
-export async function GET(): Promise<NextResponse> {
-  const auth = await requireExpertAdmin();
-  if (isAuthError(auth)) return auth;
+export async function GET() {
+  const email = await getExpertAdminEmail();
+  if (!email) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const lines = readEnvLines();
   const parsed = parseEnvLines(lines);
@@ -120,9 +106,9 @@ export async function GET(): Promise<NextResponse> {
 }
 
 // PUT /api/settings/secrets — create or update a var
-export async function PUT(request: NextRequest): Promise<NextResponse> {
-  const auth = await requireExpertAdmin();
-  if (isAuthError(auth)) return auth;
+export async function PUT(request: NextRequest) {
+  const email = await getExpertAdminEmail();
+  if (!email) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   let body: { key?: string; value?: string };
   try {
@@ -163,9 +149,9 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
 }
 
 // DELETE /api/settings/secrets — remove a var
-export async function DELETE(request: NextRequest): Promise<NextResponse> {
-  const auth = await requireExpertAdmin();
-  if (isAuthError(auth)) return auth;
+export async function DELETE(request: NextRequest) {
+  const email = await getExpertAdminEmail();
+  if (!email) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   let body: { key?: string };
   try {
