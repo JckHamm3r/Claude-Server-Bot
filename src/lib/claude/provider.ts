@@ -50,7 +50,7 @@ export interface ParsedOutput {
 }
 
 export interface ClaudeCodeProvider {
-  createSession(sessionId: string, opts?: { skipPermissions?: boolean; systemPrompt?: string; model?: string; claudeSessionId?: string; userEmail?: string }): void;
+  createSession(sessionId: string, opts?: { skipPermissions?: boolean; systemPrompt?: string; model?: string; claudeSessionId?: string; userEmail?: string; maxTurns?: number }): void;
   sendMessage(sessionId: string, message: string, opts?: { skipPermissions?: boolean; model?: string; inputFiles?: string[] }): void;
   interrupt(sessionId: string): void;
   /** Kill active process and remove all state — use for permanent deletion. */
