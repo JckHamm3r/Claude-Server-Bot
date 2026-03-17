@@ -343,6 +343,44 @@ function addColumnSafe(table: string, col: string, def: string) {
 }
 
 const migrations: Record<number, () => void> = {
+  4: () => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS terminal_sessions (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        user_email TEXT NOT NULL,
+        name TEXT NOT NULL DEFAULT 'Terminal',
+        tmux_session_name TEXT NOT NULL,
+        order_index INTEGER NOT NULL DEFAULT 0,
+        is_default INTEGER NOT NULL DEFAULT 0,
+        scrollback_json TEXT NOT NULL DEFAULT '[]',
+        cwd TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        last_active_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_terminal_sessions_user ON terminal_sessions(user_email, order_index);
+
+      CREATE TABLE IF NOT EXISTS terminal_bookmarks (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        terminal_session_id TEXT NOT NULL REFERENCES terminal_sessions(id) ON DELETE CASCADE,
+        line_index INTEGER NOT NULL,
+        label TEXT NOT NULL,
+        color TEXT NOT NULL DEFAULT '#58a6ff',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_terminal_bookmarks_session ON terminal_bookmarks(terminal_session_id);
+
+      CREATE TABLE IF NOT EXISTS terminal_shares (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        terminal_session_id TEXT NOT NULL REFERENCES terminal_sessions(id) ON DELETE CASCADE,
+        owner_email TEXT NOT NULL,
+        invited_email TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(terminal_session_id, invited_email)
+      );
+      CREATE INDEX IF NOT EXISTS idx_terminal_shares_session ON terminal_shares(terminal_session_id);
+      CREATE INDEX IF NOT EXISTS idx_terminal_shares_invited ON terminal_shares(invited_email);
+    `);
+  },
   1: () => {
     addColumnSafe("sessions", "model", "TEXT NOT NULL DEFAULT 'claude-sonnet-4-6'");
     addColumnSafe("sessions", "provider_type", "TEXT NOT NULL DEFAULT 'sdk'");
