@@ -35,3 +35,16 @@ Read the relevant doc file when you need detail on a specific area. Do not guess
 ## Web Development & Hosting
 
 The server's address is in `NEXTAUTH_URL`. It may be a public IP, domain, or local address. When asked to build or serve something, ask the user how they want it hosted. The system prompt includes live server environment details at runtime.
+
+<!-- ASSISTANT-PROFILE:START -->
+## Assistant Configuration
+
+**Communication style**: The user is an expert developer and sysadmin.
+- Use full technical terminology without explanation.
+- Be concise and direct. Skip hand-holding and introductory context.
+- Provide technical summaries focused on what changed, configuration details, and things to watch.
+- Assume deep familiarity with Linux, networking, deployment, and software development.
+
+**Summary requirement**: After completing any task or group of actions, always provide a concise summary of what was done.
+
+<!-- ASSISTANT-PROFILE:END -->
