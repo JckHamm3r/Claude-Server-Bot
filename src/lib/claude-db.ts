@@ -20,6 +20,8 @@ export interface ClaudeSession {
   claude_session_id: string | null;
   /** Set when the session is shared with the current user (not owned by them) */
   shared_by?: string;
+  /** Ephemeral flag: set client-side when this session was just pushed via a live invite */
+  is_new_invite?: boolean;
 }
 
 export interface ClaudeMessage {

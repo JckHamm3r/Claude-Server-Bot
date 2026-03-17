@@ -30,7 +30,7 @@ export function SessionSidebar({
   loading = false,
   collapsed = false,
   onToggleCollapse,
-  currentEmail,
+  currentEmail: _currentEmail,
 }: SessionSidebarProps) {
   const [search, setSearch] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -214,6 +214,8 @@ export function SessionSidebar({
                 "group relative flex items-start gap-2.5 mx-1.5 mb-0.5 rounded-lg px-2.5 py-2.5 transition-all duration-200 cursor-pointer",
                 session.id === activeSessionId
                   ? "bg-bot-accent/10 text-bot-text border-l-2 border-bot-accent shadow-glow-sm"
+                  : session.is_new_invite
+                  ? "bg-bot-accent/5 text-bot-text border-l-2 border-bot-accent/50 hover:bg-bot-accent/10"
                   : "text-bot-muted hover:bg-bot-elevated/50 hover:text-bot-text",
               )}
               onClick={() => editingId !== session.id && onSelect(session)}
@@ -232,6 +234,12 @@ export function SessionSidebar({
                 {session.skip_permissions && (
                   <span title="Skip Permissions mode" className="absolute -right-1.5 -top-1.5">
                     <AlertTriangle className="h-3 w-3 text-bot-red" />
+                  </span>
+                )}
+                {session.is_new_invite && (
+                  <span className="absolute -right-1 -top-1 flex h-2.5 w-2.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-bot-accent opacity-75" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-bot-accent" />
                   </span>
                 )}
               </div>
@@ -265,14 +273,17 @@ export function SessionSidebar({
                 <p className="truncate text-caption text-bot-muted/70">
                   {new Date(session.updated_at).toLocaleDateString()}
                   {session.shared_by ? (
-                    <span className="ml-1.5 inline-flex items-center gap-0.5 rounded-full bg-bot-muted/15 px-1.5 py-px text-[10px] font-medium text-bot-muted border border-bot-border/40" title={`Shared by ${session.shared_by}`}>
-                      <Users className="h-2.5 w-2.5" />
-                      Guest
-                    </span>
-                  ) : currentEmail && session.created_by && session.created_by !== currentEmail ? (
-                    <span className="ml-1.5 inline-flex items-center rounded-full bg-bot-accent/10 px-1.5 py-px text-[10px] font-medium text-bot-accent border border-bot-accent/20">
-                      Owner
-                    </span>
+                    <>
+                      <span className="ml-1.5 inline-flex items-center gap-0.5 rounded-full bg-bot-muted/15 px-1.5 py-px text-[10px] font-medium text-bot-muted border border-bot-border/40" title={`Shared by ${session.shared_by}`}>
+                        <Users className="h-2.5 w-2.5" />
+                        Guest
+                      </span>
+                      {session.is_new_invite && (
+                        <span className="ml-1 inline-flex items-center rounded-full bg-bot-accent px-1.5 py-px text-[10px] font-bold text-white shadow-glow-sm">
+                          New
+                        </span>
+                      )}
+                    </>
                   ) : null}
                   {session.personality && (
                     <span className="ml-1.5 inline-flex items-center rounded-full bg-bot-accent/10 px-1.5 py-px text-[10px] font-medium text-bot-accent">
