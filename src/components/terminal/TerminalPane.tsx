@@ -81,17 +81,21 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, TerminalPaneProps>(
       // Use a polling approach to wait for container to have real dimensions.
       // The container may be in a display:none parent initially (tab not active).
       let fitAttempts = 0;
+      let attachSent = false;
       const MAX_FIT_ATTEMPTS = 20;
       const tryFit = () => {
+        if (attachSent) return; // Guard: only attach once
         fitAttempts++;
         const el = containerRef.current;
         if (el && el.offsetWidth > 10 && el.offsetHeight > 10) {
+          attachSent = true;
           try { fitAddon.fit(); } catch { /* ignore */ }
           const { cols, rows } = term;
           socket.emit("terminal:attach", { tabId, cols, rows });
         } else if (fitAttempts < MAX_FIT_ATTEMPTS) {
           setTimeout(tryFit, 150);
         } else {
+          attachSent = true;
           // Fallback: attach with default dimensions
           socket.emit("terminal:attach", { tabId, cols: 80, rows: 24 });
         }
@@ -116,29 +120,30 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, TerminalPaneProps>(
       const handleScrollback = ({ tabId: tid, lines }: { tabId: string; lines: string[] }) => {
         if (tid !== tabId) return;
         if (attachedRef.current) return; // Only show scrollback on first attach
+        attachedRef.current = true;
         if (lines.length > 0) {
-          term.write("\r\n\x1b[90m── scrollback replay ──\x1b[0m\r\n");
+          term.write("\r\n\x1b[90m── scrollback ──\x1b[0m\r\n");
           term.write(lines.join("\r\n"));
-          term.write("\r\n\x1b[90m── live ──\x1b[0m\r\n");
+          term.write("\r\n");
         }
       };
 
       const handleAttached = ({ tabId: tid }: { tabId: string }) => {
         if (tid !== tabId) return;
-        if (!attachedRef.current) {
+        const wasAlreadyAttached = attachedRef.current;
+        if (!wasAlreadyAttached) {
           attachedRef.current = true;
+          // Force a resize to ensure PTY dimensions match the rendered terminal
+          try {
+            if (fitAddonRef.current) {
+              fitAddonRef.current.fit();
+            }
+            const { cols, rows } = term;
+            if (cols > 1) {
+              socket.emit("terminal:resize", { tabId, cols, rows });
+            }
+          } catch { /* ignore */ }
         }
-        term.write("\x1b[90m[attached]\x1b[0m\r\n");
-        // Force a resize to ensure PTY dimensions match the rendered terminal
-        try {
-          if (fitAddonRef.current) {
-            fitAddonRef.current.fit();
-          }
-          const { cols, rows } = term;
-          if (cols > 1) {
-            socket.emit("terminal:resize", { tabId, cols, rows });
-          }
-        } catch { /* ignore */ }
       };
 
       const handleClosed = ({ tabId: tid }: { tabId: string }) => {
