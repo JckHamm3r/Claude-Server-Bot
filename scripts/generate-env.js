@@ -14,8 +14,8 @@
 //   "email": "admin@example.com",
 //   "projectRoot": "/home/user/project",
 //   "installDir": "/home/user/claude-server-bot",
-//   "botName": "Claude-Bot",
-//   "pathPrefix": "claude-bot"
+//   "botName": "Octoby",
+//   "pathPrefix": "octoby"
 // }
 
 const bcrypt = require("bcryptjs");

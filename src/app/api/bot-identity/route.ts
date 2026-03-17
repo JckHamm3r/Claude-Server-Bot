@@ -16,7 +16,7 @@ export async function GET(_request: NextRequest) {
     .get() as BotSettingsRow | undefined;
 
   const response: Record<string, unknown> = {
-    name: row?.name ?? "Claude Server Bot",
+    name: row?.name ?? "Octoby AI",
     tagline: row?.tagline ?? "Your AI assistant",
     avatar: row?.avatar ?? null,
   };

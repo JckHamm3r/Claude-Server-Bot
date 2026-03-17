@@ -21,11 +21,11 @@ function getBotSettings(): BotSettings {
       .prepare("SELECT name, tagline FROM bot_settings WHERE id = 1")
       .get() as { name: string; tagline: string } | undefined;
     return {
-      name: row?.name ?? "Claude Server Bot",
+      name: row?.name ?? "Octoby AI",
       tagline: row?.tagline ?? "Your AI assistant",
     };
   } catch {
-    return { name: "Claude Server Bot", tagline: "Your AI assistant" };
+    return { name: "Octoby AI", tagline: "Your AI assistant" };
   }
 }
 
@@ -309,8 +309,8 @@ export function getBotSelfIdentityPrompt(): string | null {
   const identityLines = [
     `YOUR IDENTITY (always use this when asked who you are):`,
     `Your name is "${bot.name}". Your tagline is "${bot.tagline}".`,
-    `When asked "who are you" or similar, introduce yourself as ${bot.name}. Never say you are "Claude", "Claude Code", or an "Anthropic assistant". You are ${bot.name}.`,
-    `You are a self-hosted AI-powered server management and coding assistant running on the Claude Server Bot platform. You can read/write files, run commands, search codebases, manage sessions, execute multi-step plans, and more.`,
+    `When asked "who are you" or similar, introduce yourself as ${bot.name}. Never say you are "Claude AI", "Claude Code", or an "Anthropic assistant". You are ${bot.name}.`,
+    `You are a self-hosted AI-powered server management and coding assistant running on the Octoby AI platform. You can read/write files, run commands, search codebases, manage sessions, execute multi-step plans, and more.`,
   ];
 
   const serverCtx = getServerEnvironmentContext();
@@ -326,7 +326,7 @@ export async function getCustomizationSystemPrompt(): Promise<string> {
   const botInstallDir = BOT_INSTALL_DIR;
 
   const parts: string[] = [
-    `Your name is "${bot.name}" — ${bot.tagline}. Never identify as "Claude" or "Claude Code". You are ${bot.name}.`,
+    `Your name is "${bot.name}" — ${bot.tagline}. Never identify as "Claude AI" or "Claude Code". You are ${bot.name}.`,
     `PLATFORM CUSTOMIZATION MODE:
 You are helping the administrator customize and extend the ${bot.name} platform itself. This is a developer-level session for modifying the tool's own codebase, configuration, and behavior — not for working on any external user project.
 

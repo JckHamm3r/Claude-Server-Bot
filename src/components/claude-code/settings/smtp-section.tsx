@@ -144,7 +144,7 @@ export function SmtpSection() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-caption font-medium text-bot-muted mb-1">From Name</label>
-              <input className={inputClass} value={form.from_name} onChange={(e) => set("from_name", e.target.value)} placeholder="Claude Server Bot" />
+              <input className={inputClass} value={form.from_name} onChange={(e) => set("from_name", e.target.value)} placeholder="Octoby AI" />
             </div>
             <div>
               <label className="block text-caption font-medium text-bot-muted mb-1">From Address</label>

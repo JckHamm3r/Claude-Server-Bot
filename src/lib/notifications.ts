@@ -109,8 +109,8 @@ export async function dispatchNotification(
 
   // Email notification
   if (emailEnabled) {
-    const html = `<h2>${title}</h2><p>${body}</p><hr><p style="color:#888;font-size:12px">Claude Server Bot Notification</p>`;
-    await sendMail(recipientEmail, `[Claude Server Bot] ${title}`, html).catch(() => {});
+    const html = `<h2>${title}</h2><p>${body}</p><hr><p style="color:#888;font-size:12px">Octoby AI Notification</p>`;
+    await sendMail(recipientEmail, `[Octoby AI] ${title}`, html).catch(() => {});
   }
 }
 

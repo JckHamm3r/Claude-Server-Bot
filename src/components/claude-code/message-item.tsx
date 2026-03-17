@@ -527,7 +527,7 @@ export const MessageItem = memo(function MessageItem({
     <div className="flex gap-2.5 py-1 group">
       <div className="mt-1 h-8 w-8 shrink-0 rounded-full overflow-hidden ring-1 ring-bot-border/30">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={botAvatarUrl || apiUrl("/avatars/waiting.png")} alt="Claude" className="h-full w-full object-cover" />
+        <img src={botAvatarUrl || apiUrl("/avatars/waiting.png")} alt="Octoby" className="h-full w-full object-cover" />
       </div>
       <div className="min-w-0 flex-1 max-w-[90%]">
         <div className="rounded-2xl rounded-bl-sm glass px-4 py-3 text-body text-bot-text shadow-elevated">

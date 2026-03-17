@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Claude Server Bot — Uninstaller
+#  Octoby AI — Uninstaller
 # ─────────────────────────────────────────────────────────────────────────────
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -23,7 +23,7 @@ usage() {
   echo ""
   echo -e "${BOLD}Usage:${NC} $0 [OPTIONS] [INSTALL_DIR]"
   echo ""
-  echo "  Remove Claude Server Bot and all associated system configuration."
+  echo "  Remove Octoby AI and all associated system configuration."
   echo ""
   echo -e "${BOLD}Options:${NC}"
   echo "  --force       Skip all confirmation prompts"
@@ -58,7 +58,7 @@ if [ ! -d "$INSTALL_DIR" ]; then
 fi
 
 if [ ! -f "$INSTALL_DIR/package.json" ]; then
-  error "Does not look like a Claude Server Bot installation: $INSTALL_DIR"
+  error "Does not look like an Octoby AI installation: $INSTALL_DIR"
   exit 1
 fi
 
@@ -87,7 +87,7 @@ has_sudo() {
 # ═══════════════════════════════════════════════════════════════════════════════
 echo ""
 echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
-echo -e "${BOLD}       Claude Server Bot — Uninstaller${NC}"
+echo -e "${BOLD}       Octoby AI — Uninstaller${NC}"
 echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
 echo ""
 echo -e "  Install directory: ${BOLD}${INSTALL_DIR}${NC}"

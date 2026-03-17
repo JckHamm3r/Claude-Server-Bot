@@ -78,7 +78,7 @@ export function SettingsPanel() {
   const [projectStatus, setProjectStatus] = useState<{ hasClaudeMd: boolean; hasClaudeDir: boolean } | null>(null);
 
   // Bot identity
-  const [botName, setBotName] = useState("Claude Server Bot");
+  const [botName, setBotName] = useState("Octoby AI");
   const [botTagline, setBotTagline] = useState("Your AI assistant");
   const [botAvatar, setBotAvatar] = useState<string | null>(null);
   const [savingIdentity, setSavingIdentity] = useState(false);

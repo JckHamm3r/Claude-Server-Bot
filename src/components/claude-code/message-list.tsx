@@ -70,7 +70,7 @@ function ThinkingBubble({ botAvatarUrl, runStartTime }: { botAvatarUrl?: string 
     <div className="flex gap-3 py-2 justify-start animate-fadeUp">
       <div className="mt-1 h-7 w-7 shrink-0 rounded-full overflow-hidden ring-2 ring-bot-accent/30">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={botAvatarUrl || apiUrl("/avatars/waiting.png")} alt="Claude" width={28} height={28} className="h-full w-full object-cover" />
+        <img src={botAvatarUrl || apiUrl("/avatars/waiting.png")} alt="Octoby" width={28} height={28} className="h-full w-full object-cover" />
       </div>
       <div className="rounded-2xl rounded-bl-sm glass px-4 py-3 flex items-center gap-3">
         <span className="flex gap-1.5 items-center">
@@ -260,7 +260,7 @@ export function MessageList({
             </div>
             <h2 className="text-title font-bold text-bot-text">Start a conversation</h2>
             <p className="text-body text-bot-muted max-w-sm mx-auto">
-              Ask Claude Code to write code, run commands, search your codebase, or explain concepts.
+              Ask Octoby to write code, run commands, search your codebase, or explain concepts.
             </p>
           </div>
 

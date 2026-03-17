@@ -100,7 +100,7 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
   // Browser tab title badge: show count of sessions needing attention
   useEffect(() => {
     const needsAttention = sessions.filter((s) => s.status === "needs_attention").length;
-    const baseTitle = "Claude Bot";
+    const baseTitle = "Octoby AI";
     document.title = needsAttention > 0 ? `(${needsAttention}) ${baseTitle}` : baseTitle;
   }, [sessions]);
 

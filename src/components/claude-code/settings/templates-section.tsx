@@ -178,7 +178,7 @@ export function TemplatesSection() {
           <div>
             <label className="mb-1 block text-caption font-medium text-bot-muted">System Prompt</label>
             <textarea value={formSystemPrompt} onChange={(e) => setFormSystemPrompt(e.target.value)}
-              placeholder="Instructions for Claude when using this template..."
+              placeholder="Instructions for Octoby when using this template..."
               rows={4}
               className="w-full rounded-md border border-bot-border bg-bot-bg px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent resize-none" />
           </div>

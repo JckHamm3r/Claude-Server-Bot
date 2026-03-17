@@ -87,13 +87,13 @@ export function ClaudeBubble({ onOpen, isRunning, botAvatarUrl }: BubbleProps) {
       onClick={handleClick}
       style={{ right: pos.right, bottom: pos.bottom }}
       className="fixed z-50 flex h-14 w-14 items-center justify-center rounded-full bg-bot-elevated border border-bot-border shadow-xl hover:scale-105 active:scale-95 transition-transform select-none cursor-grab active:cursor-grabbing"
-      title="Open Claude Code"
+      title="Open Octoby AI"
     >
       <div className="relative">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={botAvatarUrl || apiUrl("/avatars/waiting.png")}
-          alt="Claude"
+          alt="Octoby"
           width={36}
           height={36}
           className="rounded-full object-cover"

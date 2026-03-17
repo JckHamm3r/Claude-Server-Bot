@@ -7,8 +7,8 @@ import { ToastProvider } from "@/components/ui/toast";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Claude Server Bot",
-  description: "Claude Code interface for your server",
+  title: "Octoby AI",
+  description: "Octoby AI interface for your server",
 };
 
 export default function RootLayout({

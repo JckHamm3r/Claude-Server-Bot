@@ -356,7 +356,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     ? "Connecting..."
     : willQueue
     ? "Type to queue next message..."
-    : "Message Claude Code... (/ for commands, @ for files)";
+    : "Message Octoby... (/ for commands, @ for files)";
 
   return (
     <div className="border-t border-bot-border/30 bg-bot-surface/80 backdrop-blur-md py-3">

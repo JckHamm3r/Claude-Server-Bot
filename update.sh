@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Claude Server Bot — Updater with Rollback Support
+#  Octoby AI — Updater with Rollback Support
 # ─────────────────────────────────────────────────────────────────────────────
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -190,7 +190,7 @@ fi
 
 echo ""
 echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
-echo -e "${BOLD}       Claude Server Bot — Updater${NC}"
+echo -e "${BOLD}       Octoby AI — Updater${NC}"
 echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
 echo ""
 

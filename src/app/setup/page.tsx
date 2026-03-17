@@ -76,7 +76,7 @@ export default function SetupPage() {
   const [nameError, setNameError] = useState("");
 
   // Step 2 — Bot name
-  const [botName, setBotName] = useState("Claude-Bot");
+  const [botName, setBotName] = useState("Octoby");
 
   // Step 3 — API key
   const [apiKey, setApiKey] = useState("");
@@ -111,7 +111,7 @@ export default function SetupPage() {
     fetch(`${bp}/api/bot-identity`)
       .then((r) => r.ok ? r.json() : null)
       .then((data: { name?: string; projectRoot?: string } | null) => {
-        if (data?.name && data.name !== "Claude-Bot") setBotName(data.name);
+        if (data?.name && data.name !== "Octoby") setBotName(data.name);
         if (data?.projectRoot) {
           setProjectRoot(data.projectRoot);
           checkProject(data.projectRoot);
@@ -422,7 +422,7 @@ export default function SetupPage() {
             {step === 3 && (
               <motion.div key="s3" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-6">
                 <div>
-                  <h2 className="text-subtitle font-semibold text-bot-text mb-1">Connect to Claude</h2>
+                  <h2 className="text-subtitle font-semibold text-bot-text mb-1">Connect to Anthropic</h2>
                   <p className="text-body text-bot-muted">
                     Your assistant needs an Anthropic API key to work.{" "}
                     <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" className="text-bot-accent hover:underline">

@@ -23,7 +23,7 @@ function LoginForm() {
   const [loading, setLoading] = useState(false);
   const [shake, setShake] = useState(false);
   const [botIdentity, setBotIdentity] = useState<BotIdentity>({
-    name: "Claude Server Bot",
+    name: "Octoby AI",
     tagline: "Sign in to continue",
     avatar: null,
   });

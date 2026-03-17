@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Claude Server Bot — Interactive Installer v3.0.0
+#  Octoby AI — Interactive Installer v3.0.0
 #
 #  Usage:
 #    bash install.sh                          # Interactive mode
@@ -82,7 +82,7 @@ error()   { echo -e "  ${RED}✗${NC} $*"; }
 hint()    { echo -e "  ${DIM}$*${NC}"; }
 
 header() {
-  local title="${1:-Claude Server Bot}"
+  local title="${1:-Octoby AI}"
   local ver="v${SCRIPT_VERSION}"
   local inner_w=48
   local pad=$((inner_w - ${#title} - ${#ver}))
@@ -523,7 +523,7 @@ parse_args() {
 
 show_help() {
   cat <<'HELP'
-Claude Server Bot — Installer v3.0.0
+Octoby AI — Installer v3.0.0
 
 Usage:
   bash install.sh                          # Interactive mode
@@ -590,7 +590,7 @@ validate_unattended() {
 screen_welcome() {
   CURRENT_SCREEN=1
   clear 2>/dev/null || true
-  header "Claude Server Bot"
+  header "Octoby AI"
   step_indicator 1
 
   detect_platform
@@ -618,8 +618,8 @@ screen_welcome() {
   fi
 
   # Bot display name is set in the web UI wizard after first login.
-  # Default to "Claude-Bot" silently — users personalise it in the UI.
-  BOT_NAME="${CLI_BOT_NAME:-Claude-Bot}"
+  # Default to "Octoby" silently — users personalise it in the UI.
+  BOT_NAME="${CLI_BOT_NAME:-Octoby}"
 
   if [ -n "$CLI_MODE" ]; then
     DEPLOY_MODE="$CLI_MODE"
@@ -1327,7 +1327,7 @@ setup_systemd() {
   node_bin=$(command -v node)
   sudo tee "/etc/systemd/system/${SERVICE_NAME}.service" > /dev/null <<SERVICE
 [Unit]
-Description=Claude Server Bot (${BOT_NAME})
+Description=Octoby AI (${BOT_NAME})
 After=network.target
 StartLimitIntervalSec=300
 StartLimitBurst=5

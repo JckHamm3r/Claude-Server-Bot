@@ -1,6 +1,6 @@
-# Claude Code Server Bot
+# Octoby AI
 
-A self-hosted AI assistant platform powered by Claude. It provides a real-time chat interface, reusable agent configurations, multi-step plan execution, project memory, and a full admin panel -- all installable on any server with a single curl command.
+A self-hosted AI assistant platform powered by Claude AI. It provides a real-time chat interface, reusable agent configurations, multi-step plan execution, project memory, and a full admin panel -- all installable on any server with a single curl command.
 
 ## Technology Stack
 
@@ -16,13 +16,13 @@ A self-hosted AI assistant platform powered by Claude. It provides a real-time c
 
 ## Architecture at a Glance
 
-The app runs on a custom HTTP/HTTPS server (`server.ts`) rather than the default Next.js server. Socket.IO is attached for all real-time Claude interactions -- chat messages, tool approvals, presence, and notifications all flow over WebSocket, not REST. A long-lived `query()` call per session keeps conversation context alive via an AsyncGenerator that feeds messages into the SDK stream. SQLite stores sessions, messages, users, settings, and metrics. The system prompt is composed at session creation from security rules, templates, personality, and project CLAUDE.md.
+The app runs on a custom HTTP/HTTPS server (`server.ts`) rather than the default Next.js server. Socket.IO is attached for all real-time interactions with Claude AI -- chat messages, tool approvals, presence, and notifications all flow over WebSocket, not REST. A long-lived `query()` call per session keeps conversation context alive via an AsyncGenerator that feeds messages into the SDK stream. SQLite stores sessions, messages, users, settings, and metrics. The system prompt is composed at session creation from security rules, templates, personality, and project CLAUDE.md.
 
 ## Feature Index
 
 | Feature | Description | Doc |
 |---------|-------------|-----|
-| Sessions & Chat | Create sessions, chat with Claude, approve tools, search messages, collaborate | [sessions-and-chat.md](sessions-and-chat.md) |
+| Sessions & Chat | Create sessions, chat with Claude AI, approve tools, search messages, collaborate | [sessions-and-chat.md](sessions-and-chat.md) |
 | Agents | Reusable agent configs with model, tools, and AI-powered generation | [agents.md](agents.md) |
 | Plan Mode | Multi-step execution plans with human approval and sequential execution | [plan-mode.md](plan-mode.md) |
 | Memory | Project context files (CLAUDE.md, docs, memory) readable/writable from UI | [memory.md](memory.md) |

@@ -35,8 +35,8 @@ export async function POST(request: NextRequest) {
   try {
     await sendMail(
       to,
-      "Claude Server Bot – SMTP Test",
-      `<p>This is a test email from <strong>Claude Server Bot</strong>.</p>
+      "Octoby AI – SMTP Test",
+      `<p>This is a test email from <strong>Octoby AI</strong>.</p>
        <p>If you received this, your SMTP configuration is working correctly.</p>
        <p style="color:#888;font-size:12px;">Sent at ${new Date().toISOString()}</p>`
     );

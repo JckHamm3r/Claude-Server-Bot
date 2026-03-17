@@ -110,7 +110,7 @@ app.prepare().then(() => {
             res.end(JSON.stringify({ authenticated: false }));
             return;
           }
-          let botName = "Claude";
+          let botName = "Octoby";
           try {
             // eslint-disable-next-line @typescript-eslint/no-require-imports
             const db = require("./src/lib/db").default;

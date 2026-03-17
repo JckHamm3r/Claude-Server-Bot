@@ -140,7 +140,7 @@ for (const migration of [
 db.exec(`
     CREATE TABLE IF NOT EXISTS bot_settings (
       id        INTEGER PRIMARY KEY DEFAULT 1,
-      name      TEXT NOT NULL DEFAULT 'Claude Server Bot',
+      name      TEXT NOT NULL DEFAULT 'Octoby AI',
       avatar    TEXT,
       tagline   TEXT NOT NULL DEFAULT 'Your AI assistant',
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -175,7 +175,7 @@ db.exec(`
 const envBotName = process.env.CLAUDE_BOT_NAME;
 if (envBotName) {
   db.prepare(
-    "UPDATE bot_settings SET name = ? WHERE id = 1 AND name = 'Claude Server Bot'"
+    "UPDATE bot_settings SET name = ? WHERE id = 1 AND name = 'Octoby AI'"
   ).run(envBotName);
 }
 
