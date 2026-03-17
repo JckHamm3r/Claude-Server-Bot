@@ -83,12 +83,12 @@ export const LEVEL_VISIBLE_SETTINGS: Record<ExperienceLevel, string[]> = {
   intermediate: [
     "general", "bot_identity", "customization", "rate_limits",
     "users", "project", "notifications", "activity_log",
-    "backup", "database", "system", "smtp", "budgets", "api_key",
+    "backup", "database", "system", "packages", "smtp", "budgets", "api_key",
   ],
   expert: [
     "general", "bot_identity", "customization", "rate_limits",
     "users", "project", "activity_log", "backup", "database",
-    "system", "updates", "domains", "smtp", "notifications",
+    "system", "updates", "domains", "packages", "smtp", "notifications",
     "security", "api_key", "templates", "budgets",
   ],
 };
