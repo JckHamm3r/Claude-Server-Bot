@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
-import { Users } from "lucide-react";
+import { Users, MessageCircleOff, MessageCircle } from "lucide-react";
 import type { ClaudeSession } from "@/lib/claude-db";
 import { DEFAULT_MODEL, AVAILABLE_MODELS, getModelLabel } from "@/lib/models";
 import { apiUrl } from "@/lib/utils";
@@ -320,6 +320,11 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
         const args = parts.slice(1);
 
         switch (cmd) {
+          case "/chat": {
+            chat.emit("claude:toggle_chat", { sessionId: activeSession.id });
+            return;
+          }
+
           case "/clear": {
             handleClearContext();
             return;
@@ -331,6 +336,7 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
               "",
               "| Command | Description |",
               "|---------|-------------|",
+              "| `/chat` | Toggle AI responses — pause to chat freely, resume to re-enable AI |",
               "| `/compact [focus]` | Compact conversation history to save context |",
               "| `/clear` | Clear conversation context and start fresh |",
               "| `/help` | Show this help message |",
@@ -388,6 +394,7 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
               `- Model: ${modelLabel}\n` +
               `- Skip permissions: ${activeSession.skip_permissions ? "**enabled**" : "off"}\n` +
               `- Context window: ${contextToks > 0 ? `${contextPct}% (${(contextToks / 1000).toFixed(0)}k / ${(contextMax / 1000).toFixed(0)}k tokens)` : "n/a"}\n` +
+              `- AI responses: ${chat.aiPaused ? "**paused** (use `/chat` to resume)" : "active"}\n` +
               `- Status: ${chat.isRunning ? "running" : "idle"}`,
             );
             return;
@@ -565,6 +572,23 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
           </div>
         )}
 
+        {chat.aiPaused && activeSession && (
+          <div className="flex items-center justify-between gap-2 bg-bot-blue/10 border-b border-bot-blue/20 px-4 py-2 text-caption text-bot-blue">
+            <div className="flex items-center gap-2">
+              <MessageCircleOff className="h-4 w-4" />
+              <span className="font-medium">AI paused</span>
+              <span className="text-bot-blue/70">— messages won&apos;t be sent to AI. Type <code className="rounded bg-bot-blue/10 px-1.5 py-0.5 font-mono text-[11px]">/chat</code> to resume.</span>
+            </div>
+            <button
+              onClick={() => chat.emit("claude:toggle_chat", { sessionId: activeSession.id })}
+              className="flex items-center gap-1.5 rounded-md bg-bot-blue/20 px-3 py-1 text-caption font-medium text-bot-blue hover:bg-bot-blue/30 transition-colors"
+            >
+              <MessageCircle className="h-3.5 w-3.5" />
+              Resume AI
+            </button>
+          </div>
+        )}
+
         {!activeSession ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 text-bot-muted">
             <p className="text-body">Select a session or create a new one.</p>
@@ -611,6 +635,7 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
           onSend={handleSendWithAutoName}
           disabled={!chat.connected || !activeSession}
           isRunning={chat.isRunning}
+          aiPaused={chat.aiPaused}
           pendingCount={chat.pendingCount}
           pendingQueue={chat.pendingQueue}
           onEditQueueItem={chat.handleEditQueueItem}

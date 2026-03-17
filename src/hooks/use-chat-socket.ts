@@ -114,6 +114,8 @@ export interface UseChatSocketReturn {
   pendingQueue: string[];
   loadingMessages: boolean;
   runtimeLimited: boolean;
+  aiPaused: boolean;
+  aiPausedBy: string | null;
 
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   setSessionModel: React.Dispatch<React.SetStateAction<string>>;
@@ -175,6 +177,8 @@ export function useChatSocket({
   const [pendingQueue, setPendingQueue] = useState<string[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [runtimeLimited, setRuntimeLimited] = useState(false);
+  const [aiPaused, setAiPaused] = useState(false);
+  const [aiPausedBy, setAiPausedBy] = useState<string | null>(null);
 
   // ── Refs ───────────────────────────────────────────────────────────────
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
@@ -928,6 +932,18 @@ export function useChatSocket({
       setMessages((prev) => [...prev, msg]);
     });
 
+    socket.on("claude:chat_toggled", ({ sessionId, paused, pausedBy }: { sessionId: string; paused: boolean; pausedBy: string | null }) => {
+      if (activeSessionRef.current?.id !== sessionId) return;
+      setAiPaused(paused);
+      setAiPausedBy(pausedBy);
+    });
+
+    socket.on("claude:chat_broadcast", ({ sessionId, message, fromSocketId }: { sessionId: string; message: ChatMessage; fromSocketId: string }) => {
+      if (activeSessionRef.current?.id !== sessionId) return;
+      if (fromSocketId === socket.id) return;
+      setMessages((prev) => [...prev, message]);
+    });
+
     socket.on("security:warn", ({ type: warnType, message: warnMessage }: { type: string; message: string }) => {
       const msg: ChatMessage = {
         id: crypto.randomUUID(),
@@ -976,6 +992,8 @@ export function useChatSocket({
       socket.off("claude:compacting");
       socket.off("claude:compact_done");
       socket.off("security:warn");
+      socket.off("claude:chat_toggled");
+      socket.off("claude:chat_broadcast");
       socket.off("claude:session_status");
       socket.off("claude:session_renamed");
       socket.off("claude:session_removed");
@@ -994,6 +1012,9 @@ export function useChatSocket({
     setIsCompacting(false);
     isCompactingRef.current = false;
     autoCompactFiredRef.current = false;
+    setAiPaused(false);
+    setAiPausedBy(null);
+    emit("claude:get_chat_state", { sessionId: activeSession.id });
     if (!freshSessionsRef.current.has(activeSession.id)) {
       emit("claude:get_messages", { sessionId: activeSession.id });
       emit("claude:get_usage", { sessionId: activeSession.id });
@@ -1195,6 +1216,7 @@ export function useChatSocket({
     contextUsage, isCompacting,
     sessionModel, hasError, pendingInteractions, runStartTime, pendingCount,
     pendingQueue, loadingMessages, runtimeLimited,
+    aiPaused, aiPausedBy,
     setMessages, setSessionModel, setSessionUsage, setIsRunning,
     setCurrentActivity, setLoadingMessages,
     activeSessionRef, initializedSessionsRef, freshSessionsRef, chatInputRef,
