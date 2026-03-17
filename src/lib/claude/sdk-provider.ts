@@ -2,7 +2,7 @@ import { EventEmitter } from "events";
 import * as fs from "fs";
 import * as path from "path";
 import type { ClaudeCodeProvider, ParsedOutput, TokenUsage } from "./provider";
-import { updateClaudeSessionId } from "../claude-db";
+import { updateClaudeSessionId, updateSessionContext } from "../claude-db";
 import { 
   acquireLock, 
   queueOperation, 
@@ -68,7 +68,7 @@ const HEARTBEAT_SILENCE_THRESHOLD_MS = 8_000;
 // ── Session GC ───────────────────────────────────────────────────────────────
 
 const SDK_GC_INTERVAL = 5 * 60 * 1000;
-const SDK_IDLE_THRESHOLD = 30 * 60 * 1000;
+const SDK_IDLE_THRESHOLD = parseInt(process.env.CLAUDE_SDK_IDLE_MS ?? String(30 * 60 * 1000), 10);
 setInterval(() => {
   const now = Date.now();
   for (const [id, state] of sessions) {
@@ -397,7 +397,20 @@ async function startStreamingSession(
         }
       }
 
-      // NEW: File lock check for write operations
+      // Intercept update_session_context — virtual tool for per-session context journal
+      if (toolName === "update_session_context") {
+        const input = toolInput as { context?: string };
+        if (input.context && sessionId) {
+          try {
+            updateSessionContext(sessionId, input.context);
+          } catch (err) {
+            console.error(`[sdk] Failed to update session context for ${sessionId}:`, err);
+          }
+        }
+        return { behavior: "allow" as const, updatedInput: toolInput };
+      }
+
+      // File lock check for write operations
       if (["Write", "StrReplace", "Delete", "Bash", "Shell"].includes(toolName)) {
         const filePaths = extractFilePathsFromTool(toolName, toolInput);
 
@@ -975,8 +988,32 @@ export const sdkProvider: ClaudeCodeProvider = {
   },
 
   sendMessage(sessionId, message, opts) {
-    const state = sessions.get(sessionId);
-    if (!state) return;
+    let state = sessions.get(sessionId);
+    if (!state) {
+      // Session was GC'd — attempt to rebuild from DB.
+      // System prompt rebuild (async) is handled by the message handler layer
+      // via ensureSessionAlive() before calling sendMessage. This path is a
+      // safety net that creates minimal state so the stream can start.
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { getSession: getDbSession } = require("../claude-db") as { getSession: (id: string) => { model: string; skip_permissions: boolean; claude_session_id: string | null; personality: string | null } | null };
+        const dbSession = getDbSession(sessionId);
+        if (!dbSession) {
+          console.error(`[sdk] sendMessage: session ${sessionId} not found in memory or DB`);
+          return;
+        }
+        state = getOrCreate(sessionId);
+        state.model = dbSession.model;
+        state.skipPermissions = dbSession.skip_permissions;
+        if (dbSession.claude_session_id) {
+          state.claudeSessionId = dbSession.claude_session_id;
+        }
+        console.log(`[sdk] Auto-rebuilt session ${sessionId} from DB after GC`);
+      } catch (err) {
+        console.error(`[sdk] Failed to rebuild session ${sessionId}:`, err);
+        return;
+      }
+    }
     state.lastActivity = Date.now();
     const skipPermissions = opts?.skipPermissions ?? state.skipPermissions;
     if (opts?.model) state.model = opts.model;
@@ -1024,6 +1061,7 @@ export const sdkProvider: ClaudeCodeProvider = {
   allowTool(sessionId, toolName, scope, toolCallId) {
     const state = sessions.get(sessionId);
     if (!state) return;
+    state.lastActivity = Date.now();
 
     if (scope === "session") {
       state.allowedTools.add(toolName);
@@ -1050,6 +1088,7 @@ export const sdkProvider: ClaudeCodeProvider = {
   denyPermission(sessionId) {
     const state = sessions.get(sessionId);
     if (!state) return;
+    state.lastActivity = Date.now();
 
     for (const [id, pending] of state.pendingPermissions) {
       pending.resolve({ behavior: "deny", message: "Permission denied by user" });
@@ -1120,5 +1159,9 @@ export const sdkProvider: ClaudeCodeProvider = {
 
   getClaudeSessionId(sessionId) {
     return sessions.get(sessionId)?.claudeSessionId ?? null;
+  },
+
+  hasSession(sessionId) {
+    return sessions.has(sessionId);
   },
 };

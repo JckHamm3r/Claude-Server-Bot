@@ -5,6 +5,23 @@ import { AlertCircle, AlertTriangle, Loader2, MessageSquare, PanelLeftClose, Pan
 import { cn } from "@/lib/utils";
 import type { ClaudeSession } from "@/lib/claude-db";
 
+function relativeTime(dateStr: string): { label: string; isStale: boolean } {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diffMs = now - then;
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHr = Math.floor(diffMin / 60);
+  const diffDay = Math.floor(diffHr / 24);
+
+  if (diffSec < 60) return { label: "just now", isStale: false };
+  if (diffMin < 60) return { label: `${diffMin}m ago`, isStale: false };
+  if (diffHr < 24) return { label: `${diffHr}h ago`, isStale: diffHr >= 1 };
+  if (diffDay === 1) return { label: "yesterday", isStale: true };
+  if (diffDay < 7) return { label: `${diffDay}d ago`, isStale: true };
+  return { label: new Date(dateStr).toLocaleDateString(), isStale: true };
+}
+
 interface SessionSidebarProps {
   sessions: ClaudeSession[];
   activeSessionId: string | null;
@@ -271,7 +288,10 @@ export function SessionSidebar({
                 )}
 
                 <p className="truncate text-caption text-bot-muted/70">
-                  {new Date(session.updated_at).toLocaleDateString()}
+                  {(() => {
+                    const rt = relativeTime(session.updated_at);
+                    return <span className={rt.isStale ? "opacity-50" : ""}>{rt.label}</span>;
+                  })()}
                   {session.shared_by ? (
                     <>
                       <span className="ml-1.5 inline-flex items-center gap-0.5 rounded-full bg-bot-muted/15 px-1.5 py-px text-[10px] font-medium text-bot-muted border border-bot-border/40" title={`Shared by ${session.shared_by}`}>

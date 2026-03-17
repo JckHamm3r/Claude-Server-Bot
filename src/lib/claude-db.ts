@@ -18,6 +18,7 @@ export interface ClaudeSession {
   status: SessionStatus;
   personality: string | null;
   claude_session_id: string | null;
+  context_journal: string | null;
   /** Set when the session is shared with the current user (not owned by them) */
   shared_by?: string;
   /** Ephemeral flag: set client-side when this session was just pushed via a live invite */
@@ -58,6 +59,7 @@ function rowToSession(row: Record<string, unknown>): ClaudeSession {
     status: (row.status as SessionStatus) ?? "idle",
     personality: (row.personality as string | null) ?? null,
     claude_session_id: (row.claude_session_id as string | null) ?? null,
+    context_journal: (row.context_journal as string | null) ?? null,
   };
 }
 
@@ -1402,4 +1404,21 @@ export function getAllQueuedOperations(): QueuedOperation[] {
      WHERE status IN ('queued', 'executing')
      ORDER BY queued_at ASC`
   ).all() as QueuedOperation[];
+}
+
+// ==================== SESSION CONTEXT JOURNAL ====================
+
+export function getSessionContext(sessionId: string): string | null {
+  const row = db.prepare("SELECT context_journal FROM sessions WHERE id = ?").get(sessionId) as { context_journal: string | null } | undefined;
+  return row?.context_journal ?? null;
+}
+
+export function updateSessionContext(sessionId: string, context: string): void {
+  const maxLength = 8000;
+  const trimmed = context.length > maxLength ? context.slice(-maxLength) : context;
+  db.prepare("UPDATE sessions SET context_journal = ?, updated_at = datetime('now') WHERE id = ?").run(trimmed, sessionId);
+}
+
+export function clearSessionContext(sessionId: string): void {
+  db.prepare("UPDATE sessions SET context_journal = NULL, updated_at = datetime('now') WHERE id = ?").run(sessionId);
 }

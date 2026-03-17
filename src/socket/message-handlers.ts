@@ -14,12 +14,14 @@ import {
   canAccessSession,
   canModifySession,
   getUpload,
+  getUserSettings,
 } from "../lib/claude-db";
 import { logActivity } from "../lib/activity-log";
 import { getAppSetting } from "../lib/app-settings";
 import { checkBotConfigRequest } from "../lib/security-guard";
 import { dispatchNotification } from "../lib/notifications";
 import { runSubAgent } from "../lib/sub-agent-runner";
+import { buildSystemPrompt } from "../lib/system-prompt";
 
 // Per-session AI chat pause state
 const aiPausedSessions = new Map<string, { paused: boolean; pausedAt: string | null; pausedBy: string | null }>();
@@ -80,6 +82,45 @@ function checkBudget(email: string, sessionId: string): BudgetResult {
   }
 
   return { exceeded: false, warning: false };
+}
+
+/**
+ * Ensure the SDK provider has in-memory state for this session.
+ * If the session was GC'd (idle > threshold), this rebuilds it from
+ * the DB — including an async system prompt rebuild — so the next
+ * sendMessage will work.  Returns true when the session is ready.
+ */
+async function ensureSessionAlive(
+  ctx: HandlerContext,
+  sessionId: string,
+  email: string,
+): Promise<boolean> {
+  const sessionProvider = ctx.getSessionProvider(sessionId);
+  if (sessionProvider.hasSession?.(sessionId)) return true;
+
+  const dbSession = getSession(sessionId);
+  if (!dbSession) return false;
+
+  console.log(`[session] Rebuilding GC'd session ${sessionId} for user ${email}`);
+  const userSettings = getUserSettings(email);
+  const systemPrompt = await buildSystemPrompt({
+    personality: dbSession.personality ?? undefined,
+    experienceLevel: userSettings.experience_level,
+    autoSummary: userSettings.auto_summary,
+    sessionId,
+  });
+
+  sessionProvider.createSession(sessionId, {
+    skipPermissions: dbSession.skip_permissions,
+    model: dbSession.model,
+    userEmail: email,
+    ...(systemPrompt ? { systemPrompt } : {}),
+    ...(dbSession.claude_session_id ? { claudeSessionId: dbSession.claude_session_id } : {}),
+  });
+  ctx.ensureSessionListener(sessionId);
+
+  ctx.io.to(`session:${sessionId}`).emit("claude:session_rebuilt", { sessionId });
+  return true;
 }
 
 export function registerMessageHandlers(ctx: HandlerContext) {
@@ -296,12 +337,35 @@ export function registerMessageHandlers(ctx: HandlerContext) {
           return;
         }
 
+        // Ensure the session is alive in the SDK provider (rebuild if GC'd)
+        const alive = await ensureSessionAlive(ctx, sessionId, email);
+        if (!alive) {
+          socket.emit("claude:error", { sessionId, message: "Session not found. Please create a new session." });
+          return;
+        }
+
         ctx.sessionCommandSubmitter.set(sessionId, email);
         io.to(`session:${sessionId}`).emit("claude:command_started", { sessionId, submittedBy: email });
         const sessionProvider = ctx.getSessionProvider(sessionId);
         ctx.setSessionStatus(sessionId, "running");
         sessionProvider.sendMessage(sessionId, fullContent, { inputFiles: inputFiles.length > 0 ? inputFiles : undefined });
+
+        // Safety net: if after a brief delay the provider reports not-running
+        // and no output listener has emitted command_done, emit it ourselves
+        // to prevent the client from being stuck in "running" forever.
+        setTimeout(() => {
+          if (!sessionProvider.isRunning(sessionId)) {
+            const stillSubmitting = ctx.sessionCommandSubmitter.get(sessionId);
+            if (stillSubmitting === email) {
+              ctx.sessionCommandSubmitter.delete(sessionId);
+              ctx.setSessionStatus(sessionId, "idle");
+              io.to(`session:${sessionId}`).emit("claude:command_done", { sessionId });
+            }
+          }
+        }, 3000);
       } catch (err) {
+        ctx.setSessionStatus(sessionId, "idle");
+        io.to(`session:${sessionId}`).emit("claude:command_done", { sessionId });
         socket.emit("claude:error", { sessionId, message: String(err) });
       }
     },
@@ -409,6 +473,7 @@ export function registerMessageHandlers(ctx: HandlerContext) {
         const messages = getMessages(sessionId);
         io.to(`session:${sessionId}`).emit("claude:messages_updated", { sessionId, messages });
 
+        await ensureSessionAlive(ctx, sessionId, email);
         const sessionProvider = ctx.getSessionProvider(sessionId, session.provider_type);
         ctx.ensureSessionListener(sessionId);
 
@@ -417,6 +482,7 @@ export function registerMessageHandlers(ctx: HandlerContext) {
         ctx.incrementSessionCommands(email, sessionId);
         ctx.sessionCommandSubmitter.set(sessionId, email);
         io.to(`session:${sessionId}`).emit("claude:command_started", { sessionId, submittedBy: email });
+        ctx.setSessionStatus(sessionId, "running");
         sessionProvider.sendMessage(sessionId, editPrefix + newContent);
       } catch (err) {
         socket.emit("claude:error", { message: String(err) });
@@ -444,7 +510,7 @@ export function registerMessageHandlers(ctx: HandlerContext) {
 
   socket.on(
     "claude:toggle_chat",
-    ({ sessionId }: { sessionId: string }) => {
+    async ({ sessionId }: { sessionId: string }) => {
       if (!canAccessSession(sessionId, email)) {
         socket.emit("claude:error", { sessionId, message: "Access denied" });
         return;
@@ -480,6 +546,7 @@ export function registerMessageHandlers(ctx: HandlerContext) {
               `[System: While you were paused, the following conversation happened between users. ` +
               `Please acknowledge it briefly and continue assisting.]\n\n${recap}`;
 
+            await ensureSessionAlive(ctx, sessionId, email);
             ctx.sessionCommandSubmitter.set(sessionId, email);
             io.to(`session:${sessionId}`).emit("claude:command_started", { sessionId, submittedBy: email });
             const sessionProvider = ctx.getSessionProvider(sessionId);

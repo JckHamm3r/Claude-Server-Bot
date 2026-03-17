@@ -92,6 +92,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
           templateSystemPrompt,
           experienceLevel: userSettings.experience_level,
           autoSummary: userSettings.auto_summary,
+          sessionId,
         });
         if (interface_type === "customization_interface") {
           logActivity("customization_session_started", email, { sessionId });
@@ -350,6 +351,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
           personality: dbSession.personality ?? undefined,
           experienceLevel: rejoinSettings.experience_level,
           autoSummary: rejoinSettings.auto_summary,
+          sessionId,
         });
         sessionProvider.createSession(sessionId, {
           skipPermissions: dbSession.skip_permissions,
@@ -396,6 +398,26 @@ export function registerSessionHandlers(ctx: HandlerContext) {
       socket.emit("claude:session_state", {
         sessionId,
         running: sp.isRunning(sessionId),
+      });
+    },
+  );
+
+  // ── Session health check ────────────────────────────────────────────
+  socket.on(
+    "claude:check_session_health",
+    ({ sessionId }: { sessionId: string }) => {
+      if (!canAccessSession(sessionId, email)) {
+        socket.emit("claude:error", { sessionId, message: "Access denied" });
+        return;
+      }
+      const sp = ctx.getSessionProvider(sessionId);
+      const alive = sp.hasSession?.(sessionId) ?? true;
+      const streamActive = alive && sp.isRunning(sessionId);
+      socket.emit("claude:session_health", {
+        sessionId,
+        alive,
+        streamActive,
+        hasResumeId: sp.getClaudeSessionId?.(sessionId) != null,
       });
     },
   );

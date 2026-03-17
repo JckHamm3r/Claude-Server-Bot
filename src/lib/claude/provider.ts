@@ -82,4 +82,6 @@ export interface ClaudeCodeProvider {
   denyPermission(sessionId: string): void;
   isRunning(sessionId: string): boolean;
   getClaudeSessionId?(sessionId: string): string | null;
+  /** Check whether in-memory state exists for this session (not GC'd). */
+  hasSession?(sessionId: string): boolean;
 }

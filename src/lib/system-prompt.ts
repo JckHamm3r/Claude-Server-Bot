@@ -3,7 +3,7 @@ import * as path from "path";
 import { getAppSetting, getPersonalityPrefix } from "./app-settings";
 import { getCustomizationSystemPrompt, getBotSelfIdentityPrompt } from "./customization";
 import { getSecuritySystemPrompt } from "./security-guard";
-import { getMemories } from "./claude-db";
+import { getMemories, getSessionContext } from "./claude-db";
 import { buildAgentToolBlock } from "./agent-tool-injector";
 
 export type InterfaceType = "ui_chat" | "customization_interface" | "system_agent";
@@ -16,6 +16,8 @@ interface BuildSystemPromptOpts {
   experienceLevel?: string;
   autoSummary?: boolean;
   includeAgentTools?: boolean;
+  /** When set, injects per-session context journal and the save instruction. */
+  sessionId?: string;
 }
 
 function getExperienceLevelInstruction(level: string, autoSummary: boolean): string {
@@ -118,6 +120,7 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
     experienceLevel = "expert",
     autoSummary = true,
     includeAgentTools = true,
+    sessionId,
   } = opts;
 
   let systemPrompt: string | undefined;
@@ -172,6 +175,31 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
   systemPrompt = systemPrompt
     ? systemPrompt + "\n\n" + contextSection
     : contextSection;
+
+  // Inject per-session context journal (if the session has one from a previous interaction).
+  // Also inject the instruction for the AI to maintain it via update_session_context tool.
+  if (sessionId && interfaceType === "ui_chat") {
+    const journal = getSessionContext(sessionId);
+    const journalParts: string[] = [];
+    if (journal) {
+      journalParts.push(`<session_context>\nThe following is your running context journal from previous interactions in this session. Use it to maintain continuity.\n\n${journal}\n</session_context>`);
+    }
+    journalParts.push(
+      `<session_context_tool>\n` +
+      `You have a virtual tool called "update_session_context". At the end of each significant interaction ` +
+      `(after completing a task, making key decisions, or learning important facts), call it to save a concise ` +
+      `summary of what happened. This context is loaded when the session resumes so you remember prior work.\n\n` +
+      `To use it, call the tool with input: { "context": "<your concise context summary>" }\n` +
+      `The context should include: key decisions made, files modified, current state/progress, ` +
+      `important facts learned, and any pending work. Keep it under 4000 characters.\n` +
+      `The context REPLACES the previous one (not appends), so include everything important.\n` +
+      `</session_context_tool>`
+    );
+    const journalBlock = journalParts.join("\n\n");
+    systemPrompt = systemPrompt
+      ? systemPrompt + "\n\n" + journalBlock
+      : journalBlock;
+  }
 
   // Append agent delegation tools block for ui_chat sessions so Claude can
   // autonomously invoke specialized agents mid-conversation.

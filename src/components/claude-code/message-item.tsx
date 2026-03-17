@@ -401,7 +401,7 @@ export const MessageItem = memo(function MessageItem({
             {p.retryable && onRetry && !isRunning && (
               <button
                 onClick={onRetry}
-                className="shrink-0 inline-flex items-center gap-1.5 rounded-xl border border-bot-red/30 bg-bot-red/10 px-3 py-1.5 text-caption font-medium text-bot-red hover:bg-bot-red/20 transition-all duration-200"
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-bot-red/20 px-4 py-2 text-body font-semibold text-bot-red hover:bg-bot-red/30 shadow-sm transition-all duration-200"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 Retry

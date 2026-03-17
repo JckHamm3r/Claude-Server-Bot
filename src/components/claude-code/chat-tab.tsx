@@ -75,6 +75,7 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
   const [botAvatarUrl, setBotAvatarUrl] = useState<string | null>(null);
   const [participantCount, setParticipantCount] = useState(0);
   const [inviteToast, setInviteToast] = useState<{ sessionId: string; sessionName: string | null; invitedBy: string } | null>(null);
+  const [sessionRebuiltToast, setSessionRebuiltToast] = useState(false);
 
   const handleSessionRemoved = useCallback((sessionId: string) => {
     setActiveSession((current) => {
@@ -140,8 +141,17 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
       return () => clearTimeout(timer);
     };
     socket.on("claude:session_invited", handleInvited);
-    return () => { socket.off("claude:session_invited", handleInvited); };
-  }, []);
+    socket.on("claude:session_rebuilt", ({ sessionId: rebuiltId }: { sessionId: string }) => {
+      if (chat.activeSessionRef.current?.id === rebuiltId) {
+        setSessionRebuiltToast(true);
+        setTimeout(() => setSessionRebuiltToast(false), 4000);
+      }
+    });
+    return () => {
+      socket.off("claude:session_invited", handleInvited);
+      socket.off("claude:session_rebuilt");
+    };
+  }, [chat.activeSessionRef]);
 
   // Sync activeSession when the sessions list changes (e.g. server-side rename)
   useEffect(() => {
@@ -243,6 +253,7 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
         status: "idle",
         personality: personality ?? null,
         claude_session_id: null,
+        context_journal: null,
       };
       setSessions((prev) => [optimistic, ...prev]);
       chat.resetSessionState();
@@ -769,6 +780,13 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
             setActiveHighlight(activeId);
           }}
         />
+      )}
+
+      {sessionRebuiltToast && (
+        <div className="fixed bottom-5 right-5 z-[200] flex items-center gap-2 rounded-xl border border-bot-green/30 bg-bot-surface shadow-float px-4 py-3 animate-scaleIn">
+          <div className="h-2 w-2 rounded-full bg-bot-green" />
+          <span className="text-caption text-bot-text">Session restored — ready to continue.</span>
+        </div>
       )}
 
       {inviteToast && (

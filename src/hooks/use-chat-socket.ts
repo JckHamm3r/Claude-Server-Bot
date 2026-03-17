@@ -371,6 +371,8 @@ export function useChatSocket({
         socketRef.current.emit("claude:get_session_state", { sessionId: session.id });
       }
       if (watchdogChecksRef.current >= WATCHDOG_MAX_CHECKS) {
+        const sessionId = activeSessionRef.current?.id;
+        if (sessionId) initializedSessionsRef.current.delete(sessionId);
         setIsRunning(false);
         setCurrentActivity(null);
         drainPending();
@@ -949,6 +951,23 @@ export function useChatSocket({
       }
     });
 
+    socket.on("claude:session_rebuilt", ({ sessionId }: { sessionId: string }) => {
+      console.log(`[socket] Session ${sessionId} was rebuilt on server after idle GC`);
+      initializedSessionsRef.current.delete(sessionId);
+    });
+
+    socket.on("claude:session_health", ({ sessionId, alive, streamActive }: { sessionId: string; alive: boolean; streamActive: boolean }) => {
+      if (activeSessionRef.current?.id !== sessionId) return;
+      if (!alive) {
+        initializedSessionsRef.current.delete(sessionId);
+        if (isRunning) {
+          setIsRunning(false);
+          setCurrentActivity(null);
+        }
+      }
+      void streamActive;
+    });
+
     socket.on("claude:error", ({ message }: { message: string }) => {
       streamingMsgIdRef.current = null;
       const msg: ChatMessage = {
@@ -1090,6 +1109,8 @@ export function useChatSocket({
       socket.off("claude:session_removed");
       socket.off("claude:session_invited");
       socket.off("claude:sub_agent_status");
+      socket.off("claude:session_rebuilt");
+      socket.off("claude:session_health");
       clearEditRecoveryTimer();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1124,6 +1145,21 @@ export function useChatSocket({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSession, connected]);
+
+  // ── Tab visibility reconnect ─────────────────────────────────────────
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      const session = activeSessionRef.current;
+      const socket = socketRef.current;
+      if (!session || !socket?.connected) return;
+      socket.emit("claude:rejoin_session", { sessionId: session.id });
+      socket.emit("claude:get_messages", { sessionId: session.id });
+      socket.emit("claude:get_session_state", { sessionId: session.id });
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, []);
 
   // ── Action callbacks ───────────────────────────────────────────────────
 

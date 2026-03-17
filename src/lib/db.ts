@@ -387,6 +387,7 @@ const migrations: Record<number, () => void> = {
     addColumnSafe("sessions", "status", "TEXT NOT NULL DEFAULT 'idle'");
     addColumnSafe("sessions", "personality", "TEXT");
     addColumnSafe("sessions", "claude_session_id", "TEXT");
+    addColumnSafe("sessions", "context_journal", "TEXT");
 
     db.exec(`
       CREATE TABLE IF NOT EXISTS session_templates (
@@ -521,6 +522,9 @@ const migrations: Record<number, () => void> = {
       );
       CREATE INDEX IF NOT EXISTS idx_api_request_counts_ip ON api_request_counts(ip_address, window_start);
     `);
+  },
+  7: () => {
+    addColumnSafe("sessions", "context_journal", "TEXT");
   },
 };
 
