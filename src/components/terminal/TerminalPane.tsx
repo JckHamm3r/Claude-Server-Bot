@@ -76,7 +76,16 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, TerminalPaneProps>(
       fitAddonRef.current = fitAddon;
 
       term.open(containerRef.current);
-      fitAddon.fit();
+
+      // Delay fit() until after the browser has painted and the container has real dimensions
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          try { fitAddon.fit(); } catch { /* ignore */ }
+          // Attach to backend after fit so the server gets correct terminal dimensions
+          const { cols, rows } = term;
+          socket.emit("terminal:attach", { tabId, cols, rows });
+        });
+      });
       termRef.current = term;
 
       // Track line count for bookmarks
@@ -145,10 +154,6 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, TerminalPaneProps>(
         socket.emit("terminal:resize", { tabId, cols, rows });
       });
       if (containerRef.current) resizeObserver.observe(containerRef.current);
-
-      // Attach to backend
-      const { cols, rows } = term;
-      socket.emit("terminal:attach", { tabId, cols, rows });
 
       return () => {
         socket.off("terminal:output", handleOutput);

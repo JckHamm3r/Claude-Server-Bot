@@ -68,12 +68,8 @@ async function createTmuxSession(tmuxName: string, cwd: string): Promise<void> {
 async function ensureTmuxSession(session: TerminalSession): Promise<void> {
   if (!tmuxSessionExists(session.tmux_session_name)) {
     await createTmuxSession(session.tmux_session_name, session.cwd || PROJECT_ROOT);
-    // Inject shell integration for CWD tracking via OSC 7
-    const oscHook = `PS1='\\[\\e]7;\\w\\a\\]'$PS1`;
-    try {
-      await execAsync(`tmux send-keys -t ${session.tmux_session_name} ${JSON.stringify(`export ${oscHook}`)} Enter`);
-    } catch { /* non-fatal */ }
   }
+  // If it already exists, that's fine — reuse it
 }
 
 function appendToScrollback(tabId: string, data: string) {
@@ -341,7 +337,10 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
           socket.emit("terminal:scrollback", { tabId, lines: storedLines });
         }
 
-        socket.emit("terminal:attached", { tabId });
+        // Small delay to let the PTY initialize before client sends resize
+        setTimeout(() => {
+          socket.emit("terminal:attached", { tabId });
+        }, 100);
         touchTerminalSession(tabId);
       } catch (err) {
         socket.emit("terminal:error", { message: "Failed to attach to terminal: " + String(err) });
