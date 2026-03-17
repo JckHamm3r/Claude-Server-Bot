@@ -91,7 +91,6 @@ export function SystemServiceManagerSection() {
       setLoading(false);
     }
   }, []);
-
   // Subscribe to real-time updates
   useEffect(() => {
     loadUnits();
