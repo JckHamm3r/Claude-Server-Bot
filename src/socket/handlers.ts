@@ -25,6 +25,7 @@ import { registerPresenceHandlers } from "./presence-handlers";
 import { registerPlanHandlers } from "./plan-handlers";
 import { registerTerminalHandlers, reconcileTmuxSessions, shutdownTerminals } from "./terminal-handlers";
 import { registerJobHandlers } from "./job-handlers";
+import { registerServiceWatcherHandlers, stopServiceWatcher } from "./service-watcher";
 import { 
   lockEventEmitter, 
   initFileLockManager, 
@@ -298,6 +299,7 @@ export function shutdownAllSessions() {
   // Clear intervals
   if (metricsInterval) clearInterval(metricsInterval);
   if (cleanupInterval) clearInterval(cleanupInterval);
+  stopServiceWatcher();
 }
 
 export function registerHandlers(io: Server) {
@@ -307,6 +309,9 @@ export function registerHandlers(io: Server) {
 
   // Reconcile tmux sessions for persistent terminals
   reconcileTmuxSessions().catch(err => console.error("[terminal] reconcile error:", err));
+
+  // Start service watcher for live status push
+  registerServiceWatcherHandlers(io);
   metricsInterval = setInterval(() => {
     if (Date.now() - lastMetricsFlush > 60_000) {
       flushMetrics();
@@ -783,7 +788,6 @@ export function registerHandlers(io: Server) {
     registerPlanHandlers(ctx);
     registerTerminalHandlers(ctx);
     registerJobHandlers(ctx);
-
     // File lock handlers
     socket.on("file:cancel_queued_operation", async ({ queueId }: { queueId: string }) => {
       const cancelled = cancelQueuedOperation(queueId, email);

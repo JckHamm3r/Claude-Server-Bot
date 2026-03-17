@@ -26,6 +26,7 @@ import { TemplatesSection } from "@/components/claude-code/settings/templates-se
 import { CustomizationSection } from "@/components/claude-code/settings/customization-section";
 import { ServicesSection } from "@/components/claude-code/settings/services-section";
 import { PackagesSection } from "@/components/claude-code/settings/packages-section";
+import { SystemServiceManagerSection } from "@/components/claude-code/settings/system-service-manager-section";
 import { useUserProfile, invalidateProfileCache } from "@/hooks/use-user-profile";
 
 type SectionKey =
@@ -40,6 +41,7 @@ type SectionKey =
   | "database"
   | "system"
   | "services"
+  | "service_manager"
   | "packages"
   | "updates"
   | "domains"
@@ -504,6 +506,7 @@ export function SettingsPanel() {
     { key: "database", label: "Database", adminOnly: true },
     { key: "system", label: "System", adminOnly: true },
     { key: "services", label: "Services", adminOnly: true },
+    { key: "service_manager", label: "Service Manager", adminOnly: true },
     { key: "packages", label: "Packages", adminOnly: true },
     { key: "updates", label: "Updates", adminOnly: true },
     { key: "domains", label: "Domains", adminOnly: true },
@@ -523,8 +526,7 @@ export function SettingsPanel() {
       "users", "project", "notifications", "activity_log",
       "backup", "database", "system", "services", "packages", "smtp", "budgets", "api_key",
     ],
-    expert: allSections.map((s) => s.key),
-  };
+    expert: allSections.map((s) => s.key),  };
   const userLevel = settings ? "expert" : "expert"; // will be overridden below
   void userLevel; // suppress unused warning — level comes from useUserProfile in parent
   // Sections are filtered by adminOnly AND by experience level (fetched in SettingsPanel)
@@ -1067,6 +1069,9 @@ export function SettingsPanel() {
 
         {/* ── Services ── */}
         {activeSection === "services" && <ServicesSection />}
+
+        {/* ── Service Manager ── */}
+        {activeSection === "service_manager" && <SystemServiceManagerSection />}
 
         {/* ── Packages ── */}
         {activeSection === "packages" && <PackagesSection />}
