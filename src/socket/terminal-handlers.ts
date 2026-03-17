@@ -266,22 +266,27 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
           return;
         }
 
-        // Ensure tmux session exists
+        // Ensure tmux session exists (for scrollback capture and process tracking)
         await ensureTmuxSession(session);
 
-        // Spawn node-pty attached to tmux
+        // Spawn shell directly via node-pty (NOT tmux attach-session — that renders
+        // the full tmux UI with status bars which corrupts xterm output).
+        // We keep this PTY alive server-side between browser detach/attach cycles.
         const pty = await import("node-pty");
         const safeCols = Math.max(1, Math.min(500, Number(cols) || 80));
         const safeRows = Math.max(1, Math.min(200, Number(rows) || 24));
+        const shell = process.env.SHELL ?? "/bin/bash";
 
-        const ptyProcess = pty.spawn("tmux", [
-          "attach-session", "-t", session.tmux_session_name
-        ], {
+        const ptyProcess = pty.spawn(shell, [], {
           name: "xterm-color",
           cols: safeCols,
           rows: safeRows,
           cwd: session.cwd || PROJECT_ROOT,
-          env: process.env as Record<string, string>,
+          env: {
+            ...(process.env as Record<string, string>),
+            TERM: "xterm-color",
+            TMUX: "",  // clear TMUX env so nested tmux is not confused
+          },
         });
 
         terminalPtyProcesses.set(tabId, ptyProcess);
@@ -348,20 +353,9 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
   socket.on("terminal:detach", ({ tabId }: { tabId: string }) => {
     const sockets = tabSocketMap.get(tabId);
     if (sockets) sockets.delete(socket.id);
-
-    // If no more sockets watching, detach PTY but keep tmux alive
-    if (!sockets || sockets.size === 0) {
-      const pty = terminalPtyProcesses.get(tabId);
-      if (pty) {
-        // Detach from tmux (sends detach command to tmux) then kill the pty wrapper
-        try { pty.write("\x02d"); } catch { /* ignore */ }
-        setTimeout(() => {
-          try { pty.kill?.(); } catch { /* ignore */ }
-          terminalPtyProcesses.delete(tabId);
-          flushScrollback(tabId);
-        }, 500);
-      }
-    }
+    // PTY stays alive — we just remove this socket from the watcher set.
+    // The process continues running on the server.
+    flushScrollback(tabId);
   });
 
   // ── terminal:input ─────────────────────────────────────────────────────
@@ -604,24 +598,12 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
     }
   );
 
-  // ── Disconnect: detach PTY but keep tmux alive ────────────────────────
+  // ── Disconnect: keep PTY alive, just unsubscribe this socket ────────────
   socket.on("disconnect", () => {
-    // Remove this socket from all tab watchers
     for (const [tabId, sockets] of tabSocketMap.entries()) {
       if (sockets.has(socket.id)) {
         sockets.delete(socket.id);
-        // If no more watchers, detach PTY wrapper (but tmux stays alive)
-        if (sockets.size === 0) {
-          const pty = terminalPtyProcesses.get(tabId);
-          if (pty) {
-            try { pty.write("\x02d"); } catch { /* ignore - tmux detach */ }
-            setTimeout(() => {
-              try { pty.kill?.(); } catch { /* ignore */ }
-              terminalPtyProcesses.delete(tabId);
-              flushScrollback(tabId);
-            }, 800);
-          }
-        }
+        flushScrollback(tabId);
       }
     }
   });
