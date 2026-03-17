@@ -10,7 +10,7 @@ async function checkAdminExpert(): Promise<{ error: NextResponse } | { email: st
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
   const user = db
-    .prepare("SELECT is_admin, experience_level FROM users WHERE email = ?")
+    .prepare("SELECT u.is_admin, COALESCE(us.experience_level, 'expert') as experience_level FROM users u LEFT JOIN user_settings us ON u.email = us.email WHERE u.email = ?")
     .get(session.user.email) as { is_admin: number; experience_level?: string } | undefined;
   if (!user?.is_admin) {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
