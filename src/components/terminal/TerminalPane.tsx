@@ -77,26 +77,25 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, TerminalPaneProps>(
 
       term.open(containerRef.current);
 
-      // Wait for the container to have real dimensions before fitting.
-      // Use ResizeObserver to fire exactly once when width becomes non-zero.
-      const fitOnce = () => {
-        if (containerRef.current && containerRef.current.offsetWidth > 0) {
+      // Use a polling approach to wait for container to have real dimensions.
+      // The container may be in a display:none parent initially (tab not active).
+      let fitAttempts = 0;
+      const MAX_FIT_ATTEMPTS = 20;
+      const tryFit = () => {
+        fitAttempts++;
+        const el = containerRef.current;
+        if (el && el.offsetWidth > 10 && el.offsetHeight > 10) {
           try { fitAddon.fit(); } catch { /* ignore */ }
-          // Attach to backend after fit so server gets correct terminal dimensions
           const { cols, rows } = term;
           socket.emit("terminal:attach", { tabId, cols, rows });
-          return true;
+        } else if (fitAttempts < MAX_FIT_ATTEMPTS) {
+          setTimeout(tryFit, 150);
+        } else {
+          // Fallback: attach with default dimensions
+          socket.emit("terminal:attach", { tabId, cols: 80, rows: 24 });
         }
-        return false;
       };
-
-      if (!fitOnce()) {
-        // Container not yet visible — use ResizeObserver to wait for non-zero width
-        const initObserver = new ResizeObserver(() => {
-          if (fitOnce()) initObserver.disconnect();
-        });
-        if (containerRef.current) initObserver.observe(containerRef.current);
-      }
+      setTimeout(tryFit, 100);
       termRef.current = term;
 
       // Track line count for bookmarks
@@ -158,11 +157,16 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, TerminalPaneProps>(
         }
       });
 
-      // Resize observer
+      // Resize observer — also fires when parent becomes visible
       const resizeObserver = new ResizeObserver(() => {
-        fitAddon.fit();
-        const { cols, rows } = term;
-        socket.emit("terminal:resize", { tabId, cols, rows });
+        const el = containerRef.current;
+        if (el && el.offsetWidth > 10) {
+          try {
+            fitAddon.fit();
+            const { cols, rows } = term;
+            socket.emit("terminal:resize", { tabId, cols, rows });
+          } catch { /* ignore */ }
+        }
       });
       if (containerRef.current) resizeObserver.observe(containerRef.current);
 
