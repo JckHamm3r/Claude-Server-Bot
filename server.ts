@@ -49,6 +49,9 @@ app.prepare().then(() => {
     ? "__Secure-next-auth.session-token"
     : "next-auth.session-token";
 
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { extractIP, checkAndRecordApiRequest, isIPBlocked, getIPProtectionSettings } = require("./src/lib/ip-protection") as typeof import("./src/lib/ip-protection");
+
   const handler = (req: import("http").IncomingMessage, res: import("http").ServerResponse) => {
     if (useHttps && !req.headers["x-forwarded-proto"]) {
       req.headers["x-forwarded-proto"] = "https";
@@ -132,9 +135,40 @@ app.prepare().then(() => {
     // be able to discover it. Next.js's default 404 page leaks the slug in
     // asset URLs, so we intercept here and return an opaque 404 instead.
     if (widgetBasePath && !url.startsWith(widgetBasePath + "/") && url !== widgetBasePath) {
+      // Count this 404 hit for API abuse detection (skip static assets)
+      if (!url.startsWith("/_next") && !url.includes(".")) {
+        try {
+          const ip = extractIP(req.headers as Record<string, string | string[] | undefined>, (req.socket as { remoteAddress?: string }).remoteAddress);
+          checkAndRecordApiRequest(ip);
+        } catch { /* ignore */ }
+      }
       res.writeHead(404, { "Content-Type": "text/plain" });
       res.end("Not Found");
       return;
+    }
+
+    // API abuse detection & IP block check for authenticated API routes
+    if (url.startsWith(widgetBasePath + "/api/") && !url.startsWith(widgetBasePath + "/api/auth")) {
+      try {
+        const ip = extractIP(req.headers as Record<string, string | string[] | undefined>, (req.socket as { remoteAddress?: string }).remoteAddress);
+        // Check if already blocked
+        const ipSettings = getIPProtectionSettings();
+        if (ipSettings.enabled) {
+          const block = isIPBlocked(ip);
+          if (block.blocked) {
+            res.writeHead(429, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: `IP blocked: ${block.reason ?? "Too many requests"}` }));
+            return;
+          }
+        }
+        // Check API abuse threshold
+        const abuseResult = checkAndRecordApiRequest(ip);
+        if (abuseResult.blocked) {
+          res.writeHead(429, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Too many requests — IP temporarily blocked" }));
+          return;
+        }
+      } catch { /* ignore abuse check errors */ }
     }
 
     handle(req, res, parse(url, true));

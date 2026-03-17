@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 import { authOptions } from "@/lib/auth";
-import { blockIP } from "@/lib/ip-protection";
+import { blockIP, type BlockedIP } from "@/lib/ip-protection";
 import { logActivity } from "@/lib/activity-log";
 import { getAppSetting } from "@/lib/app-settings";
 
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   const duration = body.durationMinutes ?? parseInt(getAppSetting("ip_block_duration_minutes", "60"), 10);
   const reason = body.reason ?? "Manually blocked by admin";
 
-  blockIP(body.ip, reason, blockType, duration, session.user.email);
+  blockIP(body.ip, reason, blockType, duration, session.user.email, "manual" as BlockedIP["source_type"]);
   logActivity("security_manual_ip_block", session.user.email, { ip: body.ip, reason, type: blockType });
 
   return NextResponse.json({ ok: true });

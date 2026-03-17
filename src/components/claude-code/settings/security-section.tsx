@@ -1,7 +1,11 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { Shield, Wifi, Terminal, ScrollText, Plus, X, RefreshCw, Lock, Unlock } from "lucide-react";
+import React, { useEffect, useState, useCallback } from "react";
+import {
+  Shield, Wifi, Terminal, ScrollText, Plus, X, RefreshCw, Lock, Unlock,
+  AlertTriangle, Bot, User, Activity, CircleDot, CheckCircle, XCircle,
+  ChevronDown, ChevronUp, Zap, Globe
+} from "lucide-react";
 import { cn, apiUrl } from "@/lib/utils";
 
 type SecuritySubTab = "guard_rails" | "ip_protection" | "sandbox" | "security_log";
@@ -15,6 +19,7 @@ interface BlockedIP {
   blocked_at: string;
   unblock_at: string | null;
   blocked_by: string;
+  source_type: "app" | "manual" | "fail2ban" | "api_abuse";
 }
 
 interface SecuritySettings {
@@ -28,6 +33,29 @@ interface IPProtectionSettings {
   maxAttempts: number;
   windowMinutes: number;
   blockDurationMinutes: number;
+}
+
+interface ApiAbuseSettings {
+  enabled: boolean;
+  maxRequests: number;
+  windowSeconds: number;
+  blockMinutes: number;
+}
+
+interface Fail2BanSettings {
+  enabled: boolean;
+  jail: string;
+  syncIntervalSeconds: number;
+}
+
+interface Fail2BanStatus {
+  available: boolean;
+  running: boolean;
+  version?: string;
+  jailName: string;
+  jailExists: boolean;
+  bannedIPs: string[];
+  error?: string;
 }
 
 interface SandboxData {
@@ -57,14 +85,21 @@ export function SecuritySection() {
 
   // IP Protection
   const [ipSettings, setIpSettings] = useState<IPProtectionSettings | null>(null);
+  const [apiAbuseSettings, setApiAbuseSettings] = useState<ApiAbuseSettings | null>(null);
+  const [fail2banSettings, setFail2BanSettings] = useState<Fail2BanSettings | null>(null);
+  const [fail2banStatus, setFail2BanStatus] = useState<Fail2BanStatus | null>(null);
   const [blockedIPs, setBlockedIPs] = useState<BlockedIP[]>([]);
   const [ipLoading, setIpLoading] = useState(false);
   const [ipMsg, setIpMsg] = useState("");
+  const [ipMsgType, setIpMsgType] = useState<"success" | "error">("success");
   const [manualIP, setManualIP] = useState("");
   const [manualReason, setManualReason] = useState("");
   const [manualType, setManualType] = useState<"temporary" | "permanent">("temporary");
   const [manualDuration, setManualDuration] = useState(60);
   const [blockingIP, setBlockingIP] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [expandedIP, setExpandedIP] = useState<number | null>(null);
+  const [activeIPFilter, setActiveIPFilter] = useState<BlockedIP["source_type"] | "all">("all");
 
   // Sandbox
   const [sandboxData, setSandboxData] = useState<SandboxData | null>(null);
@@ -88,6 +123,27 @@ export function SecuritySection() {
       .catch(() => {});
   }, []);
 
+  const loadIPData = useCallback(() => {
+    setIpLoading(true);
+    fetch(apiUrl("/api/security/ip-protection"))
+      .then((r) => r.json())
+      .then((d: {
+        settings: IPProtectionSettings;
+        apiAbuseSettings: ApiAbuseSettings;
+        fail2banSettings: Fail2BanSettings;
+        fail2banStatus: Fail2BanStatus;
+        blockedIPs: BlockedIP[];
+      }) => {
+        setIpSettings(d.settings);
+        setApiAbuseSettings(d.apiAbuseSettings);
+        setFail2BanSettings(d.fail2banSettings);
+        setFail2BanStatus(d.fail2banStatus);
+        setBlockedIPs(d.blockedIPs);
+      })
+      .catch(() => {})
+      .finally(() => setIpLoading(false));
+  }, []);
+
   useEffect(() => {
     if (activeTab === "ip_protection") loadIPData();
     if (activeTab === "sandbox") loadSandboxData();
@@ -95,17 +151,21 @@ export function SecuritySection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
-  function loadIPData() {
-    setIpLoading(true);
-    fetch(apiUrl("/api/security/ip-protection"))
-      .then((r) => r.json())
-      .then((d: { settings: IPProtectionSettings; blockedIPs: BlockedIP[] }) => {
-        setIpSettings(d.settings);
-        setBlockedIPs(d.blockedIPs);
-      })
-      .catch(() => {})
-      .finally(() => setIpLoading(false));
-  }
+  // Auto-refresh fail2ban sync when on ip_protection tab
+  useEffect(() => {
+    if (activeTab !== "ip_protection" || !fail2banSettings?.enabled) return;
+    const interval = Math.max((fail2banSettings.syncIntervalSeconds ?? 30) * 1000, 15_000);
+    const timer = setInterval(() => {
+      fetch(apiUrl("/api/security/ip-protection"))
+        .then((r) => r.json())
+        .then((d: { blockedIPs: BlockedIP[]; fail2banStatus: Fail2BanStatus }) => {
+          setBlockedIPs(d.blockedIPs);
+          setFail2BanStatus(d.fail2banStatus);
+        })
+        .catch(() => {});
+    }, interval);
+    return () => clearInterval(timer);
+  }, [activeTab, fail2banSettings]);
 
   function loadSandboxData() {
     setSandboxLoading(true);
@@ -132,6 +192,12 @@ export function SecuritySection() {
       })
       .catch(() => {})
       .finally(() => setLogLoading(false));
+  }
+
+  function showMsg(msg: string, type: "success" | "error" = "success") {
+    setIpMsg(msg);
+    setIpMsgType(type);
+    setTimeout(() => setIpMsg(""), 3000);
   }
 
   // ── Guard Rails handlers ───────────────────────────────────────────────────
@@ -165,39 +231,30 @@ export function SecuritySection() {
 
   // ── IP Protection handlers ─────────────────────────────────────────────────
 
-  async function saveIPSettings(updates: Partial<IPProtectionSettings>) {
-    setIpMsg("");
-    const body: Record<string, unknown> = {};
-    if ("enabled" in updates) body.ip_protection_enabled = updates.enabled;
-    if ("maxAttempts" in updates) body.ip_max_attempts = updates.maxAttempts;
-    if ("windowMinutes" in updates) body.ip_window_minutes = updates.windowMinutes;
-    if ("blockDurationMinutes" in updates) body.ip_block_duration_minutes = updates.blockDurationMinutes;
-    setIpSettings((prev) => prev ? { ...prev, ...updates } : prev);
+  async function saveIPSettings(updates: Record<string, unknown>) {
     try {
       await fetch(apiUrl("/api/security/ip-protection"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(updates),
       });
-      setIpMsg("Saved");
-      setTimeout(() => setIpMsg(""), 2000);
+      showMsg("Saved");
     } catch {
-      setIpMsg("Error saving");
+      showMsg("Error saving", "error");
     }
   }
 
-  async function unblockIP(ip: string) {
+  async function unblockIPAction(ip: string) {
     try {
       const res = await fetch(apiUrl(`/api/security/ip-protection/${encodeURIComponent(ip)}/unblock`), { method: "POST" });
       if (res.ok) {
         setBlockedIPs((prev) => prev.filter((b) => b.ip_address !== ip));
-        setIpMsg("IP unblocked");
-        setTimeout(() => setIpMsg(""), 2000);
+        showMsg("IP unblocked");
       } else {
-        setIpMsg("Failed to unblock IP");
+        showMsg("Failed to unblock IP", "error");
       }
     } catch {
-      setIpMsg("Error unblocking IP");
+      showMsg("Error unblocking IP", "error");
     }
   }
 
@@ -218,17 +275,34 @@ export function SecuritySection() {
       if (res.ok) {
         setManualIP("");
         setManualReason("");
-        setIpMsg("IP blocked successfully");
-        setTimeout(() => setIpMsg(""), 2000);
+        showMsg("IP blocked successfully");
         loadIPData();
       } else {
         const data = await res.json() as { error?: string };
-        setIpMsg(data.error ?? "Error blocking IP");
+        showMsg(data.error ?? "Error blocking IP", "error");
       }
     } catch {
-      setIpMsg("Error blocking IP");
+      showMsg("Error blocking IP", "error");
     } finally {
       setBlockingIP(false);
+    }
+  }
+
+  async function triggerFail2BanSync() {
+    setSyncing(true);
+    try {
+      const res = await fetch(apiUrl("/api/security/ip-protection/fail2ban-sync"), { method: "POST" });
+      const data = await res.json() as { ok?: boolean; added?: number; removed?: number; error?: string };
+      if (res.ok) {
+        showMsg(`Synced — ${data.added ?? 0} added, ${data.removed ?? 0} removed`);
+        loadIPData();
+      } else {
+        showMsg(data.error ?? "Sync failed", "error");
+      }
+    } catch {
+      showMsg("Sync failed", "error");
+    } finally {
+      setSyncing(false);
     }
   }
 
@@ -310,6 +384,16 @@ export function SecuritySection() {
     { key: "sandbox", label: "Command Sandbox", icon: <Terminal className="h-4 w-4" /> },
     { key: "security_log", label: "Security Log", icon: <ScrollText className="h-4 w-4" /> },
   ];
+
+  // Filter + counts
+  const filteredIPs = activeIPFilter === "all" ? blockedIPs : blockedIPs.filter((b) => b.source_type === activeIPFilter);
+  const countBySource = {
+    all: blockedIPs.length,
+    app: blockedIPs.filter((b) => b.source_type === "app").length,
+    manual: blockedIPs.filter((b) => b.source_type === "manual").length,
+    fail2ban: blockedIPs.filter((b) => b.source_type === "fail2ban").length,
+    api_abuse: blockedIPs.filter((b) => b.source_type === "api_abuse").length,
+  };
 
   return (
     <div className="space-y-4">
@@ -395,109 +479,247 @@ export function SecuritySection() {
 
       {/* ── IP Protection ─────────────────────────────────────────────────── */}
       {activeTab === "ip_protection" && (
-        <div className="space-y-5">
+        <div className="space-y-6">
           {ipLoading && !ipSettings ? (
             <p className="text-caption text-bot-muted">Loading…</p>
           ) : ipSettings ? (
             <>
-              <ToggleRow
-                label="IP Protection Enabled"
-                description="Track failed login attempts by IP and auto-block brute-force attackers"
-                checked={ipSettings.enabled}
-                onChange={(v) => saveIPSettings({ enabled: v })}
-              />
+              {/* Status message */}
+              {ipMsg && (
+                <div className={cn(
+                  "flex items-center gap-2 rounded-lg px-3 py-2 text-caption",
+                  ipMsgType === "success" ? "bg-bot-green/10 text-bot-green border border-bot-green/20" : "bg-bot-red/10 text-bot-red border border-bot-red/20"
+                )}>
+                  {ipMsgType === "success" ? <CheckCircle className="h-3.5 w-3.5 flex-shrink-0" /> : <XCircle className="h-3.5 w-3.5 flex-shrink-0" />}
+                  {ipMsg}
+                </div>
+              )}
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <LabeledInput
-                  label="Max failed attempts"
-                  type="number"
-                  value={ipSettings.maxAttempts}
-                  onChange={(v) => setIpSettings((p) => p ? { ...p, maxAttempts: parseInt(v) || 5 } : p)}
-                  onBlur={(v) => saveIPSettings({ maxAttempts: parseInt(v) || 5 })}
-                  min={1}
-                  max={50}
+              {/* ── Login Protection ──────────────────────────────────────── */}
+              <section className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Lock className="h-4 w-4 text-bot-accent" />
+                  <h3 className="text-body font-semibold text-bot-text">Login Protection</h3>
+                </div>
+                <ToggleRow
+                  label="IP Protection Enabled"
+                  description="Track failed login attempts by IP and auto-block brute-force attackers"
+                  checked={ipSettings.enabled}
+                  onChange={(v) => {
+                    setIpSettings((p) => p ? { ...p, enabled: v } : p);
+                    saveIPSettings({ ip_protection_enabled: v });
+                  }}
                 />
-                <LabeledInput
-                  label="Time window (minutes)"
-                  type="number"
-                  value={ipSettings.windowMinutes}
-                  onChange={(v) => setIpSettings((p) => p ? { ...p, windowMinutes: parseInt(v) || 10 } : p)}
-                  onBlur={(v) => saveIPSettings({ windowMinutes: parseInt(v) || 10 })}
-                  min={1}
-                  max={1440}
-                />
-                <LabeledInput
-                  label="Block duration (minutes)"
-                  type="number"
-                  value={ipSettings.blockDurationMinutes}
-                  onChange={(v) => setIpSettings((p) => p ? { ...p, blockDurationMinutes: parseInt(v) || 60 } : p)}
-                  onBlur={(v) => saveIPSettings({ blockDurationMinutes: parseInt(v) || 60 })}
-                  min={1}
-                  max={43200}
-                />
-              </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <LabeledInput
+                    label="Max failed attempts"
+                    type="number"
+                    value={ipSettings.maxAttempts}
+                    onChange={(v) => setIpSettings((p) => p ? { ...p, maxAttempts: parseInt(v) || 5 } : p)}
+                    onBlur={(v) => saveIPSettings({ ip_max_attempts: parseInt(v) || 5 })}
+                    min={1}
+                    max={50}
+                  />
+                  <LabeledInput
+                    label="Time window (minutes)"
+                    type="number"
+                    value={ipSettings.windowMinutes}
+                    onChange={(v) => setIpSettings((p) => p ? { ...p, windowMinutes: parseInt(v) || 10 } : p)}
+                    onBlur={(v) => saveIPSettings({ ip_window_minutes: parseInt(v) || 10 })}
+                    min={1}
+                    max={1440}
+                  />
+                  <LabeledInput
+                    label="Block duration (minutes)"
+                    type="number"
+                    value={ipSettings.blockDurationMinutes}
+                    onChange={(v) => setIpSettings((p) => p ? { ...p, blockDurationMinutes: parseInt(v) || 60 } : p)}
+                    onBlur={(v) => saveIPSettings({ ip_block_duration_minutes: parseInt(v) || 60 })}
+                    min={1}
+                    max={43200}
+                  />
+                </div>
+              </section>
 
-              {ipMsg && <p className="text-caption text-bot-green">{ipMsg}</p>}
+              {/* ── API Abuse Protection ───────────────────────────────────── */}
+              {apiAbuseSettings && (
+                <section className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Activity className="h-4 w-4 text-bot-accent" />
+                    <h3 className="text-body font-semibold text-bot-text">API Abuse Protection</h3>
+                  </div>
+                  <ToggleRow
+                    label="API Abuse Detection"
+                    description="Auto-block IPs that send excessive API requests — guards against scanning and scraping"
+                    checked={apiAbuseSettings.enabled}
+                    onChange={(v) => {
+                      setApiAbuseSettings((p) => p ? { ...p, enabled: v } : p);
+                      saveIPSettings({ api_abuse_protection_enabled: v });
+                    }}
+                  />
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <LabeledInput
+                      label="Max requests per window"
+                      type="number"
+                      value={apiAbuseSettings.maxRequests}
+                      onChange={(v) => setApiAbuseSettings((p) => p ? { ...p, maxRequests: parseInt(v) || 200 } : p)}
+                      onBlur={(v) => saveIPSettings({ api_abuse_max_requests: parseInt(v) || 200 })}
+                      min={10}
+                      max={10000}
+                    />
+                    <LabeledInput
+                      label="Window (seconds)"
+                      type="number"
+                      value={apiAbuseSettings.windowSeconds}
+                      onChange={(v) => setApiAbuseSettings((p) => p ? { ...p, windowSeconds: parseInt(v) || 60 } : p)}
+                      onBlur={(v) => saveIPSettings({ api_abuse_window_seconds: parseInt(v) || 60 })}
+                      min={10}
+                      max={3600}
+                    />
+                    <LabeledInput
+                      label="Block duration (minutes)"
+                      type="number"
+                      value={apiAbuseSettings.blockMinutes}
+                      onChange={(v) => setApiAbuseSettings((p) => p ? { ...p, blockMinutes: parseInt(v) || 30 } : p)}
+                      onBlur={(v) => saveIPSettings({ api_abuse_block_minutes: parseInt(v) || 30 })}
+                      min={1}
+                      max={10080}
+                    />
+                  </div>
+                </section>
+              )}
 
-              {/* Blocked IPs table */}
-              <div className="space-y-2">
+              {/* ── Fail2Ban Integration ───────────────────────────────────── */}
+              {fail2banSettings && fail2banStatus && (
+                <section className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Zap className="h-4 w-4 text-bot-accent" />
+                    <h3 className="text-body font-semibold text-bot-text">Fail2Ban Integration</h3>
+                  </div>
+
+                  {/* Fail2Ban status indicator */}
+                  <Fail2BanStatusCard status={fail2banStatus} />
+
+                  <ToggleRow
+                    label="Enable fail2ban Sync"
+                    description="Bidirectional sync: bans in this app propagate to fail2ban, and fail2ban bans appear here"
+                    checked={fail2banSettings.enabled}
+                    onChange={(v) => {
+                      setFail2BanSettings((p) => p ? { ...p, enabled: v } : p);
+                      saveIPSettings({ fail2ban_enabled: v });
+                    }}
+                    disabled={!fail2banStatus.available}
+                  />
+
+                  {fail2banSettings.enabled && (
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className="block text-caption text-bot-muted mb-1">Jail name</label>
+                        <input
+                          value={fail2banSettings.jail}
+                          onChange={(e) => setFail2BanSettings((p) => p ? { ...p, jail: e.target.value } : p)}
+                          onBlur={(e) => saveIPSettings({ fail2ban_jail: e.target.value })}
+                          placeholder="octoby-auth"
+                          className="w-full rounded-lg border border-bot-border bg-bot-elevated px-3 py-2 text-caption font-mono text-bot-text outline-none focus:border-bot-accent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-caption text-bot-muted mb-1">Auto-sync interval (seconds)</label>
+                        <input
+                          type="number"
+                          value={fail2banSettings.syncIntervalSeconds}
+                          min={10}
+                          max={3600}
+                          onChange={(e) => setFail2BanSettings((p) => p ? { ...p, syncIntervalSeconds: parseInt(e.target.value) || 30 } : p)}
+                          onBlur={(e) => saveIPSettings({ fail2ban_sync_interval_seconds: parseInt(e.target.value) || 30 })}
+                          className="w-full rounded-lg border border-bot-border bg-bot-elevated px-3 py-2 text-caption text-bot-text outline-none focus:border-bot-accent"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {fail2banSettings.enabled && (
+                    <button
+                      onClick={triggerFail2BanSync}
+                      disabled={syncing || !fail2banStatus.available || !fail2banStatus.running}
+                      className="flex items-center gap-2 rounded-lg border border-bot-border bg-bot-elevated px-3 py-2 text-caption text-bot-text hover:bg-bot-surface disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
+                      {syncing ? "Syncing…" : "Sync now"}
+                    </button>
+                  )}
+                </section>
+              )}
+
+              {/* ── Blocked IPs ────────────────────────────────────────────── */}
+              <section className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-body font-medium text-bot-text">Blocked IPs</h3>
-                  <button onClick={loadIPData} className="text-caption text-bot-muted hover:text-bot-text flex items-center gap-1">
-                    <RefreshCw className="h-3 w-3" /> Refresh
+                  <div className="flex items-center gap-2">
+                    <Globe className="h-4 w-4 text-bot-accent" />
+                    <h3 className="text-body font-semibold text-bot-text">
+                      Blocked IPs
+                      {blockedIPs.length > 0 && (
+                        <span className="ml-2 rounded-full bg-bot-red/20 text-bot-red px-2 py-0.5 text-caption font-normal">
+                          {blockedIPs.length}
+                        </span>
+                      )}
+                    </h3>
+                  </div>
+                  <button onClick={loadIPData} disabled={ipLoading} className="text-caption text-bot-muted hover:text-bot-text flex items-center gap-1 transition-colors">
+                    <RefreshCw className={cn("h-3 w-3", ipLoading && "animate-spin")} /> Refresh
                   </button>
                 </div>
 
-                {blockedIPs.length === 0 ? (
-                  <p className="text-caption text-bot-muted py-2">No blocked IPs.</p>
-                ) : (
-                  <div className="rounded-lg border border-bot-border overflow-hidden">
-                    <table className="w-full text-caption">
-                      <thead className="bg-bot-surface border-b border-bot-border">
-                        <tr>
-                          <th className="text-left px-3 py-2 text-bot-muted font-medium">IP</th>
-                          <th className="text-left px-3 py-2 text-bot-muted font-medium">Reason</th>
-                          <th className="text-left px-3 py-2 text-bot-muted font-medium">Type</th>
-                          <th className="text-left px-3 py-2 text-bot-muted font-medium">Blocked at</th>
-                          <th className="text-left px-3 py-2 text-bot-muted font-medium">Unblocks at</th>
-                          <th className="px-3 py-2" />
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-bot-border">
-                        {blockedIPs.map((b) => (
-                          <tr key={b.id} className="bg-bot-elevated">
-                            <td className="px-3 py-2 font-mono text-bot-text">{b.ip_address}</td>
-                            <td className="px-3 py-2 text-bot-muted">{b.block_reason}</td>
-                            <td className="px-3 py-2">
-                              <span className={cn(
-                                "rounded px-1.5 py-0.5 text-caption",
-                                b.block_type === "permanent" ? "bg-bot-red/20 text-bot-red" : "bg-bot-amber/20 text-bot-amber"
-                              )}>
-                                {b.block_type}
-                              </span>
-                            </td>
-                            <td className="px-3 py-2 text-bot-muted">{b.blocked_at.slice(0, 16)}</td>
-                            <td className="px-3 py-2 text-bot-muted">{b.unblock_at ? b.unblock_at.slice(0, 16) : "—"}</td>
-                            <td className="px-3 py-2">
-                              <button
-                                onClick={() => unblockIP(b.ip_address)}
-                                className="flex items-center gap-1 text-caption text-bot-green hover:text-bot-green/80"
-                              >
-                                <Unlock className="h-3 w-3" /> Unblock
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                {/* Source filter tabs */}
+                {blockedIPs.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {(["all", "app", "manual", "api_abuse", "fail2ban"] as const).map((f) => {
+                      const count = countBySource[f];
+                      if (f !== "all" && count === 0) return null;
+                      return (
+                        <button
+                          key={f}
+                          onClick={() => setActiveIPFilter(f)}
+                          className={cn(
+                            "flex items-center gap-1 rounded-full px-2.5 py-1 text-caption font-medium transition-colors",
+                            activeIPFilter === f
+                              ? sourceFilterActiveStyle(f)
+                              : "bg-bot-elevated border border-bot-border text-bot-muted hover:text-bot-text"
+                          )}
+                        >
+                          {f === "all" ? "All" : <SourceBadgeInline type={f} />}
+                          <span className="ml-0.5 opacity-70">{count}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
-              </div>
 
-              {/* Manual block form */}
-              <div className="space-y-3 rounded-lg border border-bot-border bg-bot-elevated p-4">
-                <h3 className="text-body font-medium text-bot-text flex items-center gap-2">
-                  <Lock className="h-4 w-4" /> Manual Block
+                {filteredIPs.length === 0 ? (
+                  <p className="text-caption text-bot-muted py-3">
+                    {blockedIPs.length === 0 ? "No blocked IPs." : `No IPs in the "${activeIPFilter}" category.`}
+                  </p>
+                ) : (
+                  <div className="rounded-xl border border-bot-border overflow-hidden">
+                    <div className="divide-y divide-bot-border">
+                      {filteredIPs.map((b) => (
+                        <BlockedIPRow
+                          key={b.id}
+                          entry={b}
+                          expanded={expandedIP === b.id}
+                          onToggle={() => setExpandedIP(expandedIP === b.id ? null : b.id)}
+                          onUnblock={() => unblockIPAction(b.ip_address)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              {/* ── Manual Block ───────────────────────────────────────────── */}
+              <section className="space-y-3 rounded-xl border border-bot-border bg-bot-elevated p-4">
+                <h3 className="text-body font-semibold text-bot-text flex items-center gap-2">
+                  <Lock className="h-4 w-4 text-bot-accent" /> Manual Block
                 </h3>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
@@ -545,11 +767,11 @@ export function SecuritySection() {
                 <button
                   onClick={manualBlockIP}
                   disabled={!manualIP.trim() || blockingIP}
-                  className="rounded-lg bg-bot-red px-4 py-2 text-caption font-medium text-white hover:bg-bot-red/80 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="rounded-lg bg-bot-red px-4 py-2 text-caption font-medium text-white hover:bg-bot-red/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   {blockingIP ? "Blocking…" : "Block IP"}
                 </button>
-              </div>
+              </section>
             </>
           ) : null}
         </div>
@@ -732,6 +954,184 @@ export function SecuritySection() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Source badge helpers ──────────────────────────────────────────────────────
+
+function sourceFilterActiveStyle(type: string): string {
+  switch (type) {
+    case "app":      return "bg-bot-amber/15 border border-bot-amber/30 text-bot-amber";
+    case "manual":   return "bg-bot-blue/15 border border-bot-blue/30 text-bot-blue";
+    case "fail2ban": return "bg-bot-purple/15 border border-bot-purple/30 text-bot-purple";
+    case "api_abuse":return "bg-bot-red/15 border border-bot-red/30 text-bot-red";
+    default:         return "bg-bot-elevated border border-bot-accent text-bot-accent";
+  }
+}
+
+function SourceBadgeInline({ type }: { type: BlockedIP["source_type"] }) {
+  const configs: Record<BlockedIP["source_type"], { label: string; icon: React.ReactNode; cls: string }> = {
+    app:      { label: "Auto",     icon: <Bot className="h-3 w-3" />,          cls: "text-bot-amber" },
+    manual:   { label: "Manual",   icon: <User className="h-3 w-3" />,         cls: "text-bot-blue" },
+    fail2ban: { label: "fail2ban", icon: <Zap className="h-3 w-3" />,          cls: "text-bot-purple" },
+    api_abuse:{ label: "API Abuse",icon: <Activity className="h-3 w-3" />,     cls: "text-bot-red" },
+  };
+  const c = configs[type];
+  return (
+    <span className={cn("flex items-center gap-1", c.cls)}>
+      {c.icon}
+      {c.label}
+    </span>
+  );
+}
+
+function SourceBadge({ type }: { type: BlockedIP["source_type"] }) {
+  const configs: Record<BlockedIP["source_type"], { label: string; icon: React.ReactNode; cls: string }> = {
+    app:      { label: "Auto",      icon: <Bot className="h-3 w-3" />,      cls: "bg-bot-amber/15 border-bot-amber/30 text-bot-amber" },
+    manual:   { label: "Manual",    icon: <User className="h-3 w-3" />,     cls: "bg-bot-blue/15 border-bot-blue/30 text-bot-blue" },
+    fail2ban: { label: "fail2ban",  icon: <Zap className="h-3 w-3" />,      cls: "bg-bot-purple/15 border-bot-purple/30 text-bot-purple" },
+    api_abuse:{ label: "API Abuse", icon: <Activity className="h-3 w-3" />, cls: "bg-bot-red/15 border-bot-red/30 text-bot-red" },
+  };
+  const c = configs[type] ?? { label: type, icon: null, cls: "bg-bot-surface border-bot-border text-bot-muted" };
+  return (
+    <span className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-caption font-medium", c.cls)}>
+      {c.icon}
+      {c.label}
+    </span>
+  );
+}
+
+// ── Blocked IP row ────────────────────────────────────────────────────────────
+
+function BlockedIPRow({
+  entry,
+  expanded,
+  onToggle,
+  onUnblock,
+}: {
+  entry: BlockedIP;
+  expanded: boolean;
+  onToggle: () => void;
+  onUnblock: () => void;
+}) {
+  return (
+    <>
+      <div
+        className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-3 px-4 py-3 bg-bot-elevated hover:bg-bot-surface transition-colors cursor-pointer"
+        onClick={onToggle}
+      >
+        {/* IP + reason */}
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-mono text-caption font-semibold text-bot-text">{entry.ip_address}</span>
+            <SourceBadge type={entry.source_type} />
+            <BlockTypeBadge type={entry.block_type} />
+          </div>
+          <p className="text-caption text-bot-muted mt-0.5 truncate">{entry.block_reason}</p>
+        </div>
+
+        {/* Blocked at */}
+        <div className="hidden sm:block text-right">
+          <p className="text-caption text-bot-muted whitespace-nowrap">{entry.blocked_at.slice(0, 16)}</p>
+          {entry.unblock_at && (
+            <p className="text-caption text-bot-muted/60 whitespace-nowrap">until {entry.unblock_at.slice(0, 16)}</p>
+          )}
+        </div>
+
+        {/* Unblock button */}
+        <button
+          onClick={(e) => { e.stopPropagation(); onUnblock(); }}
+          className="flex items-center gap-1 text-caption text-bot-green hover:text-bot-green/80 transition-colors whitespace-nowrap"
+        >
+          <Unlock className="h-3.5 w-3.5" /> Unblock
+        </button>
+
+        {/* Expand chevron */}
+        <div className="text-bot-muted">
+          {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="px-4 py-3 bg-bot-surface border-t border-bot-border">
+          <div className="grid grid-cols-2 gap-x-8 gap-y-1.5 text-caption">
+            <DetailRow label="IP" value={entry.ip_address} mono />
+            <DetailRow label="Source" value={<SourceBadge type={entry.source_type} />} />
+            <DetailRow label="Block type" value={<BlockTypeBadge type={entry.block_type} />} />
+            <DetailRow label="Blocked by" value={entry.blocked_by} />
+            <DetailRow label="Blocked at" value={entry.blocked_at.slice(0, 19).replace("T", " ")} mono />
+            {entry.unblock_at && <DetailRow label="Unblocks at" value={entry.unblock_at.slice(0, 19).replace("T", " ")} mono />}
+            {entry.failed_attempt_count > 0 && <DetailRow label="Failed attempts" value={String(entry.failed_attempt_count)} />}
+            <DetailRow label="Reason" value={entry.block_reason} />
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function DetailRow({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
+  return (
+    <div className="flex gap-2">
+      <span className="text-bot-muted shrink-0 w-28">{label}</span>
+      <span className={cn("text-bot-text break-all", mono && "font-mono")}>{value}</span>
+    </div>
+  );
+}
+
+function BlockTypeBadge({ type }: { type: "temporary" | "permanent" }) {
+  return (
+    <span className={cn(
+      "inline-flex items-center rounded-full border px-2 py-0.5 text-caption font-medium",
+      type === "permanent"
+        ? "bg-bot-red/15 border-bot-red/30 text-bot-red"
+        : "bg-bot-amber/15 border-bot-amber/30 text-bot-amber"
+    )}>
+      {type === "permanent" ? <AlertTriangle className="h-3 w-3 mr-1" /> : <CircleDot className="h-3 w-3 mr-1" />}
+      {type}
+    </span>
+  );
+}
+
+// ── Fail2Ban status card ──────────────────────────────────────────────────────
+
+function Fail2BanStatusCard({ status }: { status: Fail2BanStatus }) {
+  const dot = status.available && status.running && status.jailExists
+    ? "bg-bot-green"
+    : status.available && status.running
+    ? "bg-bot-amber"
+    : "bg-bot-red";
+
+  const label = status.available && status.running && status.jailExists
+    ? "Active"
+    : status.available && status.running
+    ? "Running — jail missing"
+    : status.available
+    ? "Installed — not running"
+    : "Not installed";
+
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-bot-border bg-bot-surface px-4 py-3">
+      <div className={cn("mt-1 h-2 w-2 rounded-full flex-shrink-0", dot)} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-caption font-medium text-bot-text">fail2ban {status.version ? `v${status.version}` : ""}</span>
+          <span className={cn(
+            "text-caption",
+            dot === "bg-bot-green" ? "text-bot-green" : dot === "bg-bot-amber" ? "text-bot-amber" : "text-bot-red"
+          )}>{label}</span>
+        </div>
+        <p className="text-caption text-bot-muted mt-0.5">
+          Jail: <span className="font-mono">{status.jailName}</span>
+          {status.jailExists && status.bannedIPs.length > 0 && (
+            <> · {status.bannedIPs.length} IP{status.bannedIPs.length !== 1 ? "s" : ""} currently banned in jail</>
+          )}
+        </p>
+        {status.error && (
+          <p className="text-caption text-bot-amber mt-1">{status.error}</p>
+        )}
+      </div>
     </div>
   );
 }

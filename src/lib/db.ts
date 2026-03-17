@@ -500,6 +500,28 @@ const migrations: Record<number, () => void> = {
       CREATE INDEX IF NOT EXISTS idx_job_runs_status ON job_runs(status);
     `);
   },
+  6: () => {
+    // Add source_type to blocked_ips to distinguish auto/manual/fail2ban origins
+    addColumnSafe("blocked_ips", "source_type", "TEXT NOT NULL DEFAULT 'app'");
+    // Seed fail2ban integration settings
+    db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)").run("fail2ban_enabled", "false");
+    db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)").run("fail2ban_jail", "octoby-auth");
+    db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)").run("fail2ban_sync_interval_seconds", "30");
+    db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)").run("api_abuse_protection_enabled", "true");
+    db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)").run("api_abuse_max_requests", "200");
+    db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)").run("api_abuse_window_seconds", "60");
+    db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)").run("api_abuse_block_minutes", "30");
+    // Track API request counts for abuse detection
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS api_request_counts (
+        ip_address TEXT NOT NULL,
+        window_start TEXT NOT NULL DEFAULT (datetime('now')),
+        request_count INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (ip_address, window_start)
+      );
+      CREATE INDEX IF NOT EXISTS idx_api_request_counts_ip ON api_request_counts(ip_address, window_start);
+    `);
+  },
 };
 
 const LATEST_SCHEMA_VERSION = Math.max(...Object.keys(migrations).map(Number));

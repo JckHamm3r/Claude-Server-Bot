@@ -15,7 +15,7 @@ import {
 import { setBroadcaster } from "../lib/broadcast";
 import { checkProtectedPath } from "../lib/security-guard";
 import { classifyCommand, isSandboxEnabled } from "../lib/command-sandbox";
-import { cleanupExpiredBlocks } from "../lib/ip-protection";
+import { cleanupExpiredBlocks, syncFail2BanBans } from "../lib/ip-protection";
 import db from "../lib/db";
 import type { HandlerContext, PlanAction } from "./types";
 import { registerSessionHandlers } from "./session-handlers";
@@ -316,7 +316,14 @@ export function registerHandlers(io: Server) {
     cleanupExpiredBlocks();
     runRetentionCleanup();
     try { db.pragma("incremental_vacuum"); } catch { /* ignore */ }
+    // Sync fail2ban bans into the app DB (no-op if fail2ban disabled/unavailable)
+    try { syncFail2BanBans(); } catch { /* ignore */ }
   }, 5 * 60_000);
+
+  // Initial fail2ban sync shortly after startup
+  setTimeout(() => {
+    try { syncFail2BanBans(); } catch { /* ignore */ }
+  }, 10_000);
 
   // Initialize file lock manager
   initFileLockManager();
