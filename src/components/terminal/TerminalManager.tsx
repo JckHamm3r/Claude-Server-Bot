@@ -148,6 +148,17 @@ export function TerminalManager({ isAdmin }: TerminalManagerProps) {
 
     loadSessions();
 
+    // Also load sessions when socket reconnects
+    const handleReconnect = () => {
+      loadSessions();
+    };
+    socket.on("connect", handleReconnect);
+
+    // Fallback: if not initialized after 5s, try again
+    const initTimeout = setTimeout(() => {
+      if (!initialized) loadSessions();
+    }, 5000);
+
     // Global Ctrl+R handler for history search
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === "r" && activeTabId) {
@@ -167,6 +178,8 @@ export function TerminalManager({ isAdmin }: TerminalManagerProps) {
       socket.off("terminal:share:removed", handleShareRemoved);
       socket.off("terminal:auto_attach", handleAutoAttach);
       socket.off("terminal:error", handleError);
+      socket.off("connect", handleReconnect);
+      clearTimeout(initTimeout);
       window.removeEventListener("keydown", handleGlobalKeyDown);
     };
   }, [isAdmin, loadSessions, activeTabId, ownedTabs]);
