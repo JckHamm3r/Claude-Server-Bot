@@ -21,7 +21,9 @@ export type NotificationEventType =
   | "update_completed"
   | "update_failed"
   | "security_prompt_injection_detected"
-  | "security_ip_blocked";
+  | "security_ip_blocked"
+  | "job_completed"
+  | "job_failed";
 
 export const NOTIFICATION_EVENT_LABELS: Record<NotificationEventType, string> = {
   plan_completed: "Plan completed",
@@ -44,6 +46,8 @@ export const NOTIFICATION_EVENT_LABELS: Record<NotificationEventType, string> = 
   update_failed: "Update failed",
   security_prompt_injection_detected: "Prompt injection detected",
   security_ip_blocked: "IP blocked — brute force",
+  job_completed: "Job completed",
+  job_failed: "Job failed",
 };
 
 export interface InAppNotification {

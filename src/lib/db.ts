@@ -452,6 +452,57 @@ const migrations: Record<number, () => void> = {
   },
 };
 
+  5: () => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS jobs (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        name TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        script_path TEXT NOT NULL,
+        schedule TEXT NOT NULL,
+        schedule_display TEXT DEFAULT '',
+        working_directory TEXT DEFAULT '',
+        environment TEXT DEFAULT '{}',
+        status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'paused', 'failed', 'draft')),
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        last_run_at TEXT,
+        last_run_status TEXT CHECK(last_run_status IN ('success', 'failed', 'running') OR last_run_status IS NULL),
+        next_run_at TEXT,
+        run_count INTEGER NOT NULL DEFAULT 0,
+        fail_count INTEGER NOT NULL DEFAULT 0,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        max_retries INTEGER NOT NULL DEFAULT 0,
+        timeout_seconds INTEGER NOT NULL DEFAULT 0,
+        auto_disable_after INTEGER NOT NULL DEFAULT 0,
+        notify_on_failure INTEGER NOT NULL DEFAULT 1,
+        notify_on_success INTEGER NOT NULL DEFAULT 0,
+        tags TEXT NOT NULL DEFAULT '[]',
+        ai_generated INTEGER NOT NULL DEFAULT 0,
+        systemd_unit TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+      CREATE INDEX IF NOT EXISTS idx_jobs_created_by ON jobs(created_by);
+
+      CREATE TABLE IF NOT EXISTS job_runs (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+        started_at TEXT NOT NULL DEFAULT (datetime('now')),
+        finished_at TEXT,
+        status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running', 'success', 'failed', 'cancelled')),
+        exit_code INTEGER,
+        output TEXT DEFAULT '',
+        output_log_path TEXT,
+        duration_ms INTEGER,
+        triggered_by TEXT NOT NULL DEFAULT 'timer' CHECK(triggered_by IN ('timer', 'manual', 'retry')),
+        error_summary TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_job_runs_job_id ON job_runs(job_id, started_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_job_runs_status ON job_runs(status);
+    `);
+  },
+
 const LATEST_SCHEMA_VERSION = Math.max(...Object.keys(migrations).map(Number));
 const currentVersion = getSchemaVersion();
 for (let v = currentVersion + 1; v <= LATEST_SCHEMA_VERSION; v++) {

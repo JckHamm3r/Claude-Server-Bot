@@ -33,7 +33,14 @@ export type ActivityEventType =
   | "security_command_policy_changed"
   | "app_setting_changed"
   | "user_avatar_changed"
-  | "user_password_changed";
+  | "user_password_changed"
+  | "job_created"
+  | "job_updated"
+  | "job_deleted"
+  | "job_enabled"
+  | "job_disabled"
+  | "job_run_manual"
+  | "job_auto_disabled";
 
 export function logActivity(
   event_type: ActivityEventType,
