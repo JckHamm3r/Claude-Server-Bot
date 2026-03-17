@@ -19,6 +19,7 @@ import { logActivity } from "../lib/activity-log";
 import { getAppSetting } from "../lib/app-settings";
 import { checkBotConfigRequest } from "../lib/security-guard";
 import { dispatchNotification } from "../lib/notifications";
+import { runSubAgent } from "../lib/sub-agent-runner";
 
 // Per-session AI chat pause state
 const aiPausedSessions = new Map<string, { paused: boolean; pausedAt: string | null; pausedBy: string | null }>();
@@ -152,6 +153,54 @@ export function registerMessageHandlers(ctx: HandlerContext) {
         }
         if (budget.warning) {
           socket.emit("claude:budget_warning", { sessionId, type: budget.type, limit: budget.limit, current: budget.current });
+        }
+
+        // ── /agent slash command ─────────────────────────────────────────────
+        // Syntax: /agent <name> <task>   or   /agent "<name with spaces>" <task>
+        const agentCommandMatch = content.trim().match(/^\/agent\s+(?:"([^"]+)"|(\S+))\s+([\s\S]+)/i);
+        if (agentCommandMatch) {
+          const agentName = (agentCommandMatch[1] ?? agentCommandMatch[2]).trim();
+          const agentTask = agentCommandMatch[3].trim();
+
+          saveMessage(sessionId, "admin", content, email, "chat");
+          ctx.sessionCommandSubmitter.set(sessionId, email);
+          io.to(`session:${sessionId}`).emit("claude:command_started", { sessionId, submittedBy: email });
+          ctx.setSessionStatus(sessionId, "running");
+
+          let agentResult: string;
+          try {
+            const session = getSession(sessionId);
+            const result = await runSubAgent({
+              agentName,
+              task: agentTask,
+              parentSessionId: sessionId,
+              userEmail: email,
+              skipPermissions: session?.skip_permissions ?? false,
+              delegationDepth: 0,
+            });
+
+            if (result.success) {
+              agentResult = `**Agent: ${agentName}**\n\n${result.result}`;
+            } else {
+              agentResult = `**Agent: ${agentName} — Error**\n\n${result.error ?? "Unknown error"}`;
+            }
+          } catch (err) {
+            agentResult = `**Agent: ${agentName} — Error**\n\n${String(err)}`;
+          }
+
+          io.to(`session:${sessionId}`).emit("claude:output", {
+            sessionId,
+            parsed: { type: "text", content: agentResult },
+            submittedBy: email,
+          });
+          io.to(`session:${sessionId}`).emit("claude:output", {
+            sessionId,
+            parsed: { type: "done" },
+            submittedBy: email,
+          });
+          ctx.setSessionStatus(sessionId, "idle");
+          io.to(`session:${sessionId}`).emit("claude:command_done", { sessionId });
+          return;
         }
 
         // Process attachments: separate images for --input-file, text for inline
