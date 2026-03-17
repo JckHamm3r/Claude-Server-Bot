@@ -30,3 +30,11 @@ All routes live under the Next.js App Router (`src/app/api/`).
 | `/api/system/service` | Service status (GET), restart/stop/start (POST), apply update (PATCH) |
 | `/api/system/version` | Current commit/tag and GitHub latest version check |
 | `/api/system/claude-update` | Deprecated (returns 410) |
+| `/api/jobs` | Job CRUD — list (GET), create (POST) |
+| `/api/jobs/[id]` | Single job — get (GET), update (PUT), delete (DELETE) |
+| `/api/jobs/[id]/toggle` | Enable/disable job (POST) |
+| `/api/jobs/[id]/run` | Run job immediately (POST) |
+| `/api/jobs/[id]/runs` | Run history — list (GET), single run detail via ?runId= |
+| `/api/jobs/[id]/notify-run` | Internal webhook for wrapper script run start/finish (POST) |
+| `/api/jobs/templates` | Pre-built job templates (GET) |
+| `/api/jobs/ai-builder` | AI job builder chat (POST) |
