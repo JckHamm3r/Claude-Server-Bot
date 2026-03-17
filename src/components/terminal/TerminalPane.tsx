@@ -125,6 +125,16 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, TerminalPaneProps>(
       const handleAttached = ({ tabId: tid }: { tabId: string }) => {
         if (tid !== tabId) return;
         term.write("\x1b[90m[attached]\x1b[0m\r\n");
+        // Force a resize to ensure PTY dimensions match the rendered terminal
+        try {
+          if (fitAddonRef.current) {
+            fitAddonRef.current.fit();
+          }
+          const { cols, rows } = term;
+          if (cols > 1) {
+            socket.emit("terminal:resize", { tabId, cols, rows });
+          }
+        } catch { /* ignore */ }
       };
 
       const handleClosed = ({ tabId: tid }: { tabId: string }) => {
