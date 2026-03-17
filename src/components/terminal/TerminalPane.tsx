@@ -77,15 +77,26 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, TerminalPaneProps>(
 
       term.open(containerRef.current);
 
-      // Delay fit() until after the browser has painted and the container has real dimensions
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
+      // Wait for the container to have real dimensions before fitting.
+      // Use ResizeObserver to fire exactly once when width becomes non-zero.
+      const fitOnce = () => {
+        if (containerRef.current && containerRef.current.offsetWidth > 0) {
           try { fitAddon.fit(); } catch { /* ignore */ }
-          // Attach to backend after fit so the server gets correct terminal dimensions
+          // Attach to backend after fit so server gets correct terminal dimensions
           const { cols, rows } = term;
           socket.emit("terminal:attach", { tabId, cols, rows });
+          return true;
+        }
+        return false;
+      };
+
+      if (!fitOnce()) {
+        // Container not yet visible — use ResizeObserver to wait for non-zero width
+        const initObserver = new ResizeObserver(() => {
+          if (fitOnce()) initObserver.disconnect();
         });
-      });
+        if (containerRef.current) initObserver.observe(containerRef.current);
+      }
       termRef.current = term;
 
       // Track line count for bookmarks

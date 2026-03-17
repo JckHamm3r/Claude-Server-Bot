@@ -209,6 +209,13 @@ export function TerminalManager({ isAdmin }: TerminalManagerProps) {
     });
   }, [allTabs, activeTabId]);
 
+  // Trigger fit on the primary pane when active tab changes
+  useEffect(() => {
+    if (primaryPaneRef.current) {
+      setTimeout(() => primaryPaneRef.current?.fit(), 50);
+    }
+  }, [activeTabId]);
+
   const handleHistorySelect = useCallback(
     (command: string) => {
       if (!activeTabId) return;
@@ -317,34 +324,39 @@ export function TerminalManager({ isAdmin }: TerminalManagerProps) {
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* Main terminal pane(s) */}
         <div className={cn("flex flex-1 min-h-0 min-w-0 overflow-hidden", splitTabId && "gap-0.5")}>
-          {/* Primary pane */}
-          {activeTabId ? (
-            <TerminalPane
-              key={activeTabId}
-              ref={primaryPaneRef}
-              tabId={activeTabId}
-              className="flex-1 min-h-0 p-1"
-              onActivity={() => markActivity(activeTabId)}
-              onCwd={(cwd) => setCwdMap((prev) => ({ ...prev, [activeTabId]: cwd }))}
-            />
-          ) : (
+          {/* All tabs rendered but only active/split shown — keeps xterm alive */}
+          {allTabs.length === 0 && (
             <div className="flex-1 flex items-center justify-center text-bot-muted text-caption">
               {initialized ? "No terminal sessions found" : "Loading..."}
             </div>
           )}
+          {allTabs.map((tab) => {
+            const isActive = tab.id === activeTabId;
+            const isSplit = tab.id === splitTabId;
+            const visible = isActive || isSplit;
+            if (!visible && !isActive && !isSplit) {
+              // Keep mounted but hidden so xterm doesn't lose its PTY
+            }
+            return (
+              <div
+                key={tab.id}
+                className="flex-1 min-h-0 min-w-0"
+                style={{ display: visible ? "flex" : "none" }}
+              >
+                <TerminalPane
+                  ref={isActive ? primaryPaneRef : undefined}
+                  tabId={tab.id}
+                  className="flex-1 min-h-0 p-1"
+                  onActivity={() => markActivity(tab.id)}
+                  onCwd={(cwd) => setCwdMap((prev) => ({ ...prev, [tab.id]: cwd }))}
+                />
+              </div>
+            );
+          })}
 
-          {/* Split pane */}
+          {/* Split divider */}
           {splitTabId && splitTabId !== activeTabId && (
-            <>
-              <div className="w-px bg-bot-border/30 shrink-0" />
-              <TerminalPane
-                key={splitTabId}
-                tabId={splitTabId}
-                className="flex-1 min-h-0 p-1"
-                onActivity={() => markActivity(splitTabId)}
-                onCwd={(cwd) => setCwdMap((prev) => ({ ...prev, [splitTabId]: cwd }))}
-              />
-            </>
+            <div className="w-px bg-bot-border/30 shrink-0" />
           )}
         </div>
 
