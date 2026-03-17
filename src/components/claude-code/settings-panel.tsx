@@ -1095,7 +1095,7 @@ export function SettingsPanel() {
         {/* ── Notifications ── */}
         {activeSection === "notifications" && <NotificationsSection />}
 
-        {activeSection === "security" && <SecuritySection />}
+        {activeSection === "security" && <SecuritySection experienceLevel={userExperienceLevel} />}
 
         {/* ── Templates ── */}
         {activeSection === "templates" && <TemplatesSection />}

@@ -1,14 +1,14 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import {
   Shield, Wifi, Terminal, ScrollText, Plus, X, RefreshCw, Lock, Unlock,
   AlertTriangle, Bot, User, Activity, CircleDot, CheckCircle, XCircle,
-  ChevronDown, ChevronUp, Zap, Globe
+  ChevronDown, ChevronUp, Zap, Globe, Flame, Trash2, Info
 } from "lucide-react";
 import { cn, apiUrl } from "@/lib/utils";
 
-type SecuritySubTab = "guard_rails" | "ip_protection" | "sandbox" | "security_log";
+type SecuritySubTab = "guard_rails" | "ip_protection" | "sandbox" | "security_log" | "firewall";
 
 interface BlockedIP {
   id: number;
@@ -75,7 +75,7 @@ interface SecurityEvent {
   details: string | null;
 }
 
-export function SecuritySection() {
+export function SecuritySection({ experienceLevel = "expert" }: { experienceLevel?: string }) {
   const [activeTab, setActiveTab] = useState<SecuritySubTab>("guard_rails");
 
   // Guard Rails
@@ -376,6 +376,186 @@ export function SecuritySection() {
     }
   }
 
+  // ── UFW Firewall state & handlers ─────────────────────────────────────────
+
+  interface UfwRule { number: number; to: string; action: string; from: string; comment?: string }
+  interface UfwStatus {
+    active: boolean; logging: string;
+    defaultPolicies: { incoming: string; outgoing: string; routed: string };
+    rules: UfwRule[];
+    error?: string;
+  }
+  interface UfwData { available: boolean; status: UfwStatus | null; appPort: number | null; sshPort: number; error?: string }
+  interface PendingUfwChange { changeId: string; confirmDeadlineMs: number; startedAt: number }
+
+  const [ufwData, setUfwData] = useState<UfwData | null>(null);
+  const [ufwLoading, setUfwLoading] = useState(false);
+  const [ufwMsg, setUfwMsg] = useState("");
+  const [ufwMsgType, setUfwMsgType] = useState<"success" | "error">("success");
+  const [ufwRuleLoading, setUfwRuleLoading] = useState(false);
+
+  // Add rule form state
+  const [ufwNewAction, setUfwNewAction] = useState<"allow" | "deny" | "limit">("allow");
+  const [ufwNewPort, setUfwNewPort] = useState("");
+  const [ufwNewProto, setUfwNewProto] = useState<"tcp" | "udp" | "any">("tcp");
+  const [ufwNewFrom, setUfwNewFrom] = useState("");
+  const [ufwFromAnywhere, setUfwFromAnywhere] = useState(true);
+
+  // Rollback / confirm
+  const [pendingUfw, setPendingUfw] = useState<PendingUfwChange | null>(null);
+  const [rollbackSecondsLeft, setRollbackSecondsLeft] = useState(60);
+  const rollbackTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Delete confirm
+  const [confirmDeleteRule, setConfirmDeleteRule] = useState<UfwRule | null>(null);
+
+  const loadUfwData = useCallback(() => {
+    setUfwLoading(true);
+    fetch(apiUrl("/api/security/ufw"))
+      .then((r) => r.json())
+      .then((d: UfwData) => setUfwData(d))
+      .catch(() => setUfwMsg("Failed to load firewall data"))
+      .finally(() => setUfwLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "firewall") loadUfwData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  // Rollback countdown timer
+  useEffect(() => {
+    if (!pendingUfw) {
+      if (rollbackTimerRef.current) clearInterval(rollbackTimerRef.current);
+      return;
+    }
+    const elapsed = Date.now() - pendingUfw.startedAt;
+    const remaining = Math.ceil((pendingUfw.confirmDeadlineMs - elapsed) / 1000);
+    setRollbackSecondsLeft(Math.max(0, remaining));
+
+    rollbackTimerRef.current = setInterval(() => {
+      const el = Date.now() - pendingUfw.startedAt;
+      const rem = Math.ceil((pendingUfw.confirmDeadlineMs - el) / 1000);
+      setRollbackSecondsLeft(Math.max(0, rem));
+      if (rem <= 0) {
+        if (rollbackTimerRef.current) clearInterval(rollbackTimerRef.current);
+        setPendingUfw(null);
+        loadUfwData();
+        showUfwMsg("Change was auto-rolled back (timeout)", "error");
+      }
+    }, 1000);
+
+    return () => { if (rollbackTimerRef.current) clearInterval(rollbackTimerRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingUfw]);
+
+  function showUfwMsg(msg: string, type: "success" | "error" = "success") {
+    setUfwMsg(msg);
+    setUfwMsgType(type);
+    setTimeout(() => setUfwMsg(""), 4000);
+  }
+
+  async function ufwPost(body: Record<string, unknown>): Promise<{ success: boolean; pendingConfirmation?: boolean; changeId?: string; confirmDeadlineMs?: number; error?: string }> {
+    const res = await fetch(apiUrl("/api/security/ufw"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return res.json() as Promise<{ success: boolean; pendingConfirmation?: boolean; changeId?: string; confirmDeadlineMs?: number; error?: string }>;
+  }
+
+  async function handleUfwToggle(enable: boolean) {
+    setUfwRuleLoading(true);
+    try {
+      const result = await ufwPost({ action: enable ? "enable" : "disable" });
+      if (!result.success) { showUfwMsg(result.error ?? "Failed", "error"); return; }
+      if (result.pendingConfirmation && result.changeId) {
+        setPendingUfw({ changeId: result.changeId, confirmDeadlineMs: result.confirmDeadlineMs ?? 60_000, startedAt: Date.now() });
+      }
+      showUfwMsg(enable ? "UFW enabled" : "UFW disabled — confirm access within 60s");
+      loadUfwData();
+    } catch { showUfwMsg("Request failed", "error"); }
+    finally { setUfwRuleLoading(false); }
+  }
+
+  async function handleAddRule() {
+    if (!ufwNewPort.trim()) { showUfwMsg("Port is required", "error"); return; }
+    setUfwRuleLoading(true);
+    try {
+      const result = await ufwPost({
+        action: "add_rule",
+        rule: {
+          action: ufwNewAction,
+          port: ufwNewPort.trim(),
+          protocol: ufwNewProto,
+          from: ufwFromAnywhere ? undefined : ufwNewFrom.trim() || undefined,
+        },
+      });
+      if (!result.success) { showUfwMsg(result.error ?? "Failed", "error"); return; }
+      if (result.pendingConfirmation && result.changeId) {
+        setPendingUfw({ changeId: result.changeId, confirmDeadlineMs: result.confirmDeadlineMs ?? 60_000, startedAt: Date.now() });
+        showUfwMsg("Rule added — confirm access within 60s");
+      } else {
+        showUfwMsg("Rule added");
+      }
+      setUfwNewPort("");
+      setUfwNewFrom("");
+      setUfwFromAnywhere(true);
+      loadUfwData();
+    } catch { showUfwMsg("Request failed", "error"); }
+    finally { setUfwRuleLoading(false); }
+  }
+
+  async function handleDeleteRule(rule: UfwRule) {
+    setConfirmDeleteRule(null);
+    setUfwRuleLoading(true);
+    try {
+      const result = await ufwPost({ action: "delete_rule", ruleNumber: rule.number });
+      if (!result.success) { showUfwMsg(result.error ?? "Failed", "error"); return; }
+      if (result.pendingConfirmation && result.changeId) {
+        setPendingUfw({ changeId: result.changeId, confirmDeadlineMs: result.confirmDeadlineMs ?? 60_000, startedAt: Date.now() });
+        showUfwMsg("Rule deleted — confirm access within 60s");
+      } else {
+        showUfwMsg("Rule deleted");
+      }
+      loadUfwData();
+    } catch { showUfwMsg("Request failed", "error"); }
+    finally { setUfwRuleLoading(false); }
+  }
+
+  async function handleConfirmChange() {
+    if (!pendingUfw) return;
+    try {
+      const result = await ufwPost({ action: "confirm_change", changeId: pendingUfw.changeId });
+      if (!result.success) { showUfwMsg(result.error ?? "Confirm failed", "error"); return; }
+      setPendingUfw(null);
+      showUfwMsg("Changes confirmed and locked in");
+    } catch { showUfwMsg("Confirm failed", "error"); }
+  }
+
+  async function handleRollback() {
+    if (!pendingUfw) return;
+    try {
+      const result = await ufwPost({ action: "rollback", changeId: pendingUfw.changeId });
+      if (!result.success) { showUfwMsg(result.error ?? "Rollback failed", "error"); return; }
+      setPendingUfw(null);
+      loadUfwData();
+      showUfwMsg("Changes rolled back");
+    } catch { showUfwMsg("Rollback failed", "error"); }
+  }
+
+  function ufwQuickPreset(action: "allow", port: string, proto: "tcp" | "udp" | "any") {
+    setUfwNewAction(action);
+    setUfwNewPort(port);
+    setUfwNewProto(proto);
+    setUfwFromAnywhere(true);
+  }
+
+  function isProtectedPort(rule: UfwRule, appPort: number | null): boolean {
+    const portNum = parseInt(rule.to.split("/")[0], 10);
+    return portNum === 22 || (appPort !== null && portNum === appPort);
+  }
+
   // ── Sub-tab definitions ────────────────────────────────────────────────────
 
   const tabs: { key: SecuritySubTab; label: string; icon: React.ReactNode }[] = [
@@ -383,6 +563,7 @@ export function SecuritySection() {
     { key: "ip_protection", label: "IP Protection", icon: <Wifi className="h-4 w-4" /> },
     { key: "sandbox", label: "Command Sandbox", icon: <Terminal className="h-4 w-4" /> },
     { key: "security_log", label: "Security Log", icon: <ScrollText className="h-4 w-4" /> },
+    ...(experienceLevel === "expert" ? [{ key: "firewall" as const, label: "Firewall", icon: <Flame className="h-4 w-4" /> }] : []),
   ];
 
   // Filter + counts
@@ -951,6 +1132,380 @@ export function SecuritySection() {
             >
               Load more
             </button>
+          )}
+        </div>
+      )}
+
+      {/* ── Firewall (UFW) ────────────────────────────────────────────────── */}
+      {activeTab === "firewall" && experienceLevel === "expert" && (
+        <div className="space-y-4">
+          {/* Rollback confirmation modal */}
+          {pendingUfw && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+              <div className="w-full max-w-md rounded-2xl border border-bot-border bg-bot-surface p-6 shadow-2xl">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="rounded-full bg-bot-amber/15 p-2">
+                    <AlertTriangle className="h-5 w-5 text-bot-amber" />
+                  </div>
+                  <div>
+                    <h3 className="text-body font-semibold text-bot-text">Confirm Access</h3>
+                    <p className="text-caption text-bot-muted">Verify you still have access to this panel</p>
+                  </div>
+                </div>
+                <p className="text-caption text-bot-muted mb-5">
+                  A firewall change was applied. If you can still see this, confirm the change to make it permanent. Otherwise it will be automatically reverted.
+                </p>
+                <div className="flex items-center justify-center mb-6">
+                  <div className="relative h-20 w-20">
+                    <svg className="h-20 w-20 -rotate-90" viewBox="0 0 80 80">
+                      <circle cx="40" cy="40" r="34" fill="none" stroke="currentColor" strokeWidth="6" className="text-bot-border" />
+                      <circle
+                        cx="40" cy="40" r="34" fill="none" stroke="currentColor" strokeWidth="6"
+                        className="text-bot-amber transition-all duration-1000"
+                        strokeDasharray={`${2 * Math.PI * 34}`}
+                        strokeDashoffset={`${2 * Math.PI * 34 * (1 - rollbackSecondsLeft / 60)}`}
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    <span className="absolute inset-0 flex items-center justify-center text-subtitle font-bold text-bot-text">
+                      {rollbackSecondsLeft}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleConfirmChange}
+                    className="flex-1 rounded-lg bg-bot-green px-4 py-2.5 text-caption font-semibold text-white hover:bg-bot-green/80 transition-colors"
+                  >
+                    <CheckCircle className="inline h-4 w-4 mr-1.5" />
+                    I still have access — Keep Changes
+                  </button>
+                  <button
+                    onClick={handleRollback}
+                    className="flex-1 rounded-lg bg-bot-red px-4 py-2.5 text-caption font-semibold text-white hover:bg-bot-red/80 transition-colors"
+                  >
+                    <X className="inline h-4 w-4 mr-1.5" />
+                    Undo Changes
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Delete confirmation modal */}
+          {confirmDeleteRule && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+              <div className="w-full max-w-sm rounded-2xl border border-bot-border bg-bot-surface p-6 shadow-2xl">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="rounded-full bg-bot-red/15 p-2">
+                    <Trash2 className="h-5 w-5 text-bot-red" />
+                  </div>
+                  <h3 className="text-body font-semibold text-bot-text">Delete Rule</h3>
+                </div>
+                <p className="text-caption text-bot-muted mb-2">Delete rule #{confirmDeleteRule.number}?</p>
+                <code className="block rounded-lg bg-bot-elevated px-3 py-2 text-caption font-mono text-bot-text mb-5">
+                  {confirmDeleteRule.action.toUpperCase()} {confirmDeleteRule.to} from {confirmDeleteRule.from}
+                </code>
+                {(confirmDeleteRule.to.startsWith("22") || (ufwData?.appPort && confirmDeleteRule.to.startsWith(String(ufwData.appPort)))) && (
+                  <div className="mb-4 rounded-lg border border-bot-amber/30 bg-bot-amber/10 px-3 py-2 flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 text-bot-amber mt-0.5 shrink-0" />
+                    <p className="text-caption text-bot-amber">This is a protected port. Deleting this rule may block access to SSH or this admin panel.</p>
+                  </div>
+                )}
+                <p className="text-caption text-bot-muted mb-4">You will have 60 seconds to confirm you still have access before the change auto-reverts.</p>
+                <div className="flex gap-3">
+                  <button onClick={() => setConfirmDeleteRule(null)} className="flex-1 rounded-lg border border-bot-border px-4 py-2 text-caption text-bot-muted hover:text-bot-text transition-colors">
+                    Cancel
+                  </button>
+                  <button onClick={() => handleDeleteRule(confirmDeleteRule)} className="flex-1 rounded-lg bg-bot-red px-4 py-2 text-caption font-semibold text-white hover:bg-bot-red/80 transition-colors">
+                    Delete Rule
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between">
+            <h3 className="text-body font-medium text-bot-text">UFW Firewall</h3>
+            <button onClick={loadUfwData} disabled={ufwLoading} className="text-caption text-bot-muted hover:text-bot-text flex items-center gap-1 disabled:opacity-50">
+              <RefreshCw className={cn("h-3 w-3", ufwLoading && "animate-spin")} /> Refresh
+            </button>
+          </div>
+
+          {ufwMsg && (
+            <div className={cn("rounded-lg border px-3 py-2 text-caption flex items-center gap-2",
+              ufwMsgType === "success" ? "border-bot-green/30 bg-bot-green/10 text-bot-green" : "border-bot-red/30 bg-bot-red/10 text-bot-red"
+            )}>
+              {ufwMsgType === "success" ? <CheckCircle className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
+              {ufwMsg}
+            </div>
+          )}
+
+          {ufwLoading && !ufwData && (
+            <p className="text-caption text-bot-muted">Loading firewall status…</p>
+          )}
+
+          {ufwData && !ufwData.available && (
+            <div className="rounded-lg border border-bot-amber/30 bg-bot-amber/10 px-4 py-3 flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 text-bot-amber mt-0.5 shrink-0" />
+              <div>
+                <p className="text-caption font-medium text-bot-amber">UFW not available</p>
+                <p className="text-caption text-bot-muted mt-0.5">{ufwData.error ?? "ufw binary not found. Install with: sudo apt install ufw"}</p>
+              </div>
+            </div>
+          )}
+
+          {ufwData?.available && ufwData.status && (
+            <>
+              {/* Status Banner */}
+              <div className="rounded-lg border border-bot-border bg-bot-elevated p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <CircleDot className={cn("h-4 w-4", ufwData.status.active ? "text-bot-green" : "text-bot-muted")} />
+                    <span className="text-caption font-semibold text-bot-text">
+                      UFW is {ufwData.status.active ? "active" : "inactive"}
+                    </span>
+                    <span className={cn("rounded-full px-2 py-0.5 text-caption font-medium",
+                      ufwData.status.active ? "bg-bot-green/15 text-bot-green" : "bg-bot-muted/15 text-bot-muted"
+                    )}>
+                      {ufwData.status.active ? "Enabled" : "Disabled"}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => handleUfwToggle(!ufwData.status!.active)}
+                    disabled={ufwRuleLoading}
+                    className={cn(
+                      "rounded-lg px-3 py-1.5 text-caption font-medium transition-colors disabled:opacity-50",
+                      ufwData.status.active
+                        ? "bg-bot-red/15 text-bot-red hover:bg-bot-red/25"
+                        : "bg-bot-green/15 text-bot-green hover:bg-bot-green/25"
+                    )}
+                  >
+                    {ufwData.status.active ? "Disable" : "Enable"}
+                  </button>
+                </div>
+
+                {/* Default policies */}
+                <div className="flex gap-4 text-caption">
+                  <div>
+                    <span className="text-bot-muted">Incoming: </span>
+                    <span className={cn("font-medium", ufwData.status.defaultPolicies.incoming === "deny" ? "text-bot-red" : "text-bot-green")}>
+                      {ufwData.status.defaultPolicies.incoming}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-bot-muted">Outgoing: </span>
+                    <span className={cn("font-medium", ufwData.status.defaultPolicies.outgoing === "allow" ? "text-bot-green" : "text-bot-red")}>
+                      {ufwData.status.defaultPolicies.outgoing}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-bot-muted">Logging: </span>
+                    <span className="font-medium text-bot-text">{ufwData.status.logging}</span>
+                  </div>
+                </div>
+
+                {/* Protected port info */}
+                {(ufwData.appPort || ufwData.sshPort) && (
+                  <div className="flex items-start gap-2 rounded-lg bg-bot-surface/50 px-3 py-2 border border-bot-border/50">
+                    <Info className="h-3.5 w-3.5 text-bot-muted mt-0.5 shrink-0" />
+                    <p className="text-caption text-bot-muted">
+                      Protected ports:{" "}
+                      <span className="text-bot-text font-medium">SSH (22)</span>
+                      {ufwData.appPort && ufwData.appPort !== 22 && (
+                        <>, <span className="text-bot-text font-medium">App ({ufwData.appPort})</span></>
+                      )}
+                      {" "}— rules on these ports will show a warning before deletion.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Quick Presets */}
+              <div>
+                <p className="text-caption text-bot-muted mb-2">Quick presets</p>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { label: "SSH (22)", port: "22", proto: "tcp" as const },
+                    { label: "HTTP (80)", port: "80", proto: "tcp" as const },
+                    { label: "HTTPS (443)", port: "443", proto: "tcp" as const },
+                    ...(ufwData.appPort && ufwData.appPort !== 80 && ufwData.appPort !== 443
+                      ? [{ label: `App (${ufwData.appPort})`, port: String(ufwData.appPort), proto: "tcp" as const }]
+                      : []),
+                  ].map((preset) => (
+                    <button
+                      key={preset.port}
+                      onClick={() => ufwQuickPreset("allow", preset.port, preset.proto)}
+                      className="rounded-lg border border-bot-border bg-bot-elevated px-3 py-1.5 text-caption text-bot-muted hover:text-bot-text hover:border-bot-accent transition-colors"
+                    >
+                      + {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Add Rule Form */}
+              <div className="rounded-lg border border-bot-border bg-bot-elevated p-4 space-y-3">
+                <h4 className="text-caption font-semibold text-bot-text">Add Rule</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Action */}
+                  <div>
+                    <label className="block text-caption text-bot-muted mb-1.5">Action</label>
+                    <div className="flex gap-1">
+                      {(["allow", "deny", "limit"] as const).map((a) => (
+                        <button
+                          key={a}
+                          onClick={() => setUfwNewAction(a)}
+                          className={cn(
+                            "flex-1 rounded-lg border px-2 py-1.5 text-caption font-medium capitalize transition-colors",
+                            ufwNewAction === a
+                              ? a === "allow" ? "border-bot-green bg-bot-green/15 text-bot-green" : a === "deny" ? "border-bot-red bg-bot-red/15 text-bot-red" : "border-bot-amber bg-bot-amber/15 text-bot-amber"
+                              : "border-bot-border bg-bot-surface text-bot-muted hover:text-bot-text"
+                          )}
+                        >
+                          {a}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Protocol */}
+                  <div>
+                    <label className="block text-caption text-bot-muted mb-1.5">Protocol</label>
+                    <div className="flex gap-1">
+                      {(["tcp", "udp", "any"] as const).map((p) => (
+                        <button
+                          key={p}
+                          onClick={() => setUfwNewProto(p)}
+                          className={cn(
+                            "flex-1 rounded-lg border px-2 py-1.5 text-caption font-medium uppercase transition-colors",
+                            ufwNewProto === p
+                              ? "border-bot-accent bg-bot-accent/15 text-bot-accent"
+                              : "border-bot-border bg-bot-surface text-bot-muted hover:text-bot-text"
+                          )}
+                        >
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Port */}
+                  <div>
+                    <label className="block text-caption text-bot-muted mb-1">Port / Range</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 8080 or 6000:6100"
+                      value={ufwNewPort}
+                      onChange={(e) => setUfwNewPort(e.target.value)}
+                      className="w-full rounded-lg border border-bot-border bg-bot-surface px-3 py-2 text-caption text-bot-text outline-none focus:border-bot-accent font-mono"
+                    />
+                  </div>
+
+                  {/* From */}
+                  <div>
+                    <label className="block text-caption text-bot-muted mb-1">From</label>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <button
+                        role="switch"
+                        aria-checked={ufwFromAnywhere}
+                        onClick={() => setUfwFromAnywhere((v) => !v)}
+                        className={cn(
+                          "relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors",
+                          ufwFromAnywhere ? "bg-bot-accent" : "bg-bot-border"
+                        )}
+                      >
+                        <span className={cn("inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform", ufwFromAnywhere ? "translate-x-4" : "translate-x-0")} />
+                      </button>
+                      <span className="text-caption text-bot-muted">Anywhere</span>
+                    </div>
+                    {!ufwFromAnywhere && (
+                      <input
+                        type="text"
+                        placeholder="e.g. 192.168.1.0/24"
+                        value={ufwNewFrom}
+                        onChange={(e) => setUfwNewFrom(e.target.value)}
+                        className="w-full rounded-lg border border-bot-border bg-bot-surface px-3 py-2 text-caption text-bot-text outline-none focus:border-bot-accent font-mono"
+                      />
+                    )}
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleAddRule}
+                  disabled={ufwRuleLoading || !ufwNewPort.trim()}
+                  className="flex items-center gap-1.5 rounded-lg bg-bot-accent px-4 py-2 text-caption font-semibold text-white hover:bg-bot-accent/80 disabled:opacity-50 transition-colors"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add Rule
+                </button>
+              </div>
+
+              {/* Rules Table */}
+              <div>
+                <h4 className="text-caption font-semibold text-bot-text mb-2">
+                  Current Rules
+                  <span className="ml-2 text-bot-muted font-normal">({ufwData.status.rules.length})</span>
+                </h4>
+                {ufwData.status.rules.length === 0 ? (
+                  <p className="text-caption text-bot-muted py-2">No rules configured.</p>
+                ) : (
+                  <div className="rounded-lg border border-bot-border overflow-hidden">
+                    <table className="w-full text-caption">
+                      <thead className="bg-bot-surface border-b border-bot-border">
+                        <tr>
+                          <th className="text-left px-3 py-2 text-bot-muted font-medium w-8">#</th>
+                          <th className="text-left px-3 py-2 text-bot-muted font-medium">To</th>
+                          <th className="text-left px-3 py-2 text-bot-muted font-medium">Action</th>
+                          <th className="text-left px-3 py-2 text-bot-muted font-medium">From</th>
+                          <th className="w-8"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-bot-border">
+                        {ufwData.status.rules.map((rule) => {
+                          const protected_ = isProtectedPort(rule, ufwData.appPort);
+                          return (
+                            <tr key={rule.number} className="bg-bot-elevated hover:bg-bot-surface transition-colors">
+                              <td className="px-3 py-2 font-mono text-bot-muted">{rule.number}</td>
+                              <td className="px-3 py-2 font-mono text-bot-text">
+                                <span className="flex items-center gap-1">
+                                  {rule.to}
+                                  {protected_ && (
+                                    <span title="Protected port — deleting may block access" className="text-bot-amber">
+                                      <AlertTriangle className="h-3 w-3" />
+                                    </span>
+                                  )}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2">
+                                <span className={cn("rounded-full px-2 py-0.5 text-caption font-medium",
+                                  rule.action === "allow" ? "bg-bot-green/15 text-bot-green" :
+                                  rule.action === "deny" || rule.action === "reject" ? "bg-bot-red/15 text-bot-red" :
+                                  "bg-bot-amber/15 text-bot-amber"
+                                )}>
+                                  {rule.action.toUpperCase()}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 font-mono text-bot-muted">{rule.from}</td>
+                              <td className="px-3 py-2">
+                                <button
+                                  onClick={() => setConfirmDeleteRule(rule)}
+                                  disabled={ufwRuleLoading}
+                                  className="text-bot-muted hover:text-bot-red transition-colors disabled:opacity-50"
+                                  title="Delete rule"
+                                >
+                                  <X className="h-4 w-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}

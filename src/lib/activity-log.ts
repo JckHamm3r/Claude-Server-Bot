@@ -40,7 +40,13 @@ export type ActivityEventType =
   | "job_enabled"
   | "job_disabled"
   | "job_run_manual"
-  | "job_auto_disabled";
+  | "job_auto_disabled"
+  | "security_ufw_rule_added"
+  | "security_ufw_rule_deleted"
+  | "security_ufw_enabled"
+  | "security_ufw_disabled"
+  | "security_ufw_rollback"
+  | "security_ufw_change_confirmed";
 
 export function logActivity(
   event_type: ActivityEventType,

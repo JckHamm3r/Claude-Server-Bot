@@ -230,72 +230,69 @@ export function ServiceDetailDrawer({
 
       {/* Drawer */}
       <div className="flex flex-col w-full max-w-2xl bg-bot-background border-l border-bot-border/40 shadow-2xl overflow-hidden">
+
         {/* Header */}
-        <div className="flex items-start gap-3 px-5 py-4 border-b border-bot-border/30 bg-bot-surface/60">
+        <div className="flex items-center gap-3 px-5 py-3.5 border-b border-bot-border/30 bg-bot-surface/60">
+          <span className="relative flex h-2.5 w-2.5 shrink-0">
+            {isRunning && (
+              <span className={cn("animate-ping absolute inline-flex h-full w-full rounded-full opacity-40", dotColor)} />
+            )}
+            <span className={cn("relative inline-flex rounded-full h-2.5 w-2.5", dotColor)} />
+          </span>
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="relative flex h-2.5 w-2.5 shrink-0 mt-0.5">
-                {isRunning && (
-                  <span className={cn("animate-ping absolute inline-flex h-full w-full rounded-full opacity-40", dotColor)} />
-                )}
-                <span className={cn("relative inline-flex rounded-full h-2.5 w-2.5", dotColor)} />
-              </span>
+            <div className="flex items-center gap-2">
               <h3 className="text-body font-bold font-mono text-bot-text truncate">{unit.unit}</h3>
-              {octoby && (
-                <span className="shrink-0 rounded-full bg-bot-accent/10 border border-bot-accent/20 px-2 py-0.5 text-[10px] font-medium text-bot-accent">
-                  Octoby Managed
-                </span>
-              )}
-              {isDanger && (
-                <span className="shrink-0 rounded-full bg-bot-red/10 border border-bot-red/20 px-2 py-0.5 text-[10px] font-medium text-bot-red flex items-center gap-1">
-                  <AlertTriangle className="h-3 w-3" /> Danger Zone
-                </span>
-              )}
               <span className={cn(
-                "shrink-0 text-caption capitalize font-medium px-2 py-0.5 rounded-full",
+                "shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full",
                 isFailed ? "bg-bot-red/10 text-bot-red" : isRunning ? "bg-bot-green/10 text-bot-green" : "bg-bot-muted/10 text-bot-muted",
               )}>
                 {label}
               </span>
+              {octoby && (
+                <span className="shrink-0 rounded-full bg-bot-accent/10 border border-bot-accent/20 px-1.5 py-0.5 text-[10px] font-medium text-bot-accent">
+                  Managed
+                </span>
+              )}
+              {isDanger && (
+                <span className="shrink-0 rounded-full bg-bot-red/10 border border-bot-red/20 px-1.5 py-0.5 text-[10px] font-medium text-bot-red flex items-center gap-1">
+                  <AlertTriangle className="h-2.5 w-2.5" /> Critical
+                </span>
+              )}
             </div>
-            <p className="text-caption text-bot-muted mt-1 truncate">{detail?.Description ?? unit.description}</p>
+            <p className="text-[11px] text-bot-muted mt-0.5 truncate">{detail?.Description ?? unit.description}</p>
           </div>
           <button onClick={onClose} className="shrink-0 rounded-lg p-1.5 text-bot-muted hover:text-bot-text hover:bg-bot-elevated transition-colors">
             <X className="h-4 w-4" />
           </button>
         </div>
 
+        {/* Confirm zone (full-width banner, shown only when active) */}
+        {confirmAction && (
+          <div className="flex items-center gap-3 px-5 py-2.5 bg-bot-red/10 border-b border-bot-red/20">
+            <AlertTriangle className="h-4 w-4 text-bot-red shrink-0" />
+            <span className="text-caption text-bot-red flex-1">
+              Confirm <span className="font-semibold">{confirmAction}</span>?
+            </span>
+            <button
+              onClick={() => { setConfirmAction(null); handleAction(confirmAction); }}
+              className="rounded-md bg-bot-red px-3 py-1 text-caption font-medium text-white hover:bg-bot-red/80 transition-colors"
+            >
+              Confirm
+            </button>
+            <button
+              onClick={() => setConfirmAction(null)}
+              className="text-caption text-bot-muted hover:text-bot-text transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
         {/* Action buttons */}
-        <div className="flex items-center gap-2 px-5 py-3 border-b border-bot-border/30 bg-bot-surface/40 flex-wrap">
-          {isDanger && (
-            <div className="flex items-center gap-1.5 text-caption text-bot-amber mr-2">
-              <AlertTriangle className="h-3.5 w-3.5" />
-              <span>Critical system service</span>
-            </div>
-          )}
-
-          {/* Confirm zone */}
-          {confirmAction && (
-            <div className="flex items-center gap-2 rounded-lg border border-bot-red/30 bg-bot-red/10 px-3 py-1.5 mr-2">
-              <AlertTriangle className="h-3.5 w-3.5 text-bot-red shrink-0" />
-              <span className="text-caption text-bot-red">Confirm {confirmAction}?</span>
-              <button
-                onClick={() => { setConfirmAction(null); handleAction(confirmAction); }}
-                className="rounded-md bg-bot-red px-2 py-0.5 text-caption font-medium text-white hover:bg-bot-red/80 transition-colors"
-              >
-                Yes
-              </button>
-              <button
-                onClick={() => setConfirmAction(null)}
-                className="text-caption text-bot-muted hover:text-bot-text transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          )}
-
+        <div className="flex items-center justify-between gap-3 px-5 py-2.5 border-b border-bot-border/30 bg-bot-surface/40">
+          {/* Runtime actions */}
           <div className="flex items-center gap-1.5">
-            {!isRunning && (
+            {!isRunning ? (
               <ServiceActionBtn
                 icon={<Play className="h-3.5 w-3.5" />}
                 label="Start"
@@ -304,8 +301,7 @@ export function ServiceDetailDrawer({
                 onClick={() => handleAction("start")}
                 variant="green"
               />
-            )}
-            {isRunning && (
+            ) : (
               <ServiceActionBtn
                 icon={<Square className="h-3.5 w-3.5" />}
                 label="Stop"
@@ -335,8 +331,7 @@ export function ServiceDetailDrawer({
             )}
           </div>
 
-          <div className="h-4 w-px bg-bot-border/30" />
-
+          {/* Boot / mask actions */}
           <div className="flex items-center gap-1.5">
             {!isEnabled && !isMasked && (
               <ServiceActionBtn
@@ -381,13 +376,13 @@ export function ServiceDetailDrawer({
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-0 border-b border-bot-border/30 bg-bot-surface/30 px-5">
+        <div className="flex border-b border-bot-border/30 bg-bot-surface/30 px-2">
           {(["overview", "journal", "unit-file", "resources"] as DrawerTab[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
               className={cn(
-                "flex items-center gap-1.5 px-3 py-2.5 text-caption font-medium border-b-2 transition-colors capitalize",
+                "flex items-center gap-1.5 px-3 py-2.5 text-caption font-medium border-b-2 transition-colors",
                 tab === t
                   ? "border-bot-accent text-bot-accent"
                   : "border-transparent text-bot-muted hover:text-bot-text",
@@ -407,53 +402,88 @@ export function ServiceDetailDrawer({
 
           {/* Overview */}
           {tab === "overview" && (
-            <div className="p-5 space-y-4">
+            <div className="p-5 space-y-5">
               {loadingDetail ? (
                 <div className="flex items-center justify-center py-12 gap-2 text-bot-muted">
                   <Loader2 className="h-5 w-5 animate-spin" />
                 </div>
               ) : (
                 <>
-                  <DetailGrid items={[
-                    { label: "Unit", value: unit.unit },
-                    { label: "Type", value: unit.type },
-                    { label: "Load State", value: detail?.LoadState ?? "—" },
-                    { label: "Active State", value: detail?.ActiveState ?? unit.active, highlight: isFailed ? "red" : isRunning ? "green" : undefined },
-                    { label: "Sub State", value: detail?.SubState ?? unit.sub },
-                    { label: "Startup", value: detail?.UnitFileState ?? "—" },
-                    { label: "PID", value: detail?.MainPID && detail.MainPID !== "0" ? detail.MainPID : "—" },
-                    { label: "Restart Policy", value: detail?.Restart ?? "—" },
-                    { label: "Restart Count", value: detail?.NRestarts ?? "—" },
-                    { label: "Run As", value: detail?.User ?? "root" },
-                    { label: "Working Dir", value: detail?.WorkingDirectory ?? "—", mono: true },
-                    { label: "Active Since", value: formatTimestamp(detail?.ActiveEnterTimestamp) },
-                    { label: "Last Inactive", value: formatTimestamp(detail?.InactiveEnterTimestamp) },
-                    { label: "Memory", value: formatMemory(detail?.MemoryCurrent) },
-                    { label: "CPU Time", value: formatCpuNs(detail?.CPUUsageNSec) },
-                    { label: "Fragment Path", value: detail?.FragmentPath ?? "—", mono: true },
-                  ]} />
+                  {/* Status section */}
+                  <div className="rounded-lg border border-bot-border/30 bg-bot-elevated/30 overflow-hidden">
+                    <div className="px-4 py-2 border-b border-bot-border/20 bg-bot-surface/40">
+                      <span className="text-[10px] font-semibold uppercase tracking-widest text-bot-muted">Status</span>
+                    </div>
+                    <DetailGrid items={[
+                      { label: "Active State", value: detail?.ActiveState ?? unit.active, highlight: isFailed ? "red" : isRunning ? "green" : undefined },
+                      { label: "Sub State", value: detail?.SubState ?? unit.sub },
+                      { label: "Load State", value: detail?.LoadState ?? "—" },
+                      { label: "Startup", value: detail?.UnitFileState ?? "—" },
+                      { label: "Active Since", value: formatTimestamp(detail?.ActiveEnterTimestamp) },
+                      { label: "Last Inactive", value: formatTimestamp(detail?.InactiveEnterTimestamp) },
+                    ]} />
+                  </div>
+
+                  {/* Process section */}
+                  <div className="rounded-lg border border-bot-border/30 bg-bot-elevated/30 overflow-hidden">
+                    <div className="px-4 py-2 border-b border-bot-border/20 bg-bot-surface/40">
+                      <span className="text-[10px] font-semibold uppercase tracking-widest text-bot-muted">Process</span>
+                    </div>
+                    <DetailGrid items={[
+                      { label: "PID", value: detail?.MainPID && detail.MainPID !== "0" ? detail.MainPID : "—" },
+                      { label: "Run As", value: detail?.User ?? "root" },
+                      { label: "Restart Policy", value: detail?.Restart ?? "—" },
+                      { label: "Restart Count", value: detail?.NRestarts ?? "—" },
+                      { label: "Memory", value: formatMemory(detail?.MemoryCurrent) },
+                      { label: "CPU Time", value: formatCpuNs(detail?.CPUUsageNSec) },
+                    ]} />
+                    {(detail?.WorkingDirectory || detail?.FragmentPath) && (
+                      <div className="px-4 pb-4 space-y-3 border-t border-bot-border/20 pt-3">
+                        {detail?.WorkingDirectory && detail.WorkingDirectory !== "" && (
+                          <div>
+                            <p className="text-[10px] text-bot-muted mb-1">Working Directory</p>
+                            <p className="text-caption font-mono text-bot-text/80 break-all">{detail.WorkingDirectory}</p>
+                          </div>
+                        )}
+                        {detail?.FragmentPath && (
+                          <div>
+                            <p className="text-[10px] text-bot-muted mb-1">Fragment Path</p>
+                            <p className="text-caption font-mono text-bot-text/80 break-all">{detail.FragmentPath}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
 
                   {detail?.ExecStart && (
-                    <div className="rounded-lg border border-bot-border/30 bg-bot-elevated/40 p-4">
-                      <p className="text-caption text-bot-muted mb-2">ExecStart</p>
-                      <pre className="text-caption font-mono text-bot-text whitespace-pre-wrap break-all">{detail.ExecStart}</pre>
+                    <div className="rounded-lg border border-bot-border/30 bg-bot-elevated/30 overflow-hidden">
+                      <div className="px-4 py-2 border-b border-bot-border/20 bg-bot-surface/40">
+                        <span className="text-[10px] font-semibold uppercase tracking-widest text-bot-muted">ExecStart</span>
+                      </div>
+                      <pre className="px-4 py-3 text-caption font-mono text-bot-text/90 whitespace-pre-wrap break-all">{detail.ExecStart}</pre>
                     </div>
                   )}
 
                   {detail?.Environment && detail.Environment !== "" && (
-                    <div className="rounded-lg border border-bot-border/30 bg-bot-elevated/40 p-4">
-                      <p className="text-caption text-bot-muted mb-2">Environment</p>
-                      <pre className="text-caption font-mono text-bot-text whitespace-pre-wrap break-all">{detail.Environment.split(" ").join("\n")}</pre>
+                    <div className="rounded-lg border border-bot-border/30 bg-bot-elevated/30 overflow-hidden">
+                      <div className="px-4 py-2 border-b border-bot-border/20 bg-bot-surface/40">
+                        <span className="text-[10px] font-semibold uppercase tracking-widest text-bot-muted">Environment</span>
+                      </div>
+                      <pre className="px-4 py-3 text-caption font-mono text-bot-text/90 whitespace-pre-wrap break-all">{detail.Environment.split(" ").join("\n")}</pre>
                     </div>
                   )}
 
                   {(detail?.WantedBy || detail?.Requires || detail?.After || detail?.PartOf) && (
-                    <div className="rounded-lg border border-bot-border/30 bg-bot-elevated/40 p-4 space-y-2">
-                      <p className="text-caption text-bot-muted mb-2">Dependencies</p>
-                      {detail?.WantedBy && <DepRow label="WantedBy" value={detail.WantedBy} />}
-                      {detail?.Requires && <DepRow label="Requires" value={detail.Requires} />}
-                      {detail?.After && <DepRow label="After" value={detail.After} />}
-                      {detail?.PartOf && <DepRow label="PartOf" value={detail.PartOf} />}
+                    <div className="rounded-lg border border-bot-border/30 bg-bot-elevated/30 overflow-hidden">
+                      <div className="px-4 py-2 border-b border-bot-border/20 bg-bot-surface/40">
+                        <span className="text-[10px] font-semibold uppercase tracking-widest text-bot-muted">Dependencies</span>
+                      </div>
+                      <div className="px-4 py-3 space-y-2.5">
+                        {detail?.WantedBy && <DepRow label="WantedBy" value={detail.WantedBy} />}
+                        {detail?.Requires && <DepRow label="Requires" value={detail.Requires} />}
+                        {detail?.After && <DepRow label="After" value={detail.After} />}
+                        {detail?.PartOf && <DepRow label="PartOf" value={detail.PartOf} />}
+                      </div>
                     </div>
                   )}
                 </>
@@ -563,14 +593,14 @@ export function ServiceDetailDrawer({
 
 function DetailGrid({ items }: { items: { label: string; value: string; mono?: boolean; highlight?: "red" | "green" }[] }) {
   return (
-    <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+    <div className="grid grid-cols-3 gap-px bg-bot-border/20">
       {items.map((item) => (
-        <div key={item.label}>
-          <p className="text-caption text-bot-muted">{item.label}</p>
+        <div key={item.label} className="px-4 py-3 bg-bot-background/60">
+          <p className="text-[10px] text-bot-muted uppercase tracking-wide mb-1">{item.label}</p>
           <p className={cn(
-            "text-body mt-0.5 break-all",
-            item.mono ? "font-mono text-caption" : "",
-            item.highlight === "red" ? "text-bot-red font-medium" : item.highlight === "green" ? "text-bot-green font-medium" : "text-bot-text",
+            "text-caption break-all",
+            item.mono ? "font-mono" : "font-medium",
+            item.highlight === "red" ? "text-bot-red" : item.highlight === "green" ? "text-bot-green" : "text-bot-text",
           )}>
             {item.value}
           </p>
