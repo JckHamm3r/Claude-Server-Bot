@@ -329,12 +329,19 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
           }
         });
 
-        // Replay scrollback
-        const storedLines = JSON.parse(session.scrollback_json || "[]") as string[];
-        if (storedLines.length > 0) {
-          // Seed in-memory buffer with stored lines
-          scrollbackBuffers.set(tabId, storedLines);
-          socket.emit("terminal:scrollback", { tabId, lines: storedLines });
+        // Replay scrollback only if we have an active in-memory buffer
+        // (means this is a reconnect to a session that already had output).
+        // On a fresh PTY spawn (new session or server restart), don't replay
+        // stale DB scrollback as it pushes new output off screen.
+        const activeBuffer = scrollbackBuffers.get(tabId);
+        if (activeBuffer && activeBuffer.length > 0) {
+          socket.emit("terminal:scrollback", { tabId, lines: activeBuffer });
+        } else {
+          // Seed the in-memory buffer from DB so future reconnects have scrollback
+          const storedLines = JSON.parse(session.scrollback_json || "[]") as string[];
+          if (storedLines.length > 0) {
+            scrollbackBuffers.set(tabId, storedLines);
+          }
         }
 
         // Small delay to let the PTY initialize before client sends resize
