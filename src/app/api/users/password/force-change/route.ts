@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
       email
     );
 
-    logActivity("user_password_changed", email, "Forced password change completed");
+    logActivity("user_password_changed", email, { reason: "forced" });
 
     return NextResponse.json({ success: true });
   } catch (error) {
