@@ -36,6 +36,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, TerminalPaneProps>(
 
     const initTerminal = useCallback(async () => {
       if (!containerRef.current || termRef.current) return;
+      const attachedRef = { current: false };
 
       const [{ Terminal }, { FitAddon }] = await Promise.all([
         import("@xterm/xterm"),
@@ -114,8 +115,8 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, TerminalPaneProps>(
 
       const handleScrollback = ({ tabId: tid, lines }: { tabId: string; lines: string[] }) => {
         if (tid !== tabId) return;
+        if (attachedRef.current) return; // Only show scrollback on first attach
         if (lines.length > 0) {
-          // Write scrollback as a replay header
           term.write("\r\n\x1b[90m── scrollback replay ──\x1b[0m\r\n");
           term.write(lines.join("\r\n"));
           term.write("\r\n\x1b[90m── live ──\x1b[0m\r\n");
@@ -124,6 +125,9 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, TerminalPaneProps>(
 
       const handleAttached = ({ tabId: tid }: { tabId: string }) => {
         if (tid !== tabId) return;
+        if (!attachedRef.current) {
+          attachedRef.current = true;
+        }
         term.write("\x1b[90m[attached]\x1b[0m\r\n");
         // Force a resize to ensure PTY dimensions match the rendered terminal
         try {
