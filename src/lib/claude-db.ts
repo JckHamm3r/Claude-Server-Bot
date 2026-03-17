@@ -745,6 +745,269 @@ export function deleteSessionUploads(sessionId: string): void {
   db.prepare("DELETE FROM uploads WHERE session_id = ?").run(sessionId);
 }
 
+// ==================== JOBS ====================
+
+export type JobStatus = "active" | "paused" | "failed" | "draft";
+export type JobRunStatus = "running" | "success" | "failed" | "cancelled";
+export type JobRunTrigger = "timer" | "manual" | "retry";
+
+export interface Job {
+  id: string;
+  name: string;
+  description: string;
+  script_path: string;
+  schedule: string;
+  schedule_display: string;
+  working_directory: string;
+  environment: Record<string, string>;
+  status: JobStatus;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  last_run_at: string | null;
+  last_run_status: "success" | "failed" | "running" | null;
+  next_run_at: string | null;
+  run_count: number;
+  fail_count: number;
+  consecutive_failures: number;
+  max_retries: number;
+  timeout_seconds: number;
+  auto_disable_after: number;
+  notify_on_failure: boolean;
+  notify_on_success: boolean;
+  tags: string[];
+  ai_generated: boolean;
+  systemd_unit: string | null;
+}
+
+export interface JobRun {
+  id: string;
+  job_id: string;
+  started_at: string;
+  finished_at: string | null;
+  status: JobRunStatus;
+  exit_code: number | null;
+  output: string;
+  output_log_path: string | null;
+  duration_ms: number | null;
+  triggered_by: JobRunTrigger;
+  error_summary: string | null;
+}
+
+function rowToJob(row: Record<string, unknown>): Job {
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    description: (row.description as string) ?? "",
+    script_path: row.script_path as string,
+    schedule: row.schedule as string,
+    schedule_display: (row.schedule_display as string) ?? "",
+    working_directory: (row.working_directory as string) ?? "",
+    environment: safeJsonParse(row.environment, {} as Record<string, string>),
+    status: row.status as JobStatus,
+    created_by: row.created_by as string,
+    created_at: row.created_at as string,
+    updated_at: row.updated_at as string,
+    last_run_at: row.last_run_at as string | null,
+    last_run_status: row.last_run_status as "success" | "failed" | "running" | null,
+    next_run_at: row.next_run_at as string | null,
+    run_count: (row.run_count as number) ?? 0,
+    fail_count: (row.fail_count as number) ?? 0,
+    consecutive_failures: (row.consecutive_failures as number) ?? 0,
+    max_retries: (row.max_retries as number) ?? 0,
+    timeout_seconds: (row.timeout_seconds as number) ?? 0,
+    auto_disable_after: (row.auto_disable_after as number) ?? 0,
+    notify_on_failure: Boolean(row.notify_on_failure ?? 1),
+    notify_on_success: Boolean(row.notify_on_success),
+    tags: safeJsonParse(row.tags, [] as string[]),
+    ai_generated: Boolean(row.ai_generated),
+    systemd_unit: row.systemd_unit as string | null,
+  };
+}
+
+function rowToJobRun(row: Record<string, unknown>): JobRun {
+  return {
+    id: row.id as string,
+    job_id: row.job_id as string,
+    started_at: row.started_at as string,
+    finished_at: row.finished_at as string | null,
+    status: row.status as JobRunStatus,
+    exit_code: row.exit_code as number | null,
+    output: (row.output as string) ?? "",
+    output_log_path: row.output_log_path as string | null,
+    duration_ms: row.duration_ms as number | null,
+    triggered_by: (row.triggered_by as JobRunTrigger) ?? "timer",
+    error_summary: row.error_summary as string | null,
+  };
+}
+
+export function createJob(data: {
+  name: string;
+  description?: string;
+  script_path: string;
+  schedule: string;
+  schedule_display?: string;
+  working_directory?: string;
+  environment?: Record<string, string>;
+  max_retries?: number;
+  timeout_seconds?: number;
+  auto_disable_after?: number;
+  notify_on_failure?: boolean;
+  notify_on_success?: boolean;
+  tags?: string[];
+  ai_generated?: boolean;
+}, createdBy: string): Job {
+  const id = randomUUID().replace(/-/g, "").slice(0, 32);
+  db.prepare(`
+    INSERT INTO jobs (id, name, description, script_path, schedule, schedule_display,
+      working_directory, environment, max_retries, timeout_seconds, auto_disable_after,
+      notify_on_failure, notify_on_success, tags, ai_generated, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    data.name,
+    data.description ?? "",
+    data.script_path,
+    data.schedule,
+    data.schedule_display ?? "",
+    data.working_directory ?? "",
+    JSON.stringify(data.environment ?? {}),
+    data.max_retries ?? 0,
+    data.timeout_seconds ?? 0,
+    data.auto_disable_after ?? 0,
+    (data.notify_on_failure ?? true) ? 1 : 0,
+    (data.notify_on_success ?? false) ? 1 : 0,
+    JSON.stringify(data.tags ?? []),
+    (data.ai_generated ?? false) ? 1 : 0,
+    createdBy,
+  );
+  return rowToJob(db.prepare("SELECT * FROM jobs WHERE id = ?").get(id) as Record<string, unknown>);
+}
+
+export function getJob(id: string): Job | null {
+  const row = db.prepare("SELECT * FROM jobs WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+  return row ? rowToJob(row) : null;
+}
+
+export function listJobs(): Job[] {
+  const rows = db.prepare("SELECT * FROM jobs ORDER BY updated_at DESC").all() as Record<string, unknown>[];
+  return rows.map(rowToJob);
+}
+
+export function updateJob(
+  id: string,
+  data: Partial<{
+    name: string;
+    description: string;
+    script_path: string;
+    schedule: string;
+    schedule_display: string;
+    working_directory: string;
+    environment: Record<string, string>;
+    status: JobStatus;
+    max_retries: number;
+    timeout_seconds: number;
+    auto_disable_after: number;
+    notify_on_failure: boolean;
+    notify_on_success: boolean;
+    tags: string[];
+    systemd_unit: string;
+    last_run_at: string;
+    last_run_status: "success" | "failed" | "running" | null;
+    next_run_at: string | null;
+    run_count: number;
+    fail_count: number;
+    consecutive_failures: number;
+  }>,
+): Job {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  if (data.name !== undefined) { fields.push("name = ?"); values.push(data.name); }
+  if (data.description !== undefined) { fields.push("description = ?"); values.push(data.description); }
+  if (data.script_path !== undefined) { fields.push("script_path = ?"); values.push(data.script_path); }
+  if (data.schedule !== undefined) { fields.push("schedule = ?"); values.push(data.schedule); }
+  if (data.schedule_display !== undefined) { fields.push("schedule_display = ?"); values.push(data.schedule_display); }
+  if (data.working_directory !== undefined) { fields.push("working_directory = ?"); values.push(data.working_directory); }
+  if (data.environment !== undefined) { fields.push("environment = ?"); values.push(JSON.stringify(data.environment)); }
+  if (data.status !== undefined) { fields.push("status = ?"); values.push(data.status); }
+  if (data.max_retries !== undefined) { fields.push("max_retries = ?"); values.push(data.max_retries); }
+  if (data.timeout_seconds !== undefined) { fields.push("timeout_seconds = ?"); values.push(data.timeout_seconds); }
+  if (data.auto_disable_after !== undefined) { fields.push("auto_disable_after = ?"); values.push(data.auto_disable_after); }
+  if (data.notify_on_failure !== undefined) { fields.push("notify_on_failure = ?"); values.push(data.notify_on_failure ? 1 : 0); }
+  if (data.notify_on_success !== undefined) { fields.push("notify_on_success = ?"); values.push(data.notify_on_success ? 1 : 0); }
+  if (data.tags !== undefined) { fields.push("tags = ?"); values.push(JSON.stringify(data.tags)); }
+  if (data.systemd_unit !== undefined) { fields.push("systemd_unit = ?"); values.push(data.systemd_unit); }
+  if (data.last_run_at !== undefined) { fields.push("last_run_at = ?"); values.push(data.last_run_at); }
+  if (data.last_run_status !== undefined) { fields.push("last_run_status = ?"); values.push(data.last_run_status); }
+  if (data.next_run_at !== undefined) { fields.push("next_run_at = ?"); values.push(data.next_run_at); }
+  if (data.run_count !== undefined) { fields.push("run_count = ?"); values.push(data.run_count); }
+  if (data.fail_count !== undefined) { fields.push("fail_count = ?"); values.push(data.fail_count); }
+  if (data.consecutive_failures !== undefined) { fields.push("consecutive_failures = ?"); values.push(data.consecutive_failures); }
+  if (fields.length === 0) return getJob(id)!;
+  fields.push("updated_at = datetime('now')");
+  values.push(id);
+  db.prepare(`UPDATE jobs SET ${fields.join(", ")} WHERE id = ?`).run(...values as Parameters<typeof db.prepare>[0][]);
+  return rowToJob(db.prepare("SELECT * FROM jobs WHERE id = ?").get(id) as Record<string, unknown>);
+}
+
+export function deleteJob(id: string): void {
+  db.prepare("DELETE FROM jobs WHERE id = ?").run(id);
+}
+
+export function createJobRun(jobId: string, triggeredBy: JobRunTrigger = "timer"): JobRun {
+  const id = randomUUID().replace(/-/g, "").slice(0, 32);
+  db.prepare(
+    "INSERT INTO job_runs (id, job_id, triggered_by) VALUES (?, ?, ?)"
+  ).run(id, jobId, triggeredBy);
+  return rowToJobRun(db.prepare("SELECT * FROM job_runs WHERE id = ?").get(id) as Record<string, unknown>);
+}
+
+export function updateJobRun(
+  id: string,
+  data: Partial<{
+    finished_at: string;
+    status: JobRunStatus;
+    exit_code: number;
+    output: string;
+    output_log_path: string;
+    duration_ms: number;
+    error_summary: string;
+  }>,
+): JobRun {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  if (data.finished_at !== undefined) { fields.push("finished_at = ?"); values.push(data.finished_at); }
+  if (data.status !== undefined) { fields.push("status = ?"); values.push(data.status); }
+  if (data.exit_code !== undefined) { fields.push("exit_code = ?"); values.push(data.exit_code); }
+  if (data.output !== undefined) { fields.push("output = ?"); values.push(data.output); }
+  if (data.output_log_path !== undefined) { fields.push("output_log_path = ?"); values.push(data.output_log_path); }
+  if (data.duration_ms !== undefined) { fields.push("duration_ms = ?"); values.push(data.duration_ms); }
+  if (data.error_summary !== undefined) { fields.push("error_summary = ?"); values.push(data.error_summary); }
+  if (fields.length === 0) return getJobRun(id)!;
+  values.push(id);
+  db.prepare(`UPDATE job_runs SET ${fields.join(", ")} WHERE id = ?`).run(...values as Parameters<typeof db.prepare>[0][]);
+  return rowToJobRun(db.prepare("SELECT * FROM job_runs WHERE id = ?").get(id) as Record<string, unknown>);
+}
+
+export function getJobRun(id: string): JobRun | null {
+  const row = db.prepare("SELECT * FROM job_runs WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+  return row ? rowToJobRun(row) : null;
+}
+
+export function listJobRuns(jobId: string, limit = 50): JobRun[] {
+  const rows = db.prepare(
+    "SELECT * FROM job_runs WHERE job_id = ? ORDER BY started_at DESC LIMIT ?"
+  ).all(jobId, limit) as Record<string, unknown>[];
+  return rows.map(rowToJobRun);
+}
+
+export function getActiveJobRun(jobId: string): JobRun | null {
+  const row = db.prepare(
+    "SELECT * FROM job_runs WHERE job_id = ? AND status = 'running' ORDER BY started_at DESC LIMIT 1"
+  ).get(jobId) as Record<string, unknown> | undefined;
+  return row ? rowToJobRun(row) : null;
+}
+
 // ==================== SEARCH ====================
 
 export interface SearchResult {

@@ -109,6 +109,35 @@ Key files:
 
 Admin-accessible terminal sessions via Socket.IO for direct server access.
 
+## Jobs
+
+Scheduled task automation powered by systemd timers. Admin-only, expert experience level.
+
+**Two creation modes:**
+
+- **AI-Assisted Builder** — Mini-chat dialog (powered by Claude Haiku) that asks the user what to automate, proposes a script + schedule, and creates the job on confirmation
+- **Manual Configuration** — Form with script path, schedule picker (presets + custom systemd OnCalendar expressions), working directory, environment variables, and advanced settings
+
+**Features:**
+
+- Enable/disable jobs (starts/stops systemd timers)
+- Run Now — immediate manual execution outside schedule
+- Run history with output capture (last 64 KB in DB, full log on disk)
+- Configurable failure handling: auto-disable after N consecutive failures, per-job notifications (failure on by default, success off by default)
+- 6 pre-built templates: Database Backup, SSL Cert Check, Disk Cleanup, Log Rotation, System Health Report, Git Sync
+- Job detail drawer with overview, configuration, and scrollable run history with expandable log output
+
+**Architecture:**
+
+- Each job = `octoby-job-{id}.service` + `octoby-job-{id}.timer` in systemd
+- Wrapper script calls internal API on run start/finish for DB tracking
+- Output captured to `data/job-logs/{jobId}_{runId}.log`
+- Tables: `jobs`, `job_runs`
+- Socket events: `claude:list_jobs`, `claude:create_job`, `claude:update_job`, `claude:delete_job`, `claude:toggle_job`, `claude:run_job_now`, `claude:get_job_runs`
+- REST routes: `/api/jobs` CRUD, `/api/jobs/[id]/toggle`, `/api/jobs/[id]/run`, `/api/jobs/[id]/runs`, `/api/jobs/templates`, `/api/jobs/ai-builder`
+- Notification events: `job_completed`, `job_failed`
+- Activity events: `job_created`, `job_updated`, `job_deleted`, `job_enabled`, `job_disabled`, `job_run_manual`, `job_auto_disabled`
+
 ## File Browser & Uploads
 
 - Browse project files via `/api/claude-code/files`

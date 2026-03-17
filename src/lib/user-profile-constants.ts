@@ -74,7 +74,7 @@ export const EXPERIENCE_LEVELS: {
 export const LEVEL_VISIBLE_TABS: Record<ExperienceLevel, string[]> = {
   beginner: ["chat", "settings"],
   intermediate: ["chat", "agents", "plan", "memory", "settings"],
-  expert: ["chat", "agents", "plan", "memory", "files", "settings", "terminal"],
+  expert: ["chat", "agents", "plan", "jobs", "memory", "files", "settings", "terminal"],
 };
 
 // Which settings sections each level can see

@@ -24,6 +24,7 @@ import { registerSecurityHandlers } from "./security-handlers";
 import { registerPresenceHandlers } from "./presence-handlers";
 import { registerPlanHandlers } from "./plan-handlers";
 import { registerTerminalHandlers, reconcileTmuxSessions, shutdownTerminals } from "./terminal-handlers";
+import { registerJobHandlers } from "./job-handlers";
 import { 
   lockEventEmitter, 
   initFileLockManager, 
@@ -758,6 +759,7 @@ export function registerHandlers(io: Server) {
     registerPresenceHandlers(ctx);
     registerPlanHandlers(ctx);
     registerTerminalHandlers(ctx);
+    registerJobHandlers(ctx);
 
     // File lock handlers
     socket.on("file:cancel_queued_operation", async ({ queueId }: { queueId: string }) => {
