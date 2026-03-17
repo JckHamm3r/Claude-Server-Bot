@@ -651,6 +651,41 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
           </div>
         )}
 
+        {chat.activeSubAgents.length > 0 && activeSession && (
+          <div className="border-b border-bot-border bg-bot-surface/60 px-4 py-2 flex flex-col gap-1">
+            {chat.activeSubAgents.map((agent) => (
+              <div key={agent.id} className="flex items-center gap-2 text-caption">
+                <span className="text-sm">{agent.agentIcon ?? "🤖"}</span>
+                {agent.status === "running" ? (
+                  <>
+                    <span className="h-1.5 w-1.5 rounded-full bg-bot-accent animate-pulse flex-shrink-0" />
+                    <span className="text-bot-muted">
+                      Using agent: <span className="font-medium text-bot-text">{agent.agentName}</span>
+                      <span className="text-bot-muted/70"> — working…</span>
+                    </span>
+                  </>
+                ) : agent.status === "error" ? (
+                  <>
+                    <span className="h-1.5 w-1.5 rounded-full bg-bot-red flex-shrink-0" />
+                    <span className="text-bot-red">
+                      Agent: <span className="font-medium">{agent.agentName}</span> — failed
+                      {agent.error && <span className="text-bot-red/70"> ({agent.error.slice(0, 80)})</span>}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="h-1.5 w-1.5 rounded-full bg-bot-green flex-shrink-0" />
+                    <span className="text-bot-muted">
+                      Agent: <span className="font-medium text-bot-text">{agent.agentName}</span>
+                      <span className="text-bot-green"> ✓ complete</span>
+                    </span>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
         {!activeSession ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 text-bot-muted">
             <p className="text-body">Select a session or create a new one.</p>

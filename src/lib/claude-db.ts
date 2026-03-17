@@ -423,6 +423,11 @@ export function listAgents(createdBy: string): ClaudeAgent[] {
   return rows.map(rowToAgent);
 }
 
+export function getActiveAgents(): ClaudeAgent[] {
+  const rows = db.prepare("SELECT * FROM agents WHERE status = 'active' ORDER BY name ASC").all() as Record<string, unknown>[];
+  return rows.map(rowToAgent);
+}
+
 export function getAgent(id: string): ClaudeAgent | null {
   const row = db.prepare("SELECT * FROM agents WHERE id = ?").get(id) as Record<string, unknown> | undefined;
   return row ? rowToAgent(row) : null;

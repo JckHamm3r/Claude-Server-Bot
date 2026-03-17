@@ -123,6 +123,14 @@ export interface UseChatSocketReturn {
   runtimeLimited: boolean;
   aiPaused: boolean;
   aiPausedBy: string | null;
+  activeSubAgents: {
+    id: string;
+    agentName: string;
+    agentIcon: string | null;
+    task: string;
+    status: "running" | "complete" | "error";
+    error?: string;
+  }[];
 
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   setSessionModel: React.Dispatch<React.SetStateAction<string>>;
@@ -186,6 +194,14 @@ export function useChatSocket({
   const [runtimeLimited, setRuntimeLimited] = useState(false);
   const [aiPaused, setAiPaused] = useState(false);
   const [aiPausedBy, setAiPausedBy] = useState<string | null>(null);
+  const [activeSubAgents, setActiveSubAgents] = useState<{
+    id: string;
+    agentName: string;
+    agentIcon: string | null;
+    task: string;
+    status: "running" | "complete" | "error";
+    error?: string;
+  }[]>([]);
 
   // ── Refs ───────────────────────────────────────────────────────────────
   const aiPausedRef = useRef(false);
@@ -522,6 +538,15 @@ export function useChatSocket({
         socket.emit("claude:get_usage", { sessionId });
       }
     });
+
+    socket.on(
+      "claude:sub_agent_status",
+      ({ sessionId, agents }: { sessionId: string; agents: typeof activeSubAgents }) => {
+        if (activeSessionRef.current?.id === sessionId) {
+          setActiveSubAgents(agents ?? []);
+        }
+      },
+    );
 
     socket.on(
       "claude:messages",
@@ -1064,6 +1089,7 @@ export function useChatSocket({
       socket.off("claude:session_renamed");
       socket.off("claude:session_removed");
       socket.off("claude:session_invited");
+      socket.off("claude:sub_agent_status");
       clearEditRecoveryTimer();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1299,7 +1325,7 @@ export function useChatSocket({
     contextUsage, isCompacting,
     sessionModel, hasError, pendingInteractions, runStartTime, pendingCount,
     pendingQueue, loadingMessages, runtimeLimited,
-    aiPaused, aiPausedBy,
+    aiPaused, aiPausedBy, activeSubAgents,
     setMessages, setSessionModel, setSessionUsage, setIsRunning,
     setCurrentActivity, setLoadingMessages,
     activeSessionRef, initializedSessionsRef, freshSessionsRef, chatInputRef,

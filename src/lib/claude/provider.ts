@@ -21,7 +21,7 @@ export interface UserQuestion {
 }
 
 export interface ParsedOutput {
-  type: "text" | "streaming" | "options" | "confirm" | "diff" | "progress" | "done" | "error" | "permission_request" | "security_warn" | "usage" | "tool_call" | "tool_result" | "user_question" | "session_id" | "compacting" | "compact_done" | "file_queued";
+  type: "text" | "streaming" | "options" | "confirm" | "diff" | "progress" | "done" | "error" | "permission_request" | "security_warn" | "usage" | "tool_call" | "tool_result" | "user_question" | "session_id" | "compacting" | "compact_done" | "file_queued" | "sub_agent_status";
   content?: string;
   choices?: string[];       // for 'options'
   prompt?: string;          // for 'confirm'
@@ -47,10 +47,29 @@ export interface ParsedOutput {
     userEmail: string;
     userName: string;
   };
+  // for 'sub_agent_status' — live status of sub-agents running for this session
+  subAgents?: {
+    id: string;
+    agentName: string;
+    agentIcon: string | null;
+    task: string;
+    status: "running" | "complete" | "error";
+    error?: string;
+  }[];
 }
 
 export interface ClaudeCodeProvider {
-  createSession(sessionId: string, opts?: { skipPermissions?: boolean; systemPrompt?: string; model?: string; claudeSessionId?: string; userEmail?: string; maxTurns?: number }): void;
+  createSession(sessionId: string, opts?: {
+    skipPermissions?: boolean;
+    systemPrompt?: string;
+    model?: string;
+    claudeSessionId?: string;
+    userEmail?: string;
+    maxTurns?: number;
+    delegationDepth?: number;
+    parentSessionId?: string;
+    onSubAgentCost?: (costUsd: number) => void;
+  }): void;
   sendMessage(sessionId: string, message: string, opts?: { skipPermissions?: boolean; model?: string; inputFiles?: string[] }): void;
   interrupt(sessionId: string): void;
   /** Kill active process and remove all state — use for permanent deletion. */

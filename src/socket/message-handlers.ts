@@ -19,6 +19,7 @@ import { logActivity } from "../lib/activity-log";
 import { getAppSetting } from "../lib/app-settings";
 import { checkBotConfigRequest } from "../lib/security-guard";
 import { dispatchNotification } from "../lib/notifications";
+import { runSubAgent } from "../lib/sub-agent-runner";
 
 // Per-session AI chat pause state
 const aiPausedSessions = new Map<string, { paused: boolean; pausedAt: string | null; pausedBy: string | null }>();
@@ -152,6 +153,76 @@ export function registerMessageHandlers(ctx: HandlerContext) {
         }
         if (budget.warning) {
           socket.emit("claude:budget_warning", { sessionId, type: budget.type, limit: budget.limit, current: budget.current });
+        }
+
+        // ── /agent slash command ─────────────────────────────────────────────
+        // Syntax: /agent <name> <task>   or   /agent "<name with spaces>" <task>
+        if (content.trim().match(/^\/agent\s/i)) {
+          const rest = content.trim().slice("/agent ".length).trim();
+          let agentName = "";
+          let agentTask = "";
+
+          // Try quoted name first
+          const quotedMatch = rest.match(/^["']([^"']+)["']\s+([\s\S]+)/);
+          if (quotedMatch) {
+            agentName = quotedMatch[1].trim();
+            agentTask = quotedMatch[2].trim();
+          } else {
+            // Greedy: try longest leading word sequence that still leaves task words
+            const words = rest.split(/\s+/);
+            for (let wordCount = words.length - 1; wordCount >= 1; wordCount--) {
+              const taskPart = words.slice(wordCount).join(" ").trim();
+              if (taskPart) {
+                agentName = words.slice(0, wordCount).join(" ");
+                agentTask = taskPart;
+                break;
+              }
+            }
+          }
+
+          if (agentName && agentTask) {
+
+          saveMessage(sessionId, "admin", content, email, "chat");
+          ctx.sessionCommandSubmitter.set(sessionId, email);
+          io.to(`session:${sessionId}`).emit("claude:command_started", { sessionId, submittedBy: email });
+          ctx.setSessionStatus(sessionId, "running");
+
+          let agentResult: string;
+          try {
+            const session = getSession(sessionId);
+            const result = await runSubAgent({
+              agentName,
+              task: agentTask,
+              parentSessionId: sessionId,
+              userEmail: email,
+              skipPermissions: session?.skip_permissions ?? false,
+              delegationDepth: 0,
+            });
+
+            if (result.success) {
+              agentResult = `**Agent: ${agentName}**\n\n${result.result}`;
+            } else {
+              agentResult = `**Agent: ${agentName} — Error**\n\n${result.error ?? "Unknown error"}`;
+            }
+          } catch (err) {
+            agentResult = `**Agent: ${agentName} — Error**\n\n${String(err)}`;
+          }
+
+          io.to(`session:${sessionId}`).emit("claude:output", {
+            sessionId,
+            parsed: { type: "text", content: agentResult },
+            submittedBy: email,
+          });
+          io.to(`session:${sessionId}`).emit("claude:output", {
+            sessionId,
+            parsed: { type: "done" },
+            submittedBy: email,
+          });
+          ctx.setSessionStatus(sessionId, "idle");
+          io.to(`session:${sessionId}`).emit("claude:command_done", { sessionId });
+          return;
+          }
+          // If agentName/task could not be parsed, fall through to normal message handling
         }
 
         // Process attachments: separate images for --input-file, text for inline
