@@ -157,10 +157,30 @@ export function registerMessageHandlers(ctx: HandlerContext) {
 
         // ── /agent slash command ─────────────────────────────────────────────
         // Syntax: /agent <name> <task>   or   /agent "<name with spaces>" <task>
-        const agentCommandMatch = content.trim().match(/^\/agent\s+(?:"([^"]+)"|(\S+))\s+([\s\S]+)/i);
-        if (agentCommandMatch) {
-          const agentName = (agentCommandMatch[1] ?? agentCommandMatch[2]).trim();
-          const agentTask = agentCommandMatch[3].trim();
+        if (content.trim().match(/^\/agent\s/i)) {
+          const rest = content.trim().slice("/agent ".length).trim();
+          let agentName = "";
+          let agentTask = "";
+
+          // Try quoted name first
+          const quotedMatch = rest.match(/^["']([^"']+)["']\s+([\s\S]+)/);
+          if (quotedMatch) {
+            agentName = quotedMatch[1].trim();
+            agentTask = quotedMatch[2].trim();
+          } else {
+            // Greedy: try longest leading word sequence that still leaves task words
+            const words = rest.split(/\s+/);
+            for (let wordCount = words.length - 1; wordCount >= 1; wordCount--) {
+              const taskPart = words.slice(wordCount).join(" ").trim();
+              if (taskPart) {
+                agentName = words.slice(0, wordCount).join(" ");
+                agentTask = taskPart;
+                break;
+              }
+            }
+          }
+
+          if (agentName && agentTask) {
 
           saveMessage(sessionId, "admin", content, email, "chat");
           ctx.sessionCommandSubmitter.set(sessionId, email);
@@ -201,6 +221,8 @@ export function registerMessageHandlers(ctx: HandlerContext) {
           ctx.setSessionStatus(sessionId, "idle");
           io.to(`session:${sessionId}`).emit("claude:command_done", { sessionId });
           return;
+          }
+          // If agentName/task could not be parsed, fall through to normal message handling
         }
 
         // Process attachments: separate images for --input-file, text for inline

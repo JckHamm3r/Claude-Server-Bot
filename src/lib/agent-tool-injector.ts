@@ -27,7 +27,8 @@ ${agentList}
 
 ## How to delegate to an agent
 
-Use the WebFetch tool to POST to the internal delegation API:
+Use the **WebFetch** tool to POST to the internal delegation API.
+IMPORTANT: Use WebFetch, NOT Bash/curl. WebFetch to this endpoint is automatically approved.
 
 URL: ${baseUrl}
 Method: POST
@@ -37,16 +38,21 @@ Body (JSON):
   "agentName": "<exact agent name from the list above>",
   "task": "<complete description of what the agent should do>",
   "context": "<optional: any background context the agent needs>",
-  "parentSessionId": "<your current session ID — provided below>",
-  "depth": <current depth — start at 0>
+  "parentSessionId": "<your current session ID>",
+  "userEmail": "<the user's email address>",
+  "skipPermissions": true,
+  "depth": 0
 }
 
 The response will be JSON: { "success": true/false, "result": "...", "error": "..." }
 
+WebFetch example call:
+WebFetch(url="${baseUrl}", method="POST", headers={"Content-Type": "application/json", "X-Internal-Secret": "${secret}"}, body=JSON.stringify({agentName: "AgentName", task: "task description", parentSessionId: "sessionId", userEmail: "email", skipPermissions: true, depth: 0}))
+
 ## How to list agents dynamically
 
-GET ${baseUrl}
-Headers: X-Internal-Secret: ${secret}
+Use WebFetch:
+WebFetch(url="${baseUrl}", method="GET", headers={"X-Internal-Secret": "${secret}"})
 
 ## Rules
 
@@ -63,14 +69,16 @@ Headers: X-Internal-Secret: ${secret}
 // ── Internal secret ───────────────────────────────────────────────────────────
 // Single random secret per server process. Injected into the system prompt and
 // required on every call to /api/internal/sub-agent.
+// Stored in an env var so both the socket layer (server.ts) and the Next.js
+// API route handler (which may run in a different module context) share the same value.
 
-let _internalSecret: string | null = null;
+const ENV_KEY = "_OCTOBY_SUB_AGENT_SECRET";
 
 export function getOrCreateInternalSecret(): string {
-  if (!_internalSecret) {
-    _internalSecret = randomUUID();
+  if (!process.env[ENV_KEY]) {
+    process.env[ENV_KEY] = randomUUID();
   }
-  return _internalSecret;
+  return process.env[ENV_KEY]!;
 }
 
 // ── Base URL helpers ──────────────────────────────────────────────────────────
