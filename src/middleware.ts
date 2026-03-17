@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
-import db from "./lib/db";
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -47,17 +46,10 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(loginUrl);
     }
 
-    // Check if user must change password
-    const userEmail = token.email as string;
-    if (userEmail) {
-      const user = db.prepare("SELECT must_change_password FROM users WHERE email = ?").get(userEmail) as
-        | { must_change_password: number }
-        | undefined;
-      
-      if (user?.must_change_password === 1 && pathname !== "/change-password") {
-        const changePasswordUrl = new URL(`${basePath}/change-password`, origin);
-        return NextResponse.redirect(changePasswordUrl);
-      }
+    // Check if user must change password (flag is stored in the JWT token)
+    if (token.mustChangePassword && pathname !== "/change-password") {
+      const changePasswordUrl = new URL(`${basePath}/change-password`, origin);
+      return NextResponse.redirect(changePasswordUrl);
     }
 
     // Authenticated: allow /login and /setup through

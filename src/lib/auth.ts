@@ -132,13 +132,14 @@ export const authOptions: NextAuthOptions = {
         try {
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           const db = (require("./db") as { default: import("better-sqlite3").Database }).default;
-          const row = db.prepare("SELECT is_admin, first_name, last_name FROM users WHERE email = ?").get(token.email as string) as
-            | { is_admin: number; first_name: string; last_name: string }
+          const row = db.prepare("SELECT is_admin, first_name, last_name, must_change_password FROM users WHERE email = ?").get(token.email as string) as
+            | { is_admin: number; first_name: string; last_name: string; must_change_password: number }
             | undefined;
           if (row) {
             token.isAdmin = Boolean(row.is_admin);
             token.firstName = row.first_name ?? "";
             token.lastName = row.last_name ?? "";
+            token.mustChangePassword = Boolean(row.must_change_password);
           }
 
           // Non-admin users don't go through the setup wizard.
