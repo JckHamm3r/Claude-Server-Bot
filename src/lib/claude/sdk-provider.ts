@@ -476,9 +476,9 @@ async function startStreamingSession(
           const pathCheck = checkProtectedPath(toolName, toolInput, state.groupPermissions);
           if (pathCheck.blocked) {
             state.emitter.emit("output", {
-              type: "security_blocked",
-              toolName,
-              reason: pathCheck.reason ?? "Blocked by group policy",
+              type: "security_warn",
+              message: pathCheck.reason ?? "Blocked by group policy",
+              warnType: "group_policy",
             } as ParsedOutput);
             return { behavior: "deny" as const, message: pathCheck.reason ?? "Blocked by group policy" };
           }
@@ -498,9 +498,9 @@ async function startStreamingSession(
             );
             if (classification.category === "blocked" || classification.category === "custom_blocked") {
               state.emitter.emit("output", {
-                type: "security_blocked",
-                toolName,
-                reason: classification.reason ?? "Command blocked by group policy",
+                type: "security_warn",
+                message: classification.reason ?? "Command blocked by group policy",
+                warnType: "group_policy",
               } as ParsedOutput);
               return { behavior: "deny" as const, message: classification.reason ?? "Command blocked by group policy" };
             }
