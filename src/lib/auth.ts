@@ -184,7 +184,7 @@ export const authOptions: NextAuthOptions = {
         : "next-auth.session-token",
       options: {
         httpOnly: true,
-        sameSite: "none" as const,
+        sameSite: (process.env.NEXTAUTH_URL ?? "").startsWith("https") ? ("none" as const) : ("lax" as const),
         path: "/",
         secure: (process.env.NEXTAUTH_URL ?? "").startsWith("https"),
       },
