@@ -415,10 +415,12 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
               "| `/cost` | Show token usage and cost for this session |",
               "| `/status` | Show current session info |",
               "| `/memory` | List and manage project memory files |",
+              "| `/remember <text>` | Save something to project memory (AI-parsed) |",
               "| `/rename <name>` | Rename the current session |",
               "| `/new [name]` | Create a new session |",
               "| `/export [md\\|json]` | Export this session (default: markdown) |",
               "| `/model <model>` | Switch the AI model |",
+              "| `/agent <name> <task>` | Delegate a task to a named sub-agent |",
               "",
               "**Keyboard Shortcuts**",
               "",
@@ -518,6 +520,69 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
                 injectLocalMessage(`Model switched to **${match.label}**.`);
               }
             }
+            return;
+          }
+
+          case "/memory": {
+            (async () => {
+              try {
+                const [memRes, fileRes] = await Promise.all([
+                  fetch(apiUrl("/api/claude-code/memories")),
+                  fetch(apiUrl("/api/claude-code/memory")),
+                ]);
+                const memData = await memRes.json() as { memories?: { title: string; content: string }[] };
+                const fileData = await fileRes.json() as { files?: string[] };
+                const lines: string[] = ["**Project Memory**", ""];
+                if (memData.memories?.length) {
+                  lines.push(`**Memory Items** (${memData.memories.length})`, "");
+                  for (const m of memData.memories) {
+                    lines.push(`- **${m.title}** — ${m.content.slice(0, 120)}${m.content.length > 120 ? "…" : ""}`);
+                  }
+                } else {
+                  lines.push("*No memory items saved.*");
+                }
+                lines.push("");
+                if (fileData.files?.length) {
+                  lines.push(`**Context Files** (${fileData.files.length})`, "");
+                  for (const f of fileData.files) {
+                    lines.push(`- \`${f}\``);
+                  }
+                }
+                lines.push("", "*Manage memories in the Memory tab.*");
+                injectLocalMessage(lines.join("\n"));
+              } catch {
+                injectLocalMessage("Failed to load memory data.");
+              }
+            })();
+            return;
+          }
+
+          case "/remember": {
+            const text = args.join(" ").trim();
+            if (!text) {
+              injectLocalMessage("Usage: `/remember <something to remember>`");
+              return;
+            }
+            injectLocalMessage("Saving to memory…");
+            (async () => {
+              try {
+                const res = await fetch(apiUrl("/api/claude-code/memories/remember"), {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ text }),
+                });
+                const data = await res.json() as { memory?: { title: string; content: string }; error?: string };
+                if (!res.ok) {
+                  injectLocalMessage(`Failed to save: ${data.error ?? res.statusText}`);
+                  return;
+                }
+                injectLocalMessage(
+                  `Saved to memory: **${data.memory!.title}**\n\n${data.memory!.content}`
+                );
+              } catch {
+                injectLocalMessage("Failed to save memory.");
+              }
+            })();
             return;
           }
 

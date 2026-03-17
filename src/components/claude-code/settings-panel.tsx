@@ -14,6 +14,7 @@ import {
   Skull,
   RefreshCw,
   ChevronDown,
+  ChevronRight,
   Database,
   HardDrive,
 } from "lucide-react";
@@ -59,6 +60,9 @@ export function SettingsPanel() {
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState(false);
   const [activeSection, setActiveSection] = useState<SectionKey>("general");
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
+    new Set(["User", "Bot", "Access & Security", "Server", "Networking & Data"])
+  );
   const [isAdmin, setIsAdmin] = useState(false);
   const userProfile = useUserProfile();
   const userExperienceLevel = userProfile.experience_level;
@@ -198,6 +202,25 @@ export function SettingsPanel() {
     if (activeSection !== "system") return;
     const t = setInterval(loadResources, 30_000);
     return () => clearInterval(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSection]);
+
+  // Auto-expand the group that contains the active section
+  useEffect(() => {
+    const sectionGroups: { label: string; sections: { key: SectionKey }[] }[] = [
+      { label: "User", sections: [{ key: "general" }, { key: "notifications" }] },
+      { label: "Bot", sections: [{ key: "bot_identity" }, { key: "customization" }, { key: "templates" }] },
+      { label: "Access & Security", sections: [{ key: "users" }, { key: "security" }, { key: "rate_limits" }, { key: "budgets" }, { key: "api_key" }] },
+      { label: "Server", sections: [{ key: "system" }, { key: "services" }, { key: "service_manager" }, { key: "packages" }, { key: "updates" }, { key: "project" }] },
+      { label: "Networking & Data", sections: [{ key: "domains" }, { key: "smtp" }, { key: "backup" }, { key: "database" }, { key: "activity_log" }] },
+    ];
+    const group = sectionGroups.find((g) => g.sections.some((s) => s.key === activeSection));
+    if (group) {
+      setExpandedGroups((prev) => {
+        if (prev.has(group.label)) return prev;
+        return new Set([...prev, group.label]);
+      });
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSection]);
 
@@ -493,32 +516,60 @@ export function SettingsPanel() {
     );
   }
 
-  const allSections: { key: SectionKey; label: string; adminOnly?: boolean }[] = [
-    { key: "general", label: "General" },
-    { key: "bot_identity", label: "Bot Identity", adminOnly: true },
-    { key: "customization", label: "Customization", adminOnly: true },
-    { key: "rate_limits", label: "Rate Limits", adminOnly: true },
-    { key: "users", label: "Users", adminOnly: true },
-    { key: "project", label: "Project", adminOnly: true },
-    { key: "notifications", label: "Notifications" },
-    { key: "activity_log", label: "Activity Log", adminOnly: true },
-    { key: "backup", label: "Backup & Restore", adminOnly: true },
-    { key: "database", label: "Database", adminOnly: true },
-    { key: "system", label: "System", adminOnly: true },
-    { key: "services", label: "Services", adminOnly: true },
-    { key: "service_manager", label: "Service Manager", adminOnly: true },
-    { key: "packages", label: "Packages", adminOnly: true },
-    { key: "updates", label: "Updates", adminOnly: true },
-    { key: "domains", label: "Domains", adminOnly: true },
-    { key: "smtp", label: "Email / SMTP", adminOnly: true },
-    { key: "security", label: "Security", adminOnly: true },
-    { key: "templates", label: "Templates", adminOnly: true },
-    { key: "budgets", label: "Budgets", adminOnly: true },
-    { key: "api_key", label: "API Key (SDK)", adminOnly: true },
+  type SectionDef = { key: SectionKey; label: string; adminOnly?: boolean };
+  type SectionGroup = { label: string; sections: SectionDef[] };
+
+  const sectionGroups: SectionGroup[] = [
+    {
+      label: "User",
+      sections: [
+        { key: "general", label: "General" },
+        { key: "notifications", label: "Notifications" },
+      ],
+    },
+    {
+      label: "Bot",
+      sections: [
+        { key: "bot_identity", label: "Bot Identity", adminOnly: true },
+        { key: "customization", label: "Customization", adminOnly: true },
+        { key: "templates", label: "Templates", adminOnly: true },
+      ],
+    },
+    {
+      label: "Access & Security",
+      sections: [
+        { key: "users", label: "Users", adminOnly: true },
+        { key: "security", label: "Security", adminOnly: true },
+        { key: "rate_limits", label: "Rate Limits", adminOnly: true },
+        { key: "budgets", label: "Budgets", adminOnly: true },
+        { key: "api_key", label: "API Key (SDK)", adminOnly: true },
+      ],
+    },
+    {
+      label: "Server",
+      sections: [
+        { key: "system", label: "System", adminOnly: true },
+        { key: "services", label: "Services", adminOnly: true },
+        { key: "service_manager", label: "Service Manager", adminOnly: true },
+        { key: "packages", label: "Packages", adminOnly: true },
+        { key: "updates", label: "Updates", adminOnly: true },
+        { key: "project", label: "Project", adminOnly: true },
+      ],
+    },
+    {
+      label: "Networking & Data",
+      sections: [
+        { key: "domains", label: "Domains", adminOnly: true },
+        { key: "smtp", label: "Email / SMTP", adminOnly: true },
+        { key: "backup", label: "Backup & Restore", adminOnly: true },
+        { key: "database", label: "Database", adminOnly: true },
+        { key: "activity_log", label: "Activity Log", adminOnly: true },
+      ],
+    },
   ];
 
-  // Apply experience-level gating
-  // Import inline to avoid circular deps
+  const allSections: SectionDef[] = sectionGroups.flatMap((g) => g.sections);
+
   const levelSections: Record<string, string[]> = {
     beginner: ["general", "bot_identity", "notifications"],
     intermediate: [
@@ -526,33 +577,68 @@ export function SettingsPanel() {
       "users", "project", "notifications", "activity_log",
       "backup", "database", "system", "services", "packages", "smtp", "budgets", "api_key",
     ],
-    expert: allSections.map((s) => s.key),  };
-  const userLevel = settings ? "expert" : "expert"; // will be overridden below
-  void userLevel; // suppress unused warning — level comes from useUserProfile in parent
-  // Sections are filtered by adminOnly AND by experience level (fetched in SettingsPanel)
+    expert: allSections.map((s) => s.key),
+  };
+
   const visibleLevelSections = levelSections[userExperienceLevel] ?? levelSections.expert;
-  const sections = allSections.filter((s) =>
-    (!s.adminOnly || isAdmin) && visibleLevelSections.includes(s.key)
-  );
+
+  const visibleGroups = sectionGroups
+    .map((g) => ({
+      ...g,
+      sections: g.sections.filter(
+        (s) => (!s.adminOnly || isAdmin) && visibleLevelSections.includes(s.key)
+      ),
+    }))
+    .filter((g) => g.sections.length > 0);
 
   return (
     <div className="flex h-full overflow-hidden">
       {/* Sidebar */}
-      <div className="w-48 shrink-0 border-r border-bot-border/30 bg-bot-surface/60 backdrop-blur-sm flex flex-col py-2 overflow-y-auto space-y-0.5 px-1.5">
-        {sections.map((s) => (
-          <button
-            key={s.key}
-            onClick={() => setActiveSection(s.key)}
-            className={cn(
-              "w-full text-left px-3.5 py-2.5 rounded-lg text-body transition-all duration-200",
-              activeSection === s.key
-                ? "bg-bot-accent/10 text-bot-accent font-medium shadow-glow-sm"
-                : "text-bot-muted hover:text-bot-text hover:bg-bot-elevated/40",
-            )}
-          >
-            {s.label}
-          </button>
-        ))}
+      <div className="w-52 shrink-0 border-r border-bot-border/30 bg-bot-surface/60 backdrop-blur-sm flex flex-col py-2 overflow-y-auto px-1.5">
+        {visibleGroups.map((group) => {
+          const isExpanded = expandedGroups.has(group.label);
+          return (
+            <div key={group.label} className="mb-1">
+              <button
+                onClick={() =>
+                  setExpandedGroups((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(group.label)) next.delete(group.label);
+                    else next.add(group.label);
+                    return next;
+                  })
+                }
+                className="w-full flex items-center justify-between px-3 pt-3 pb-1 group"
+              >
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-bot-muted/60 group-hover:text-bot-muted transition-colors">
+                  {group.label}
+                </span>
+                {isExpanded
+                  ? <ChevronDown className="w-3 h-3 text-bot-muted/40 group-hover:text-bot-muted transition-colors" />
+                  : <ChevronRight className="w-3 h-3 text-bot-muted/40 group-hover:text-bot-muted transition-colors" />
+                }
+              </button>
+              {isExpanded && (
+                <div className="space-y-0.5">
+                  {group.sections.map((s) => (
+                    <button
+                      key={s.key}
+                      onClick={() => setActiveSection(s.key)}
+                      className={cn(
+                        "w-full text-left px-3.5 py-2 rounded-lg text-body transition-all duration-200",
+                        activeSection === s.key
+                          ? "bg-bot-accent/10 text-bot-accent font-medium shadow-glow-sm"
+                          : "text-bot-muted hover:text-bot-text hover:bg-bot-elevated/40",
+                      )}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {/* Content */}
