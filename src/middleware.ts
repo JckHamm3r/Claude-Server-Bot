@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
+import { isIPInAllowList } from "@/lib/ip-allowlist";
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -45,6 +46,20 @@ export async function middleware(request: NextRequest) {
       const safePath = pathname.startsWith("/") && !pathname.startsWith("//") ? pathname : "/";
       loginUrl.searchParams.set("callbackUrl", `${origin}${basePath}${safePath}`);
       return NextResponse.redirect(loginUrl);
+    }
+
+    // Enforce per-user IP allowlist on every request (refreshed every 5 min via JWT)
+    const allowedIps = token.allowedIps as string[] | undefined;
+    if (allowedIps && allowedIps.length > 0) {
+      const clientIP =
+        request.headers.get("x-real-ip") ??
+        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+        "";
+      if (clientIP && !isIPInAllowList(clientIP, allowedIps)) {
+        const loginUrl = new URL(`${basePath}/login`, origin);
+        loginUrl.searchParams.set("error", "ip_restricted");
+        return NextResponse.redirect(loginUrl);
+      }
     }
 
     // Check if user must change password (flag is stored in the JWT token)

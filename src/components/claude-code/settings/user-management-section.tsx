@@ -5,7 +5,7 @@ import { cn, apiUrl } from "@/lib/utils";
 import {
   UserPlus, Search, Edit2, Trash2, ChevronDown,
   Shield, User, Check, X, Copy, RefreshCw, Users2,
-  CheckSquare, Square, AlertTriangle,
+  CheckSquare, Square, AlertTriangle, Network, Plus,
 } from "lucide-react";
 
 interface UserGroupBadge {
@@ -25,6 +25,15 @@ interface AdminUser {
   group_id: string | null;
   group_name: string | null;
   group_color: string | null;
+  allowed_ips: string | null;
+  security_groups: Array<{ id: string; name: string }>;
+}
+
+interface SecurityGroupOption {
+  id: string;
+  name: string;
+  description: string;
+  allowed_ips: string;
 }
 
 const AVATAR_PALETTE = [
@@ -84,6 +93,24 @@ function RoleBadge({ isAdmin }: { isAdmin: number }) {
   );
 }
 
+function IPRestrictedBadge({ securityGroups, directIPs }: { securityGroups: Array<{ id: string; name: string }>; directIPs: string[] }) {
+  const total = securityGroups.length + (directIPs.length > 0 ? 1 : 0);
+  if (total === 0) return null;
+  const title = [
+    directIPs.length > 0 ? `${directIPs.length} direct IP${directIPs.length !== 1 ? "s" : ""}` : "",
+    securityGroups.length > 0 ? `Groups: ${securityGroups.map((g) => g.name).join(", ")}` : "",
+  ].filter(Boolean).join(" | ");
+  return (
+    <span
+      title={title}
+      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-amber-500/15 text-amber-400 border border-amber-500/30"
+    >
+      <Network className="w-2.5 h-2.5" />
+      IP Restricted
+    </span>
+  );
+}
+
 function PasswordBanner({
   password,
   label,
@@ -130,6 +157,7 @@ function PasswordBanner({
 export function UserManagementSection() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [groups, setGroups] = useState<UserGroupBadge[]>([]);
+  const [securityGroups, setSecurityGroups] = useState<SecurityGroupOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -155,6 +183,10 @@ export function UserManagementSection() {
   const [editIsAdmin, setEditIsAdmin] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [editPassword, setEditPassword] = useState<string | null>(null);
+  const [editAllowedIPs, setEditAllowedIPs] = useState<string[]>([]);
+  const [editSecurityGroupIds, setEditSecurityGroupIds] = useState<string[]>([]);
+  const [editIPInput, setEditIPInput] = useState("");
+  const [editIPError, setEditIPError] = useState("");
 
   // Bulk
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -181,10 +213,12 @@ export function UserManagementSection() {
     Promise.all([
       fetch(apiUrl("/api/users")).then((r) => r.json()),
       fetch(apiUrl("/api/groups")).then((r) => r.json()),
+      fetch(apiUrl("/api/security-groups")).then((r) => r.json()),
     ])
-      .then(([ud, gd]) => {
+      .then(([ud, gd, sgd]) => {
         setUsers(ud.users ?? []);
         setGroups(gd.groups ?? []);
+        setSecurityGroups(sgd.groups ?? []);
       })
       .catch(() => showMsg(false, "Failed to load data"))
       .finally(() => setLoading(false));
@@ -260,6 +294,8 @@ export function UserManagementSection() {
           group_id: addGroupId || null,
           group_name: grp?.name ?? null,
           group_color: grp?.color ?? null,
+          allowed_ips: null,
+          security_groups: [],
         };
         setUsers((prev) => [...prev, newUser]);
         setNewPassword(data.password);
@@ -284,11 +320,18 @@ export function UserManagementSection() {
     setEditIsAdmin(!!u.is_admin);
     setEditPassword(null);
     setConfirmDeleteEmail(null);
+    // IP allowlist
+    try { setEditAllowedIPs(JSON.parse(u.allowed_ips ?? "[]") ?? []); } catch { setEditAllowedIPs([]); }
+    setEditSecurityGroupIds((u.security_groups ?? []).map((sg) => sg.id));
+    setEditIPInput("");
+    setEditIPError("");
   };
 
   const cancelEdit = () => {
     setEditingEmail(null);
     setEditPassword(null);
+    setEditIPInput("");
+    setEditIPError("");
   };
 
   const handleSave = async () => {
@@ -301,6 +344,7 @@ export function UserManagementSection() {
       body.last_name = editLast;
       body.is_admin = editIsAdmin;
       body.group_id = editGroupId || null;
+      body.allowed_ips = editAllowedIPs;
 
       const res = await fetch(apiUrl("/api/users"), {
         method: "PATCH",
@@ -310,28 +354,54 @@ export function UserManagementSection() {
       const data = await res.json();
       if (!res.ok) {
         showMsg(false, data.error ?? "Save failed");
-      } else {
-        const effectiveEmail = data.email ?? editingEmail;
-        const grp = groups.find((g) => g.id === editGroupId);
-        setUsers((prev) =>
-          prev.map((u) =>
-            u.email === editingEmail
-              ? {
-                  ...u,
-                  email: effectiveEmail,
-                  first_name: editFirst,
-                  last_name: editLast,
-                  is_admin: editIsAdmin ? 1 : 0,
-                  group_id: editGroupId || null,
-                  group_name: grp?.name ?? null,
-                  group_color: grp?.color ?? null,
-                }
-              : u
-          )
-        );
-        setEditingEmail(null);
-        showMsg(true, "User updated");
+        return;
       }
+
+      const effectiveEmail = data.email ?? editingEmail;
+      const grp = groups.find((g) => g.id === editGroupId);
+
+      // Reconcile security group assignments
+      const currentUser = users.find((u) => u.email === editingEmail);
+      const previousSecGroupIds = (currentUser?.security_groups ?? []).map((sg) => sg.id);
+      const toAdd = editSecurityGroupIds.filter((id) => !previousSecGroupIds.includes(id));
+      const toRemove = previousSecGroupIds.filter((id) => !editSecurityGroupIds.includes(id));
+
+      await Promise.all([
+        ...toAdd.map((id) => fetch(apiUrl(`/api/security-groups/${id}/members`), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: effectiveEmail }),
+        })),
+        ...toRemove.map((id) => fetch(apiUrl(`/api/security-groups/${id}/members`), {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: effectiveEmail }),
+        })),
+      ]);
+
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.email === editingEmail
+            ? {
+                ...u,
+                email: effectiveEmail,
+                first_name: editFirst,
+                last_name: editLast,
+                is_admin: editIsAdmin ? 1 : 0,
+                group_id: editGroupId || null,
+                group_name: grp?.name ?? null,
+                group_color: grp?.color ?? null,
+                allowed_ips: JSON.stringify(editAllowedIPs),
+                security_groups: editSecurityGroupIds.map((id) => {
+                  const sg = securityGroups.find((s) => s.id === id);
+                  return { id, name: sg?.name ?? id };
+                }),
+              }
+            : u
+        )
+      );
+      setEditingEmail(null);
+      showMsg(true, "User updated");
     } catch {
       showMsg(false, "Network error");
     } finally {
@@ -634,13 +704,14 @@ export function UserManagementSection() {
       ) : (
         <div className="rounded-lg border border-bot-border overflow-hidden">
           {/* Table header */}
-          <div className="grid grid-cols-[auto_1fr_auto_auto_auto_auto] items-center gap-3 px-4 py-2 border-b border-bot-border bg-bot-elevated text-[10px] font-medium uppercase tracking-wide text-bot-muted">
+          <div className="grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto] items-center gap-3 px-4 py-2 border-b border-bot-border bg-bot-elevated text-[10px] font-medium uppercase tracking-wide text-bot-muted">
             <button onClick={toggleAll} className="flex items-center text-bot-muted hover:text-bot-accent transition-colors">
               {allChecked ? <CheckSquare className="h-4 w-4 text-bot-accent" /> : <Square className="h-4 w-4" />}
             </button>
             <span>User</span>
             <span>Group</span>
             <span>Role</span>
+            <span>IP</span>
             <span>Joined</span>
             <span>Actions</span>
           </div>
@@ -653,7 +724,7 @@ export function UserManagementSection() {
                   {/* User row */}
                   <div
                     className={cn(
-                      "grid grid-cols-[auto_1fr_auto_auto_auto_auto] items-center gap-3 px-4 py-3 group transition-colors",
+                      "grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto] items-center gap-3 px-4 py-3 group transition-colors",
                       isEditing ? "bg-bot-elevated" : "hover:bg-bot-elevated/60"
                     )}
                   >
@@ -684,6 +755,15 @@ export function UserManagementSection() {
 
                     {/* Role */}
                     <RoleBadge isAdmin={u.is_admin} />
+
+                    {/* IP Restricted badge */}
+                    <div>
+                      {(() => {
+                        let directIPs: string[] = [];
+                        try { directIPs = JSON.parse(u.allowed_ips ?? "[]") ?? []; } catch { directIPs = []; }
+                        return <IPRestrictedBadge securityGroups={u.security_groups ?? []} directIPs={directIPs} />;
+                      })()}
+                    </div>
 
                     {/* Date */}
                     <span className="text-caption text-bot-muted whitespace-nowrap">{formatDate(u.created_at)}</span>
@@ -807,6 +887,92 @@ export function UserManagementSection() {
                           </label>
                         </div>
                       </div>
+
+                      {/* IP Allowlist */}
+                      <div className="space-y-2">
+                        <label className="block text-caption font-medium text-bot-muted">
+                          Direct IP Allowlist
+                          <span className="ml-1 font-normal text-bot-muted">(leave empty for unrestricted)</span>
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            value={editIPInput}
+                            onChange={(e) => { setEditIPInput(e.target.value); setEditIPError(""); }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                const trimmed = editIPInput.trim();
+                                if (!trimmed) return;
+                                if (editAllowedIPs.includes(trimmed)) { setEditIPInput(""); return; }
+                                setEditAllowedIPs((prev) => [...prev, trimmed]);
+                                setEditIPInput("");
+                              }
+                            }}
+                            placeholder="e.g. 192.168.1.0/24 or 10.0.0.5"
+                            className="flex-1 rounded-md border border-bot-border bg-bot-bg px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent placeholder:text-bot-muted font-mono text-sm"
+                          />
+                          <button
+                            onClick={() => {
+                              const trimmed = editIPInput.trim();
+                              if (!trimmed) return;
+                              if (editAllowedIPs.includes(trimmed)) { setEditIPInput(""); return; }
+                              setEditAllowedIPs((prev) => [...prev, trimmed]);
+                              setEditIPInput("");
+                            }}
+                            className="px-3 py-2 rounded-md bg-bot-accent text-white text-sm hover:bg-bot-accent/90 flex items-center gap-1"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                        {editIPError && <p className="text-[11px] text-red-400">{editIPError}</p>}
+                        {editAllowedIPs.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {editAllowedIPs.map((ip) => (
+                              <span key={ip} className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-bot-elevated border border-bot-border text-bot-text font-mono">
+                                {ip}
+                                <button onClick={() => setEditAllowedIPs((prev) => prev.filter((v) => v !== ip))} className="text-bot-muted hover:text-red-400 ml-0.5">
+                                  <X className="h-2.5 w-2.5" />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Security Groups assignment */}
+                      {securityGroups.length > 0 && (
+                        <div className="space-y-2">
+                          <label className="block text-caption font-medium text-bot-muted">
+                            Security Groups
+                            <span className="ml-1 font-normal text-bot-muted">(IP allowlists from groups are merged)</span>
+                          </label>
+                          <div className="flex flex-wrap gap-1.5">
+                            {securityGroups.map((sg) => {
+                              const assigned = editSecurityGroupIds.includes(sg.id);
+                              return (
+                                <button
+                                  key={sg.id}
+                                  onClick={() => {
+                                    setEditSecurityGroupIds((prev) =>
+                                      assigned ? prev.filter((id) => id !== sg.id) : [...prev, sg.id]
+                                    );
+                                  }}
+                                  className={cn(
+                                    "inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border transition-colors",
+                                    assigned
+                                      ? "bg-bot-accent/15 border-bot-accent/40 text-bot-accent"
+                                      : "bg-bot-elevated border-bot-border text-bot-muted hover:border-bot-accent/40 hover:text-bot-text"
+                                  )}
+                                >
+                                  <Network className="h-2.5 w-2.5" />
+                                  {sg.name}
+                                  {assigned && <Check className="h-2.5 w-2.5" />}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
 
                       <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                         <button

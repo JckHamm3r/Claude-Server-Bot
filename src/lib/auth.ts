@@ -87,6 +87,22 @@ export const authOptions: NextAuthOptions = {
           if (ipSettings.enabled) {
             recordLoginAttempt(ip, credentials.email, true);
           }
+
+          // Check per-user IP allowlist (security groups + direct user IPs)
+          try {
+            const { getUserEffectiveAllowedIPs } = await import("./claude-db");
+            const { isIPInAllowList } = await import("./ip-allowlist");
+            const allowedIPs = getUserEffectiveAllowedIPs(credentials.email);
+            if (allowedIPs.length > 0 && !isIPInAllowList(ip, allowedIPs)) {
+              logActivity("security_ip_restricted_login", credentials.email, { ip });
+              throw new Error(`IP_NOT_ALLOWED: Access from ${ip} is not permitted for this account`);
+            }
+          } catch (ipErr) {
+            const ipErrMsg = String(ipErr);
+            if (ipErrMsg.includes("IP_NOT_ALLOWED:")) throw ipErr;
+            // Non-fatal: DB/import error — allow login
+          }
+
           logActivity("user_login", user.email);
 
           return {
@@ -98,6 +114,7 @@ export const authOptions: NextAuthOptions = {
         } catch (err) {
           const msg = String(err);
           if (msg.includes("IP_BLOCKED:")) throw err; // re-throw so NextAuth surfaces it
+          if (msg.includes("IP_NOT_ALLOWED:")) throw err; // re-throw so NextAuth surfaces it
           console.error("[auth] authorize error:", err);
           return null;
         }
@@ -143,6 +160,14 @@ export const authOptions: NextAuthOptions = {
             token.groupId = row.group_id ?? null;
           }
 
+          // Load per-user IP allowlist (user direct + security groups)
+          try {
+            const { getUserEffectiveAllowedIPs } = require("./claude-db") as typeof import("./claude-db");
+            token.allowedIps = getUserEffectiveAllowedIPs(token.email as string);
+          } catch {
+            token.allowedIps = [];
+          }
+
           // Non-admin users don't go through the setup wizard.
           // Auto-mark their setup_complete on first encounter so the middleware
           // never redirects them to /setup.
@@ -152,10 +177,10 @@ export const authOptions: NextAuthOptions = {
             db.prepare("INSERT OR IGNORE INTO user_settings (email) VALUES (?)").run(token.email as string);
             db.prepare("UPDATE user_settings SET setup_complete = 1 WHERE email = ?").run(token.email as string);
           } else {
-            const settings = db.prepare("SELECT setup_complete FROM user_settings WHERE email = ?").get(token.email as string) as
-              | { setup_complete: number }
+            const globalSetup = db.prepare("SELECT value FROM app_settings WHERE key = 'setup_complete'").get() as
+              | { value: string }
               | undefined;
-            token.setupComplete = settings ? Boolean(settings.setup_complete) : false;
+            token.setupComplete = globalSetup?.value === "true";
           }
 
           token.lastRefresh = Date.now();

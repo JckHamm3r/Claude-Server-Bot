@@ -3,7 +3,7 @@ import * as path from "path";
 import { getAppSetting, getPersonalityPrefix } from "./app-settings";
 import { getCustomizationSystemPrompt, getBotSelfIdentityPrompt } from "./customization";
 import { getSecuritySystemPrompt } from "./security-guard";
-import { getMemories, getSessionContext } from "./claude-db";
+import { getMemoriesForTarget, MAIN_SESSION_TARGET, getSessionContext } from "./claude-db";
 import { buildAgentToolBlock } from "./agent-tool-injector";
 
 export type InterfaceType = "ui_chat" | "customization_interface" | "system_agent";
@@ -240,7 +240,7 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
 
   // Append saved memories from the database so Claude has access to
   // project-level knowledge items curated by admins.
-  const memories = getMemories();
+  const memories = getMemoriesForTarget(MAIN_SESSION_TARGET);
   if (memories.length > 0) {
     const memoriesText = memories
       .map((m) => `### ${m.title}\n${m.content}`)

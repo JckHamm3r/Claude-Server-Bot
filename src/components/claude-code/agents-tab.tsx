@@ -15,6 +15,17 @@ interface AgentFormData {
   allowed_tools: string[];
 }
 
+interface Memory {
+  id: string;
+  title: string;
+  content: string;
+  is_global: boolean;
+  assigned_agent_ids: string[];
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export function AgentsTab() {
   const [agents, setAgents] = useState<ClaudeAgent[]>([]);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -22,11 +33,30 @@ export function AgentsTab() {
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [versionAgent, setVersionAgent] = useState<ClaudeAgent | null>(null);
   const [versions, setVersions] = useState<ClaudeAgentVersion[]>([]);
+  const [memoryCounts, setMemoryCounts] = useState<Record<string, number>>({});
+  const [globalMemoryCount, setGlobalMemoryCount] = useState(0);
 
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
+  const globalMemoryCountRef = useRef(0);
 
   const emit = useCallback((event: string, data?: unknown) => {
     socketRef.current?.emit(event, data);
+  }, []);
+
+  const fetchMemoryCounts = useCallback(async (agentList: ClaudeAgent[]) => {
+    try {
+      const res = await fetch("/api/claude-code/memories");
+      if (!res.ok) return;
+      const data: Memory[] = await res.json();
+      const globalCount = data.filter((m) => m.is_global).length;
+      setGlobalMemoryCount(globalCount);
+      globalMemoryCountRef.current = globalCount;
+    } catch {
+      // non-fatal
+    }
+    for (const agent of agentList) {
+      socketRef.current?.emit("claude:get_agent_memories", { agentId: agent.id });
+    }
   }, []);
 
   useEffect(() => {
@@ -35,6 +65,15 @@ export function AgentsTab() {
 
     const handleAgents = ({ agents: a }: { agents: ClaudeAgent[] }) => {
       setAgents(a);
+      fetchMemoryCounts(a);
+    };
+
+    const handleAgentMemories = ({ agentId, memories }: { agentId: string; memories: Memory[] }) => {
+      const specificCount = memories.filter((m) => !m.is_global).length;
+      setMemoryCounts((prev) => ({
+        ...prev,
+        [agentId]: globalMemoryCountRef.current + specificCount,
+      }));
     };
 
     const handleVersions = ({
@@ -44,13 +83,12 @@ export function AgentsTab() {
       agentId: string;
       versions: ClaudeAgentVersion[];
     }) => {
-      // Only apply if we're showing versions for the same agent
       setVersions(v);
-      // If the response is for a different agent than currently shown, clear it
       setVersionAgent((prev) => (prev?.id === agentId ? prev : null));
     };
 
     socket.on("claude:agents", handleAgents);
+    socket.on("claude:agent_memories", handleAgentMemories);
     socket.on("claude:agent_versions", handleVersions);
 
     if (socket.connected) {
@@ -63,10 +101,11 @@ export function AgentsTab() {
 
     return () => {
       socket.off("claude:agents", handleAgents);
+      socket.off("claude:agent_memories", handleAgentMemories);
       socket.off("claude:agent_versions", handleVersions);
       socket.off("connect");
     };
-  }, []);
+  }, [fetchMemoryCounts]);
 
   const handleNew = useCallback(() => {
     setSelectedAgent(null);
@@ -97,7 +136,6 @@ export function AgentsTab() {
 
   const handleDelete = useCallback(
     (agentId: string) => {
-      // Optimistic removal
       setAgents((prev) => prev.filter((a) => a.id !== agentId));
       emit("claude:delete_agent", { agentId });
     },
@@ -107,7 +145,6 @@ export function AgentsTab() {
   const handleToggleStatus = useCallback(
     (agent: ClaudeAgent) => {
       const newStatus = agent.status === "active" ? "disabled" : "active";
-      // Optimistic update
       setAgents((prev) =>
         prev.map((a) => (a.id === agent.id ? { ...a, status: newStatus } : a)),
       );
@@ -122,7 +159,6 @@ export function AgentsTab() {
 
   const handleArchive = useCallback(
     (agentId: string) => {
-      // Optimistic update
       setAgents((prev) =>
         prev.map((a) => (a.id === agentId ? { ...a, status: "archived" as const } : a)),
       );
@@ -170,6 +206,7 @@ export function AgentsTab() {
     <div className="flex h-full flex-col overflow-hidden">
       <AgentListView
         agents={agents}
+        memoryCounts={memoryCounts}
         onEdit={handleEdit}
         onDelete={handleDelete}
         onToggleStatus={handleToggleStatus}
@@ -187,6 +224,7 @@ export function AgentsTab() {
           onSave={handleSave}
           initialData={selectedAgent ?? undefined}
           isEditing={!!selectedAgent}
+          globalMemoryCount={globalMemoryCount}
         />
       )}
 

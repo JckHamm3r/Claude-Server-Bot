@@ -17,10 +17,10 @@ export async function GET() {
     return NextResponse.json({ needsSetup: false });
   }
 
-  const settings = db.prepare("SELECT setup_complete FROM user_settings WHERE email = ?").get(session.user.email) as
-    | { setup_complete: number }
+  const row = db.prepare("SELECT value FROM app_settings WHERE key = 'setup_complete'").get() as
+    | { value: string }
     | undefined;
 
-  const needsSetup = !settings || !settings.setup_complete;
+  const needsSetup = !row || row.value !== "true";
   return NextResponse.json({ needsSetup });
 }

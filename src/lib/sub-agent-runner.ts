@@ -1,5 +1,5 @@
 import { getClaudeProvider } from "./claude";
-import { getActiveAgents, incrementAgentUseCount } from "./claude-db";
+import { getActiveAgents, incrementAgentUseCount, getMemoriesForTarget } from "./claude-db";
 import { registerSubAgent, updateSubAgentStatus } from "./sub-agent-registry";
 import { randomUUID } from "crypto";
 
@@ -55,13 +55,26 @@ export async function runSubAgent(opts: SubAgentOptions): Promise<SubAgentResult
   // Register in the UI registry before starting
   registerSubAgent(opts.parentSessionId, subAgentId, agent.name, agent.icon ?? null, opts.task);
 
-  const systemPrompt = [
+  const basePromptParts = [
     `You are "${agent.name}": ${agent.description}`,
     ``,
     `Execute the task you are given completely and thoroughly. Return a clear, comprehensive result.`,
     `If you encounter any errors or cannot complete part of the task, explain exactly what went wrong.`,
     `If you need to delegate a sub-task to another specialized agent, use the delegation mechanism described in your tools.`,
-  ].join("\n");
+  ];
+
+  const agentMemories = getMemoriesForTarget(agent.id);
+  if (agentMemories.length > 0) {
+    const memoriesText = agentMemories
+      .map((m) => `### ${m.title}\n${m.content}`)
+      .join("\n\n");
+    basePromptParts.push(
+      ``,
+      `<memories>\nThe following are important memory items for this project. Treat them as ground truth.\n\n${memoriesText}\n</memories>`,
+    );
+  }
+
+  const systemPrompt = basePromptParts.join("\n");
 
   provider.createSession(subSessionId, {
     model: agent.model,

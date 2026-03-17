@@ -4,7 +4,9 @@ import { authOptions } from "@/lib/auth";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import db from "@/lib/db";
-import { assignUserToGroup, getGroup } from "@/lib/claude-db";
+import { assignUserToGroup, getGroup, getUserSecurityGroups } from "@/lib/claude-db";
+import { validateIPOrCIDR } from "@/lib/ip-allowlist";
+import { logActivity } from "@/lib/activity-log";
 
 function generatePassword(): string {
   const len = Math.floor(Math.random() * 47) + 80; // 80–126 chars
@@ -27,12 +29,20 @@ export async function GET() {
 
   const users = db.prepare(`
     SELECT u.email, u.is_admin, u.first_name, u.last_name, u.avatar_url, u.created_at, u.group_id,
+           u.allowed_ips,
            g.name as group_name, g.color as group_color, g.icon as group_icon
     FROM users u
     LEFT JOIN user_groups g ON g.id = u.group_id
     ORDER BY u.created_at ASC
-  `).all() as Array<{ email: string; is_admin: number; first_name: string; last_name: string; avatar_url: string | null; created_at: string; group_id: string | null; group_name: string | null; group_color: string | null; group_icon: string | null }>;
-  return NextResponse.json({ users: users });
+  `).all() as Array<{ email: string; is_admin: number; first_name: string; last_name: string; avatar_url: string | null; created_at: string; group_id: string | null; allowed_ips: string | null; group_name: string | null; group_color: string | null; group_icon: string | null }>;
+
+  // Attach security group names for each user
+  const usersWithSecurityGroups = users.map((u) => {
+    const secGroups = getUserSecurityGroups(u.email);
+    return { ...u, security_groups: secGroups.map((sg) => ({ id: sg.id, name: sg.name })) };
+  });
+
+  return NextResponse.json({ users: usersWithSecurityGroups });
 }
 
 export async function POST(request: NextRequest) {
@@ -124,14 +134,14 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: { email: string; newEmail?: string; is_admin?: boolean; resetPassword?: boolean; first_name?: string; last_name?: string; group_id?: string | null };
+  let body: { email: string; newEmail?: string; is_admin?: boolean; resetPassword?: boolean; first_name?: string; last_name?: string; group_id?: string | null; allowed_ips?: string[] };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { email, newEmail, is_admin, resetPassword, first_name, last_name, group_id } = body;
+  const { email, newEmail, is_admin, resetPassword, first_name, last_name, group_id, allowed_ips } = body;
   if (!email || typeof email !== "string") {
     return NextResponse.json({ error: "Missing email" }, { status: 400 });
   }
@@ -196,6 +206,24 @@ export async function PATCH(request: NextRequest) {
       if (!grp) return NextResponse.json({ error: "Group not found" }, { status: 404 });
     }
     assignUserToGroup(effectiveEmail, group_id);
+  }
+
+  if (allowed_ips !== undefined) {
+    if (!Array.isArray(allowed_ips)) {
+      return NextResponse.json({ error: "allowed_ips must be an array" }, { status: 400 });
+    }
+    for (const entry of allowed_ips) {
+      const v = validateIPOrCIDR(String(entry));
+      if (!v.valid) {
+        return NextResponse.json({ error: `Invalid IP/CIDR: ${entry} — ${v.error}` }, { status: 400 });
+      }
+    }
+    const normalizedIPs = allowed_ips.map((e) => String(e).trim()).filter(Boolean);
+    db.prepare("UPDATE users SET allowed_ips = ? WHERE email = ?").run(
+      JSON.stringify(normalizedIPs),
+      effectiveEmail
+    );
+    logActivity("user_ip_allowlist_updated", session.user.email, { target_email: effectiveEmail, ip_count: normalizedIPs.length });
   }
 
   return NextResponse.json({ ok: true, email: effectiveEmail, ...result });

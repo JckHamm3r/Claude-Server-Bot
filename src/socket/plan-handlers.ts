@@ -16,6 +16,9 @@ import {
   deletePlanSteps,
   deletePlan,
   isUserAdmin,
+  getAgentMemories,
+  setMemoryAssignments,
+  getMemories,
 } from "../lib/claude-db";
 import { logActivity } from "../lib/activity-log";
 import { dispatchNotification } from "../lib/notifications";
@@ -105,6 +108,32 @@ export function registerPlanHandlers(ctx: HandlerContext) {
       socket.emit("claude:error", { message: String(err) });
     }
   });
+
+  socket.on("claude:get_agent_memories", ({ agentId }: { agentId: string }) => {
+    try {
+      const memories = getAgentMemories(agentId);
+      socket.emit("claude:agent_memories", { agentId, memories });
+    } catch (err) {
+      socket.emit("claude:error", { message: String(err) });
+    }
+  });
+
+  socket.on(
+    "claude:set_memory_assignments",
+    ({ memoryId, isGlobal, agentIds }: { memoryId: string; isGlobal: boolean; agentIds: string[] }) => {
+      try {
+        if (!isUserAdmin(email)) {
+          socket.emit("claude:error", { message: "Access denied" });
+          return;
+        }
+        setMemoryAssignments(memoryId, isGlobal, agentIds);
+        const memories = getMemories();
+        socket.emit("claude:memories_updated", { memories });
+      } catch (err) {
+        socket.emit("claude:error", { message: String(err) });
+      }
+    },
+  );
 
   socket.on("claude:generate_agent", async ({ description }: { description: string }) => {
     const sessionId = `agent-gen-${Date.now()}`;

@@ -1,33 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import {
+  getMemories,
+  setMemoryAssignments,
+  getMemoryAssignments,
+} from "@/lib/claude-db";
 import db from "@/lib/db";
-
-interface MemoryRow {
-  id: string;
-  title: string;
-  content: string;
-  created_by: string;
-  created_at: string;
-  updated_at: string;
-}
 
 function requireAdmin(email: string): boolean {
   const user = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(email) as { is_admin: number } | undefined;
   return Boolean(user?.is_admin);
 }
 
-// GET /api/claude-code/memories — list all memories (any authenticated user)
+// GET /api/claude-code/memories — list all memories with assignment info (any authenticated user)
 export async function GET() {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const memories = db
-    .prepare("SELECT id, title, content, created_by, created_at, updated_at FROM memories ORDER BY updated_at DESC")
-    .all() as MemoryRow[];
-
+  const memories = getMemories();
   return NextResponse.json({ memories });
 }
 
@@ -41,25 +34,33 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: { title: string; content: string };
+  let body: { title: string; content: string; is_global?: boolean; agent_ids?: string[] };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { title, content } = body;
+  const { title, content, is_global = true, agent_ids = [] } = body;
   if (!title?.trim() || typeof content !== "string") {
     return NextResponse.json({ error: "Missing title or content" }, { status: 400 });
   }
 
-  const result = db
+  const row = db
     .prepare(
-      "INSERT INTO memories (title, content, created_by) VALUES (?, ?, ?) RETURNING id, title, content, created_by, created_at, updated_at"
+      "INSERT INTO memories (title, content, created_by, is_global) VALUES (?, ?, ?, ?) RETURNING id, title, content, is_global, created_by, created_at, updated_at"
     )
-    .get(title.trim(), content, session.user.email) as MemoryRow;
+    .get(title.trim(), content, session.user.email, is_global ? 1 : 0) as {
+      id: string; title: string; content: string; is_global: number;
+      created_by: string; created_at: string; updated_at: string;
+    };
 
-  return NextResponse.json({ memory: result }, { status: 201 });
+  setMemoryAssignments(row.id, is_global, agent_ids);
+
+  const assigned_agent_ids = getMemoryAssignments(row.id);
+  const memory = { ...row, is_global: row.is_global === 1, assigned_agent_ids };
+
+  return NextResponse.json({ memory }, { status: 201 });
 }
 
 // PUT /api/claude-code/memories — update a memory (admin only)
@@ -72,14 +73,14 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: { id: string; title?: string; content?: string };
+  let body: { id: string; title?: string; content?: string; is_global?: boolean; agent_ids?: string[] };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { id, title, content } = body;
+  const { id, title, content, is_global, agent_ids } = body;
   if (!id) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
   }
@@ -99,11 +100,22 @@ export async function PUT(request: NextRequest) {
     db.prepare("UPDATE memories SET content = ?, updated_at = datetime('now') WHERE id = ?").run(content, id);
   }
 
-  const updated = db
-    .prepare("SELECT id, title, content, created_by, created_at, updated_at FROM memories WHERE id = ?")
-    .get(id) as MemoryRow;
+  // Update assignment scope if provided
+  if (is_global !== undefined || agent_ids !== undefined) {
+    const currentRow = db.prepare("SELECT is_global FROM memories WHERE id = ?").get(id) as { is_global: number };
+    const newIsGlobal = is_global !== undefined ? is_global : currentRow.is_global === 1;
+    const newAgentIds = agent_ids !== undefined ? agent_ids : getMemoryAssignments(id);
+    setMemoryAssignments(id, newIsGlobal, newAgentIds);
+  }
 
-  return NextResponse.json({ memory: updated });
+  const updated = db
+    .prepare("SELECT id, title, content, is_global, created_by, created_at, updated_at FROM memories WHERE id = ?")
+    .get(id) as { id: string; title: string; content: string; is_global: number; created_by: string; created_at: string; updated_at: string };
+
+  const assigned_agent_ids = getMemoryAssignments(id);
+  const memory = { ...updated, is_global: updated.is_global === 1, assigned_agent_ids };
+
+  return NextResponse.json({ memory });
 }
 
 // DELETE /api/claude-code/memories — delete a memory (admin only)

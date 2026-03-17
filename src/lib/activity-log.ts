@@ -46,7 +46,14 @@ export type ActivityEventType =
   | "security_ufw_enabled"
   | "security_ufw_disabled"
   | "security_ufw_rollback"
-  | "security_ufw_change_confirmed";
+  | "security_ufw_change_confirmed"
+  | "security_ip_restricted_login"
+  | "security_group_created"
+  | "security_group_updated"
+  | "security_group_deleted"
+  | "security_group_member_added"
+  | "security_group_member_removed"
+  | "user_ip_allowlist_updated";
 
 export function logActivity(
   event_type: ActivityEventType,

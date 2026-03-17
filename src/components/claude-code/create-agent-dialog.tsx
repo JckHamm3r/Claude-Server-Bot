@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X, Loader2, Sparkles, SlidersHorizontal } from "lucide-react";
+import { X, Loader2, Sparkles, SlidersHorizontal, Brain, ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getSocket } from "@/lib/socket";
 import type { ClaudeAgent } from "@/lib/claude-db";
@@ -21,11 +21,23 @@ interface AgentFormData {
   allowed_tools: string[];
 }
 
+interface Memory {
+  id: string;
+  title: string;
+  content: string;
+  is_global: boolean;
+  assigned_agent_ids: string[];
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 interface CreateAgentDialogProps {
   onClose: () => void;
   onSave: (data: AgentFormData) => void;
   initialData?: Partial<ClaudeAgent>;
   isEditing?: boolean;
+  globalMemoryCount?: number;
 }
 
 
@@ -34,6 +46,7 @@ export function CreateAgentDialog({
   onSave,
   initialData,
   isEditing = false,
+  globalMemoryCount = 0,
 }: CreateAgentDialogProps) {
   const [activeTab, setActiveTab] = useState<Tab>(isEditing ? "manual" : "generate");
   const [generatePrompt, setGeneratePrompt] = useState("");
@@ -45,6 +58,8 @@ export function CreateAgentDialog({
     model: initialData?.model ?? "claude-sonnet-4-6",
     allowed_tools: initialData?.allowed_tools ?? [],
   });
+  const [agentMemories, setAgentMemories] = useState<Memory[]>([]);
+  const [memoriesOpen, setMemoriesOpen] = useState(false);
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
 
   useEffect(() => {
@@ -70,14 +85,26 @@ export function CreateAgentDialog({
       console.error("[create-agent] generation error:", message);
     };
 
+    const handleAgentMemories = ({ agentId, memories }: { agentId: string; memories: Memory[] }) => {
+      if (initialData?.id && agentId === initialData.id) {
+        setAgentMemories(memories.filter((m) => !m.is_global));
+      }
+    };
+
     socket.on("claude:agent_generated", handleGenerated);
     socket.on("claude:error", handleError);
+    socket.on("claude:agent_memories", handleAgentMemories);
+
+    if (isEditing && initialData?.id) {
+      socket.emit("claude:get_agent_memories", { agentId: initialData.id });
+    }
 
     return () => {
       socket.off("claude:agent_generated", handleGenerated);
       socket.off("claude:error", handleError);
+      socket.off("claude:agent_memories", handleAgentMemories);
     };
-  }, []);
+  }, [isEditing, initialData?.id]);
 
   function handleGenerate() {
     if (!generatePrompt.trim() || isGenerating) return;
@@ -259,6 +286,47 @@ export function CreateAgentDialog({
                   })}
                 </div>
               </div>
+
+              {isEditing && (
+                <div className="rounded-xl border border-bot-border/25 bg-bot-elevated/20 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setMemoriesOpen((o) => !o)}
+                    className="flex w-full items-center justify-between px-4 py-2.5 text-caption font-medium text-bot-muted hover:text-bot-text transition-colors duration-200"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Brain className="h-3.5 w-3.5" />
+                      Assigned Memories
+                      <span className="rounded-md bg-bot-elevated/60 px-1.5 py-0.5 text-[10px] font-semibold text-bot-muted">
+                        {agentMemories.length} specific + {globalMemoryCount} global
+                      </span>
+                    </span>
+                    {memoriesOpen
+                      ? <ChevronDown className="h-3.5 w-3.5" />
+                      : <ChevronRight className="h-3.5 w-3.5" />}
+                  </button>
+
+                  {memoriesOpen && (
+                    <div className="border-t border-bot-border/25 px-4 py-3 flex flex-col gap-2">
+                      <p className="text-[11px] text-bot-muted/60">
+                        Global memories are always included. Manage assignments from the Memory tab.
+                      </p>
+                      {agentMemories.length === 0 ? (
+                        <p className="text-[11px] text-bot-muted/50 italic">No agent-specific memories assigned.</p>
+                      ) : (
+                        agentMemories.map((m) => (
+                          <div key={m.id} className="rounded-lg bg-bot-elevated/30 border border-bot-border/20 px-3 py-2">
+                            <p className="text-[12px] font-medium text-bot-text leading-tight mb-0.5">{m.title}</p>
+                            <p className="text-[11px] text-bot-muted/70 leading-snug line-clamp-2">
+                              {m.content.slice(0, 80)}{m.content.length > 80 ? "…" : ""}
+                            </p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="flex items-center justify-end gap-3 pt-1">
                 <button

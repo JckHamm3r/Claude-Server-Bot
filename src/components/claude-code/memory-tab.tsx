@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { apiUrl } from "@/lib/utils";
+import { getSocket } from "@/lib/socket";
 import { MonacoEditor } from "./monaco-editor";
 import {
   Loader2,
@@ -19,9 +20,15 @@ import {
   BookOpen,
   Sparkles,
   RotateCcw,
+  Globe,
+  Tag,
+  Users,
+  Filter,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+
+const MAIN_SESSION_TARGET = "__main_session__";
 
 interface Memory {
   id: string;
@@ -30,6 +37,14 @@ interface Memory {
   created_by: string;
   created_at: string;
   updated_at: string;
+  is_global: boolean;
+  assigned_agent_ids: string[];
+}
+
+interface AgentOption {
+  id: string;
+  name: string;
+  icon: string | null;
 }
 
 type MainTab = "memories" | "files";
@@ -72,10 +87,56 @@ interface MemoryItemProps {
   onToggle: () => void;
   onEdit: (memory: Memory) => void;
   onDelete: (id: string) => void;
+  agents: AgentOption[];
 }
 
-function MemoryItem({ memory, isAdmin, isExpanded, onToggle, onEdit, onDelete }: MemoryItemProps) {
+function MemoryItem({ memory, isAdmin, isExpanded, onToggle, onEdit, onDelete, agents }: MemoryItemProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const scopeBadges = () => {
+    if (memory.is_global) {
+      return (
+        <span className="flex items-center gap-0.5 text-[10px] rounded-full px-1.5 py-0.5 bg-bot-elevated/30 text-bot-muted border border-bot-border/25">
+          <Globe className="h-2.5 w-2.5" />
+          Global
+        </span>
+      );
+    }
+    const ids = memory.assigned_agent_ids ?? [];
+    if (ids.length === 0) {
+      return (
+        <span className="text-[10px] rounded-full px-1.5 py-0.5 bg-bot-amber/10 text-bot-amber border border-bot-amber/25">
+          Unassigned
+        </span>
+      );
+    }
+    const displayIds = ids.slice(0, 3);
+    const remainder = ids.length - displayIds.length;
+    return (
+      <span className="flex items-center gap-1 flex-wrap">
+        {displayIds.map((aid) => {
+          const label =
+            aid === MAIN_SESSION_TARGET
+              ? "Main Session"
+              : (agents.find((a) => a.id === aid)?.name ?? aid.slice(0, 8));
+          return (
+            <span
+              key={aid}
+              className="flex items-center gap-0.5 text-[10px] rounded-full px-1.5 py-0.5 bg-bot-elevated/30 text-bot-muted border border-bot-border/25"
+            >
+              <Tag className="h-2.5 w-2.5" />
+              {label}
+            </span>
+          );
+        })}
+        {remainder > 0 && (
+          <span className="text-[10px] rounded-full px-1.5 py-0.5 bg-bot-elevated/30 text-bot-muted border border-bot-border/25">
+            +{remainder} more
+          </span>
+        )}
+      </span>
+    );
+  };
 
   return (
     <div className="group border border-bot-border/25 rounded-lg bg-bot-surface/30 hover:bg-bot-surface/50 hover:border-bot-border/40 transition-all duration-150 overflow-hidden">
@@ -94,7 +155,10 @@ function MemoryItem({ memory, isAdmin, isExpanded, onToggle, onEdit, onDelete }:
         <span className="flex-1 text-[13px] font-medium text-bot-text truncate leading-snug">
           {memory.title}
         </span>
-        <span className="text-[11px] text-bot-muted/50 shrink-0 hidden sm:block">
+        <span className="hidden sm:flex items-center gap-1 shrink-0">
+          {scopeBadges()}
+        </span>
+        <span className="text-[11px] text-bot-muted/50 shrink-0 hidden sm:block ml-1">
           {formatDate(memory.updated_at)}
         </span>
         {isAdmin && (
@@ -153,15 +217,18 @@ function MemoryItem({ memory, isAdmin, isExpanded, onToggle, onEdit, onDelete }:
 
 interface MemoryEditModalProps {
   memory: Memory | null;
-  onSave: (title: string, content: string) => void;
+  onSave: (title: string, content: string, isGlobal: boolean, agentIds: string[]) => void;
   onClose: () => void;
   saving: boolean;
   error: string | null;
+  agents: AgentOption[];
 }
 
-function MemoryEditModal({ memory, onSave, onClose, saving, error }: MemoryEditModalProps) {
+function MemoryEditModal({ memory, onSave, onClose, saving, error, agents }: MemoryEditModalProps) {
   const [title, setTitle] = useState(memory?.title ?? "");
   const [content, setContent] = useState(memory?.content ?? "");
+  const [isGlobal, setIsGlobal] = useState(memory?.is_global ?? true);
+  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>(memory?.assigned_agent_ids ?? []);
   const titleRef = useRef<HTMLInputElement>(null);
 
   // Refactor state
@@ -181,7 +248,7 @@ function MemoryEditModal({ memory, onSave, onClose, saving, error }: MemoryEditM
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
-    onSave(title.trim(), content);
+    onSave(title.trim(), content, isGlobal, isGlobal ? [] : selectedAgentIds);
   };
 
   const handleRefactor = async () => {
@@ -258,6 +325,64 @@ function MemoryEditModal({ memory, onSave, onClose, saving, error }: MemoryEditM
                 placeholder="Memory content…"
                 className="min-h-[140px] w-full px-3 py-2.5 rounded-lg bg-bot-bg border border-bot-border/30 text-[12.5px] text-bot-text placeholder:text-bot-muted/40 focus:outline-none focus:border-bot-accent/50 focus:ring-1 focus:ring-bot-accent/20 transition-all resize-none font-mono leading-relaxed"
               />
+            </div>
+
+            {/* Scope */}
+            <div className="px-5 pb-3">
+              <p className="text-[10.5px] uppercase tracking-wider text-bot-muted/50 font-semibold mb-2">Scope</p>
+              <button
+                type="button"
+                onClick={() => setIsGlobal((v) => !v)}
+                className={[
+                  "flex items-center gap-2 w-full px-3 py-2 rounded-lg border text-[12.5px] font-medium transition-all duration-150",
+                  isGlobal
+                    ? "gradient-accent text-white border-transparent shadow-glow-sm"
+                    : "bg-bot-bg border-bot-border/30 text-bot-muted hover:border-bot-border/50",
+                ].join(" ")}
+              >
+                {isGlobal ? (
+                  <Globe className="h-3.5 w-3.5 shrink-0" />
+                ) : (
+                  <Users className="h-3.5 w-3.5 shrink-0" />
+                )}
+                {isGlobal ? "Global — apply to all agents" : "Agent-specific"}
+              </button>
+
+              {!isGlobal && (
+                <div className="mt-2 border border-bot-border/25 rounded-lg overflow-hidden">
+                  {[
+                    { id: MAIN_SESSION_TARGET, name: "Main Session", icon: null as string | null },
+                    ...agents,
+                  ].map((target) => {
+                    const checked = selectedAgentIds.includes(target.id);
+                    return (
+                      <label
+                        key={target.id}
+                        className="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-bot-elevated/20 transition-colors border-b border-bot-border/15 last:border-b-0"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() =>
+                            setSelectedAgentIds((prev) =>
+                              checked ? prev.filter((id) => id !== target.id) : [...prev, target.id]
+                            )
+                          }
+                          className="accent-bot-accent h-3.5 w-3.5 shrink-0"
+                        />
+                        <span className="text-[12.5px] shrink-0">
+                          {target.icon ?? (target.id === MAIN_SESSION_TARGET ? "🖥️" : "🤖")}
+                        </span>
+                        <span className="text-[12.5px] text-bot-text">{target.name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+
+              {!isGlobal && selectedAgentIds.length === 0 && (
+                <p className="mt-1.5 text-[11px] text-bot-amber">Select at least one target.</p>
+              )}
             </div>
 
             {/* AI Refactor preview */}
@@ -505,6 +630,27 @@ export function MemoryTab() {
   const { data: session } = useSession();
   const isAdmin = Boolean((session?.user as { isAdmin?: boolean })?.isAdmin);
 
+  // Agent filter
+  const [agentFilter, setAgentFilter] = useState<string>("all");
+  const [agents, setAgents] = useState<AgentOption[]>([]);
+
+  // Load agents via socket on mount
+  useEffect(() => {
+    const socket = getSocket();
+    const handleAgents = (data: { agents: Array<{ id: string; name: string; icon?: string | null; status: string }> }) => {
+      setAgents(
+        (data.agents ?? [])
+          .filter((a) => a.status === "active")
+          .map((a) => ({ id: a.id, name: a.name, icon: a.icon ?? null }))
+      );
+    };
+    socket.on("claude:agents", handleAgents);
+    socket.emit("claude:list_agents");
+    return () => {
+      socket.off("claude:agents", handleAgents);
+    };
+  }, []);
+
   // Memories state
   const [memories, setMemories] = useState<Memory[]>([]);
   const [memoriesLoading, setMemoriesLoading] = useState(true);
@@ -617,7 +763,7 @@ export function MemoryTab() {
 
   // ── Memory CRUD ───────────────────────────────────────────────────────────
 
-  const handleSaveMemory = useCallback(async (title: string, content: string) => {
+  const handleSaveMemory = useCallback(async (title: string, content: string, isGlobal: boolean, agentIds: string[]) => {
     setEditSaving(true);
     setEditError(null);
     try {
@@ -627,8 +773,8 @@ export function MemoryTab() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           isEdit
-            ? { id: editModal.memory!.id, title, content }
-            : { title, content }
+            ? { id: editModal.memory!.id, title, content, is_global: isGlobal, agent_ids: agentIds }
+            : { title, content, is_global: isGlobal, agent_ids: agentIds }
         ),
       });
       const data = await res.json() as { memory?: Memory; error?: string };
@@ -744,26 +890,46 @@ export function MemoryTab() {
           {/* Toolbar */}
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-bot-border/20 shrink-0">
             <p className="text-[12px] text-bot-muted/60 leading-snug">
-              Injected into every session&apos;s system prompt as ground truth.
+              Memories are injected into sessions based on their scope (global or agent-specific).
             </p>
-            {isAdmin && (
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => { setShowImport(true); setImportError(null); }}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] text-bot-muted hover:text-bot-text hover:bg-bot-elevated/30 border border-bot-border/25 hover:border-bot-border/40 transition-all duration-150"
+            <div className="flex items-center gap-1.5">
+              {/* Filter dropdown */}
+              <div className="relative flex items-center">
+                <Filter className="absolute left-2 h-3 w-3 text-bot-muted/50 pointer-events-none" />
+                <select
+                  value={agentFilter}
+                  onChange={(e) => setAgentFilter(e.target.value)}
+                  className="pl-6 pr-2 py-1.5 rounded-lg text-[12px] bg-bot-bg border border-bot-border/25 text-bot-muted hover:border-bot-border/40 focus:outline-none focus:border-bot-accent/50 transition-all appearance-none cursor-pointer"
                 >
-                  <Upload className="h-3 w-3" />
-                  Import
-                </button>
-                <button
-                  onClick={() => { setEditModal({ open: true, memory: null }); setEditError(null); }}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] font-semibold gradient-accent text-white shadow-glow-sm hover:brightness-110 active:scale-[0.98] transition-all duration-150"
-                >
-                  <Plus className="h-3 w-3" />
-                  New
-                </button>
+                  <option value="all">All memories</option>
+                  <option value="global">Global only</option>
+                  <option value={MAIN_SESSION_TARGET}>Main Session</option>
+                  {agents.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.icon ? `${a.icon} ` : ""}{a.name}
+                    </option>
+                  ))}
+                </select>
               </div>
-            )}
+              {isAdmin && (
+                <>
+                  <button
+                    onClick={() => { setShowImport(true); setImportError(null); }}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] text-bot-muted hover:text-bot-text hover:bg-bot-elevated/30 border border-bot-border/25 hover:border-bot-border/40 transition-all duration-150"
+                  >
+                    <Upload className="h-3 w-3" />
+                    Import
+                  </button>
+                  <button
+                    onClick={() => { setEditModal({ open: true, memory: null }); setEditError(null); }}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] font-semibold gradient-accent text-white shadow-glow-sm hover:brightness-110 active:scale-[0.98] transition-all duration-150"
+                  >
+                    <Plus className="h-3 w-3" />
+                    New
+                  </button>
+                </>
+              )}
+            </div>
           </div>
 
           {/* Success banner */}
@@ -814,21 +980,33 @@ export function MemoryTab() {
                   </div>
                 )}
               </div>
-            ) : (
-              <div className="p-3 flex flex-col gap-1.5">
-                {memories.map((memory) => (
-                  <MemoryItem
-                    key={memory.id}
-                    memory={memory}
-                    isAdmin={isAdmin}
-                    isExpanded={expandedIds.has(memory.id)}
-                    onToggle={() => toggleExpand(memory.id)}
-                    onEdit={(m) => { setEditModal({ open: true, memory: m }); setEditError(null); }}
-                    onDelete={handleDeleteMemory}
-                  />
-                ))}
-              </div>
-            )}
+            ) : (() => {
+              const filteredMemories = memories.filter((m) => {
+                if (agentFilter === "all") return true;
+                if (agentFilter === "global") return m.is_global;
+                return m.is_global || (m.assigned_agent_ids ?? []).includes(agentFilter);
+              });
+              return filteredMemories.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-32 gap-2 text-center px-6">
+                  <p className="text-[12.5px] text-bot-muted/50">No memories match the current filter.</p>
+                </div>
+              ) : (
+                <div className="p-3 flex flex-col gap-1.5">
+                  {filteredMemories.map((memory) => (
+                    <MemoryItem
+                      key={memory.id}
+                      memory={memory}
+                      isAdmin={isAdmin}
+                      isExpanded={expandedIds.has(memory.id)}
+                      onToggle={() => toggleExpand(memory.id)}
+                      onEdit={(m) => { setEditModal({ open: true, memory: m }); setEditError(null); }}
+                      onDelete={handleDeleteMemory}
+                      agents={agents}
+                    />
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -944,6 +1122,7 @@ export function MemoryTab() {
           onClose={() => setEditModal({ open: false, memory: null })}
           saving={editSaving}
           error={editError}
+          agents={agents}
         />
       )}
 

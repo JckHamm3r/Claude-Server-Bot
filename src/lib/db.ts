@@ -204,6 +204,7 @@ const defaultAppSettings: Record<string, string> = {
   budget_limit_daily_usd: "0",
   budget_limit_monthly_usd: "0",
   message_retention_days: "0",
+  setup_complete: "false",
   // File lock settings
   file_lock_enabled: "true",
   file_lock_timeout_minutes: "5",
@@ -750,6 +751,46 @@ const migrations: Record<number, () => void> = {
     }
 
     console.log('[db] Migration 9: applied 5-group role hierarchy');
+  },
+  10: () => {
+    // Per-user IP allowlist and reusable Security Groups
+    addColumnSafe("users", "allowed_ips", "TEXT");
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS security_groups (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT NOT NULL DEFAULT '',
+        allowed_ips TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS user_security_groups (
+        user_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+        security_group_id TEXT NOT NULL REFERENCES security_groups(id) ON DELETE CASCADE,
+        assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
+        assigned_by TEXT,
+        PRIMARY KEY (user_email, security_group_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_security_groups_email ON user_security_groups(user_email);
+      CREATE INDEX IF NOT EXISTS idx_user_security_groups_group ON user_security_groups(security_group_id);
+    `);
+    console.log('[db] Migration 10: added security_groups and user_security_groups tables');
+  },
+  11: () => {
+    // Agent-scoped memories: is_global flag + assignment junction table
+    addColumnSafe("memories", "is_global", "INTEGER NOT NULL DEFAULT 1");
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS memory_agent_assignments (
+        memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+        agent_id TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (memory_id, agent_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_maa_agent ON memory_agent_assignments(agent_id);
+      CREATE INDEX IF NOT EXISTS idx_maa_memory ON memory_agent_assignments(memory_id);
+    `);
+    console.log('[db] Migration 11: agent-scoped memories (is_global + memory_agent_assignments)');
   },
 };
 

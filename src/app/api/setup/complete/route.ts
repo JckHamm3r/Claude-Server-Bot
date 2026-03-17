@@ -25,6 +25,10 @@ export async function POST(_req: NextRequest) {
 
   try {
     await updateUserSettings(session.user.email, { setup_complete: true });
+    // Set the global flag so all future admins are not re-prompted
+    db.prepare(
+      "INSERT INTO app_settings (key, value) VALUES ('setup_complete', 'true') ON CONFLICT(key) DO UPDATE SET value = 'true', updated_at = datetime('now')"
+    ).run();
   } catch (err) {
     console.error("[setup/complete] updateUserSettings failed:", err);
     return NextResponse.json({ error: "Setup completion failed" }, { status: 500 });

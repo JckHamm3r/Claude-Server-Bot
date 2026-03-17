@@ -41,6 +41,7 @@ import {
   Mail,
   Archive,
   ScrollText,
+  ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
 
@@ -56,6 +57,7 @@ import { SystemServiceManagerSection } from "@/components/claude-code/settings/s
 import { SecretsSection } from "@/components/claude-code/settings/secrets-section";
 import { UserManagementSection } from "@/components/claude-code/settings/user-management-section";
 import { UserGroupsSection } from "@/components/claude-code/settings/user-groups-section";
+import SecurityGroupsSection from "@/components/claude-code/settings/security-groups-section";
 import { useUserProfile, invalidateProfileCache } from "@/hooks/use-user-profile";
 
 type SectionKey =
@@ -81,7 +83,8 @@ type SectionKey =
   | "budgets"
   | "secrets"
   | "user_management"
-  | "user_groups";
+  | "user_groups"
+  | "security_groups";
 
 export function SettingsPanel() {
   useSession();
@@ -447,6 +450,7 @@ export function SettingsPanel() {
       sections: [
         { key: "user_management", label: "User Management", icon: Users },
         { key: "user_groups", label: "User Groups", icon: Users2 },
+        { key: "security_groups", label: "Security Groups", icon: ShieldCheck },
         { key: "security", label: "Security", icon: Shield },
         { key: "rate_limits", label: "Rate Limits", icon: Gauge },
         { key: "budgets", label: "Budgets", icon: Wallet },
@@ -772,6 +776,11 @@ export function SettingsPanel() {
         {/* ── User Groups ── */}
         {activeSection === "user_groups" && (
           <UserGroupsSection />
+        )}
+
+        {/* ── Security Groups ── */}
+        {activeSection === "security_groups" && (
+          <SecurityGroupsSection />
         )}
 
         {/* ── Project ── */}

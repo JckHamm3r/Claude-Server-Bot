@@ -1150,15 +1150,90 @@ export interface Memory {
   id: string;
   title: string;
   content: string;
+  is_global: boolean;
+  assigned_agent_ids: string[];
   created_by: string;
   created_at: string;
   updated_at: string;
 }
 
+/** Sentinel agent_id used for the main chat session */
+export const MAIN_SESSION_TARGET = "__main_session__";
+
+type MemoryRow = Omit<Memory, "is_global" | "assigned_agent_ids"> & { is_global: number };
+
+function hydrateMemo(row: MemoryRow): Memory {
+  const ids = (db.prepare(
+    "SELECT agent_id FROM memory_agent_assignments WHERE memory_id = ?"
+  ).all(row.id) as { agent_id: string }[]).map((r) => r.agent_id);
+  return { ...row, is_global: row.is_global === 1, assigned_agent_ids: ids };
+}
+
 export function getMemories(): Memory[] {
-  return db.prepare(
-    "SELECT id, title, content, created_by, created_at, updated_at FROM memories ORDER BY created_at ASC"
-  ).all() as Memory[];
+  const rows = db.prepare(
+    "SELECT id, title, content, is_global, created_by, created_at, updated_at FROM memories ORDER BY created_at ASC"
+  ).all() as MemoryRow[];
+  return rows.map(hydrateMemo);
+}
+
+/**
+ * Returns memories that should be injected for a given target.
+ * targetId is either MAIN_SESSION_TARGET or an agent.id.
+ * A memory is included if it is global OR explicitly assigned to this target.
+ */
+export function getMemoriesForTarget(targetId: string): Memory[] {
+  const rows = db.prepare(`
+    SELECT id, title, content, is_global, created_by, created_at, updated_at
+    FROM memories
+    WHERE is_global = 1
+       OR id IN (SELECT memory_id FROM memory_agent_assignments WHERE agent_id = ?)
+    ORDER BY created_at ASC
+  `).all(targetId) as MemoryRow[];
+  return rows.map(hydrateMemo);
+}
+
+/**
+ * Replace the full set of assignments for a memory.
+ * If isGlobal is true, junction rows are cleared (they are irrelevant when global).
+ */
+export function setMemoryAssignments(memoryId: string, isGlobal: boolean, agentIds: string[]): void {
+  const update = db.prepare(
+    "UPDATE memories SET is_global = ?, updated_at = datetime('now') WHERE id = ?"
+  );
+  const deleteAssignments = db.prepare(
+    "DELETE FROM memory_agent_assignments WHERE memory_id = ?"
+  );
+  const insertAssignment = db.prepare(
+    "INSERT OR IGNORE INTO memory_agent_assignments (memory_id, agent_id) VALUES (?, ?)"
+  );
+  db.transaction(() => {
+    update.run(isGlobal ? 1 : 0, memoryId);
+    deleteAssignments.run(memoryId);
+    if (!isGlobal) {
+      for (const agentId of agentIds) {
+        insertAssignment.run(memoryId, agentId);
+      }
+    }
+  })();
+}
+
+/** Returns all agent_ids assigned to a specific memory */
+export function getMemoryAssignments(memoryId: string): string[] {
+  return (db.prepare(
+    "SELECT agent_id FROM memory_agent_assignments WHERE memory_id = ?"
+  ).all(memoryId) as { agent_id: string }[]).map((r) => r.agent_id);
+}
+
+/** Returns all non-global memories assigned to a specific agent (for agent-side UI) */
+export function getAgentMemories(agentId: string): Memory[] {
+  const rows = db.prepare(`
+    SELECT m.id, m.title, m.content, m.is_global, m.created_by, m.created_at, m.updated_at
+    FROM memories m
+    JOIN memory_agent_assignments maa ON maa.memory_id = m.id
+    WHERE maa.agent_id = ? AND m.is_global = 0
+    ORDER BY m.created_at ASC
+  `).all(agentId) as MemoryRow[];
+  return rows.map(hydrateMemo);
 }
 
 // ==================== FILE LOCKS ====================
@@ -1702,4 +1777,194 @@ export function cloneGroup(sourceId: string, newId: string, newName: string): Us
   `).run(newId, sourceId);
 
   return getGroup(newId)!;
+}
+
+// ==================== SECURITY GROUPS (IP ALLOWLISTS) ====================
+
+export interface SecurityGroup {
+  id: string;
+  name: string;
+  description: string;
+  allowed_ips: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SecurityGroupWithCount extends SecurityGroup {
+  member_count: number;
+}
+
+export function listSecurityGroups(): SecurityGroupWithCount[] {
+  try {
+    return db.prepare(`
+      SELECT sg.*, COUNT(usg.user_email) as member_count
+      FROM security_groups sg
+      LEFT JOIN user_security_groups usg ON usg.security_group_id = sg.id
+      GROUP BY sg.id
+      ORDER BY sg.name ASC
+    `).all() as SecurityGroupWithCount[];
+  } catch {
+    return [];
+  }
+}
+
+export function getSecurityGroup(id: string): SecurityGroup | null {
+  try {
+    return db.prepare("SELECT * FROM security_groups WHERE id = ?").get(id) as SecurityGroup | undefined ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function createSecurityGroup(id: string, name: string, description: string, allowedIps: string[]): SecurityGroup {
+  db.prepare(
+    "INSERT INTO security_groups (id, name, description, allowed_ips) VALUES (?, ?, ?, ?)"
+  ).run(id, name, description, JSON.stringify(allowedIps));
+  return getSecurityGroup(id)!;
+}
+
+export function updateSecurityGroup(id: string, updates: { name?: string; description?: string; allowed_ips?: string[] }): void {
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  if (updates.name !== undefined) { sets.push("name = ?"); vals.push(updates.name); }
+  if (updates.description !== undefined) { sets.push("description = ?"); vals.push(updates.description); }
+  if (updates.allowed_ips !== undefined) { sets.push("allowed_ips = ?"); vals.push(JSON.stringify(updates.allowed_ips)); }
+  if (sets.length === 0) return;
+  sets.push("updated_at = datetime('now')");
+  db.prepare(`UPDATE security_groups SET ${sets.join(", ")} WHERE id = ?`).run(...vals, id);
+}
+
+export function deleteSecurityGroup(id: string): void {
+  db.prepare("DELETE FROM security_groups WHERE id = ?").run(id);
+}
+
+export function assignUserSecurityGroup(userEmail: string, groupId: string, assignedBy: string): void {
+  db.prepare(
+    "INSERT OR IGNORE INTO user_security_groups (user_email, security_group_id, assigned_by) VALUES (?, ?, ?)"
+  ).run(userEmail, groupId, assignedBy);
+}
+
+export function removeUserSecurityGroup(userEmail: string, groupId: string): void {
+  db.prepare(
+    "DELETE FROM user_security_groups WHERE user_email = ? AND security_group_id = ?"
+  ).run(userEmail, groupId);
+}
+
+export function getUserSecurityGroups(userEmail: string): SecurityGroup[] {
+  try {
+    return db.prepare(`
+      SELECT sg.* FROM security_groups sg
+      INNER JOIN user_security_groups usg ON usg.security_group_id = sg.id
+      WHERE usg.user_email = ?
+      ORDER BY sg.name ASC
+    `).all(userEmail) as SecurityGroup[];
+  } catch {
+    return [];
+  }
+}
+
+export function getSecurityGroupMembers(groupId: string): Array<{
+  email: string;
+  first_name: string;
+  last_name: string;
+  is_admin: number;
+  avatar_url: string | null;
+  assigned_at: string;
+  assigned_by: string | null;
+}> {
+  try {
+    return db.prepare(`
+      SELECT u.email, u.first_name, u.last_name, u.is_admin, u.avatar_url,
+             usg.assigned_at, usg.assigned_by
+      FROM users u
+      INNER JOIN user_security_groups usg ON usg.user_email = u.email
+      WHERE usg.security_group_id = ?
+      ORDER BY u.email ASC
+    `).all(groupId) as Array<{
+      email: string;
+      first_name: string;
+      last_name: string;
+      is_admin: number;
+      avatar_url: string | null;
+      assigned_at: string;
+      assigned_by: string | null;
+    }>;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Returns the merged IP allowlist for a user:
+ * union of users.allowed_ips + all assigned security_groups.allowed_ips.
+ * Returns [] if the user has no restrictions (unrestricted access).
+ */
+export function getUserEffectiveAllowedIPs(email: string): string[] {
+  try {
+    const userRow = db.prepare("SELECT allowed_ips FROM users WHERE email = ?").get(email) as { allowed_ips: string | null } | undefined;
+    const userIPs: string[] = parseStoredIPsDB(userRow?.allowed_ips);
+
+    const groups = db.prepare(`
+      SELECT sg.allowed_ips FROM security_groups sg
+      INNER JOIN user_security_groups usg ON usg.security_group_id = sg.id
+      WHERE usg.user_email = ?
+    `).all(email) as Array<{ allowed_ips: string }>;
+
+    const groupIPs: string[] = groups.flatMap((g) => parseStoredIPsDB(g.allowed_ips));
+
+    const merged = [...new Set([...userIPs, ...groupIPs])];
+    return merged;
+  } catch {
+    return [];
+  }
+}
+
+function parseStoredIPsDB(json: string | null | undefined): string[] {
+  if (!json) return [];
+  try {
+    const arr = JSON.parse(json);
+    return Array.isArray(arr) ? arr.filter((x: unknown) => typeof x === "string" && x.trim()) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * For the "Test IP" tool — find all security groups that would allow the given IP.
+ */
+export function findSecurityGroupsMatchingIP(ip: string): Array<{ id: string; name: string; matched_ips: string[] }> {
+  try {
+    const { isIPInCIDR } = require("./ip-allowlist") as typeof import("./ip-allowlist");
+    const groups = db.prepare("SELECT id, name, allowed_ips FROM security_groups").all() as Array<{ id: string; name: string; allowed_ips: string }>;
+    const result = [];
+    for (const g of groups) {
+      const ips = parseStoredIPsDB(g.allowed_ips);
+      const matched = ips.filter((entry) => isIPInCIDR(ip, entry));
+      if (matched.length > 0) result.push({ id: g.id, name: g.name, matched_ips: matched });
+    }
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * For the "Test IP" tool — find all users whose effective allowlist covers the given IP.
+ * Returns users that would be BLOCKED (IP not in their allowlist) when they have restrictions.
+ */
+export function findUsersBlockedByIP(ip: string): Array<{ email: string; first_name: string; last_name: string }> {
+  try {
+    const { isIPInAllowList } = require("./ip-allowlist") as typeof import("./ip-allowlist");
+    const users = db.prepare("SELECT email, first_name, last_name FROM users").all() as Array<{ email: string; first_name: string; last_name: string }>;
+    const blocked = [];
+    for (const u of users) {
+      const allowedIPs = getUserEffectiveAllowedIPs(u.email);
+      if (allowedIPs.length > 0 && !isIPInAllowList(ip, allowedIPs)) {
+        blocked.push(u);
+      }
+    }
+    return blocked;
+  } catch {
+    return [];
+  }
 }

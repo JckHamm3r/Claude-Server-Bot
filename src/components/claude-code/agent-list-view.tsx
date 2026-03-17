@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Pencil, Trash2, Archive, History, Power, PowerOff, Bot, Zap } from "lucide-react";
+import { Plus, Pencil, Trash2, Archive, History, Power, PowerOff, Bot, Zap, Brain } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ClaudeAgent } from "@/lib/claude-db";
 
@@ -15,6 +15,7 @@ interface AgentListViewProps {
   onArchive: (agentId: string) => void;
   onViewVersions: (agent: ClaudeAgent) => void;
   onNew: () => void;
+  memoryCounts?: Record<string, number>;
 }
 
 function StatusBadge({ status }: { status: ClaudeAgent["status"] }) {
@@ -55,6 +56,7 @@ export function AgentListView({
   onArchive,
   onViewVersions,
   onNew,
+  memoryCounts = {},
 }: AgentListViewProps) {
   const [filter, setFilter] = useState<StatusFilter>("all");
 
@@ -144,6 +146,7 @@ export function AgentListView({
               <AgentCard
                 key={agent.id}
                 agent={agent}
+                memoryCount={memoryCounts[agent.id]}
                 onEdit={onEdit}
                 onDelete={onDelete}
                 onToggleStatus={onToggleStatus}
@@ -160,6 +163,7 @@ export function AgentListView({
 
 interface AgentCardProps {
   agent: ClaudeAgent;
+  memoryCount?: number;
   onEdit: (agent: ClaudeAgent) => void;
   onDelete: (agentId: string) => void;
   onToggleStatus: (agent: ClaudeAgent) => void;
@@ -167,7 +171,7 @@ interface AgentCardProps {
   onViewVersions: (agent: ClaudeAgent) => void;
 }
 
-function AgentCard({ agent, onEdit, onDelete, onToggleStatus, onArchive, onViewVersions }: AgentCardProps) {
+function AgentCard({ agent, memoryCount, onEdit, onDelete, onToggleStatus, onArchive, onViewVersions }: AgentCardProps) {
   return (
     <div className="group relative flex flex-col rounded-2xl border border-bot-border/30 bg-bot-surface/60 backdrop-blur-sm p-5 transition-all duration-200 hover:border-bot-accent/30 hover:shadow-glow-sm hover:-translate-y-0.5">
       <div className="flex items-start justify-between mb-3">
@@ -182,6 +186,15 @@ function AgentCard({ agent, onEdit, onDelete, onToggleStatus, onArchive, onViewV
       <p className="text-caption text-bot-muted/70 line-clamp-2 mb-3 flex-1">
         {agent.description}
       </p>
+
+      {memoryCount !== undefined && (
+        <div className="flex items-center gap-1 mb-3">
+          <Brain className="h-3 w-3 text-bot-muted/50" />
+          <span className="text-[10.5px] text-bot-muted/60">
+            {memoryCount} {memoryCount === 1 ? "memory" : "memories"}
+          </span>
+        </div>
+      )}
 
       <div className="flex items-center justify-between mt-auto">
         <ModelBadge model={agent.model} />
