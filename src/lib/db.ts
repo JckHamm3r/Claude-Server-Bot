@@ -450,8 +450,6 @@ const migrations: Record<number, () => void> = {
       CREATE INDEX IF NOT EXISTS idx_queue_session ON file_operation_queue(session_id);
     `);
   },
-};
-
   5: () => {
     db.exec(`
       CREATE TABLE IF NOT EXISTS jobs (
@@ -502,6 +500,7 @@ const migrations: Record<number, () => void> = {
       CREATE INDEX IF NOT EXISTS idx_job_runs_status ON job_runs(status);
     `);
   },
+};
 
 const LATEST_SCHEMA_VERSION = Math.max(...Object.keys(migrations).map(Number));
 const currentVersion = getSchemaVersion();

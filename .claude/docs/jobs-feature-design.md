@@ -4,11 +4,28 @@
 
 The Jobs feature adds scheduled task automation to Octoby, powered by systemd timers. Users can create recurring or one-shot jobs either through an AI-assisted chat workflow (the AI asks what they want to automate and builds the job for them) or by directly pointing to a script and configuring the schedule manually. Jobs are managed through a dedicated top-level tab with full CRUD, enable/disable toggling, run history, and live status.
 
+## Finalized Decisions
+
+| Question | Decision |
+|----------|----------|
+| Who can create jobs? | Admin only |
+| Sandbox integration | Yes — respects existing command sandbox |
+| Max active jobs | No limit |
+| Inline scripts vs file paths | File paths only — must reference existing script |
+| Job templates | Yes — 6 pre-built templates shipped |
+| Dry run | Yes — "Run Now" button for immediate execution |
+| Run detection | Wrapper script approach — pings internal API on start/finish |
+| Output capture | Last 64 KB in DB + pointer to full log file on disk |
+| Failure behavior | All configurable per-job (retry, auto-disable, notify) |
+| Experience level | Expert only |
+| Detail view | Slide-over drawer from right |
+| AI builder | Mini-chat modal dialog with job-building context |
+| Success notifications | Off by default |
+| Per-job notification overrides | Yes |
+
 ---
 
-## Open Design Questions
-
-These questions need answers before implementation. They're grouped by area.
+## Design Questions (Archived — All Answered)
 
 ### 1. Scope & Permissions
 

@@ -7,7 +7,6 @@ import {
   deleteJob,
   listJobRuns,
   getJobRun,
-  isUserAdmin,
 } from "../lib/claude-db";
 import {
   installJob,

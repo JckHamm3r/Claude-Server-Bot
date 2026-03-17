@@ -1,4 +1,5 @@
 import { execSync, spawn } from "child_process";
+import { randomBytes } from "crypto";
 import fs from "fs";
 import path from "path";
 import {
@@ -159,7 +160,7 @@ function getOrCreateJobSecret(): string {
       return jobSecret;
     }
   } catch { /* ignore */ }
-  const secret = require("crypto").randomBytes(32).toString("hex");
+  const secret = randomBytes(32).toString("hex");
   db.prepare(
     "INSERT INTO app_settings (key, value) VALUES ('job_runner_secret', ?) ON CONFLICT(key) DO UPDATE SET value = ?"
   ).run(secret, secret);
