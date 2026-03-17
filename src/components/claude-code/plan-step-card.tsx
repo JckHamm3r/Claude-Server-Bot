@@ -11,6 +11,7 @@ import {
   SkipForward,
   Loader2,
   ChevronDown,
+  ChevronRight,
   AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -22,6 +23,8 @@ interface PlanStepCardProps {
   isFirst: boolean;
   isLast: boolean;
   totalSteps: number;
+  expanded: boolean;
+  onToggleExpand: () => void;
   onApprove: () => void;
   onReject: () => void;
   onMoveUp: () => void;
@@ -86,6 +89,8 @@ export function PlanStepCard({
   stepNumber,
   isFirst,
   isLast,
+  expanded,
+  onToggleExpand,
   onApprove,
   onReject,
   onMoveUp,
@@ -163,13 +168,24 @@ export function PlanStepCard({
           <div className="h-0.5 rounded-t-2xl bg-gradient-to-r from-blue-500/60 via-bot-accent/60 to-bot-accent-2/40 animate-shimmer" />
         )}
 
-        {/* Header */}
-        <div className="flex items-start gap-3 px-4 pt-3.5 pb-2">
+        {/* Header — clickable to expand / collapse */}
+        <button
+          type="button"
+          onClick={onToggleExpand}
+          className="flex w-full items-start gap-3 px-4 pt-3.5 pb-2 text-left cursor-pointer select-none"
+        >
+          <ChevronRight
+            className={cn(
+              "mt-1 h-3.5 w-3.5 shrink-0 text-bot-muted/50 transition-transform duration-200",
+              expanded && "rotate-90",
+            )}
+          />
           <div className="flex-1 min-w-0">
             {editing ? (
               <input
                 value={editSummary}
                 onChange={(e) => setEditSummary(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
                 className="w-full rounded-xl border border-bot-border/50 bg-bot-elevated/60 px-3 py-1.5 text-body text-bot-text focus:border-bot-accent/50 focus:shadow-glow-sm focus:outline-none transition-all"
                 autoFocus
               />
@@ -189,218 +205,223 @@ export function PlanStepCard({
           )}>
             {STATUS_LABEL[step.status]}
           </span>
-        </div>
+        </button>
 
-        {/* Inline edit details textarea */}
-        {editing && (
-          <div className="px-4 pb-3">
-            <textarea
-              value={editDetails}
-              onChange={(e) => setEditDetails(e.target.value)}
-              rows={3}
-              placeholder="Details (optional)"
-              className="w-full resize-none rounded-xl border border-bot-border/50 bg-bot-elevated/60 px-3 py-2 text-caption text-bot-text placeholder:text-bot-muted/40 focus:border-bot-accent/50 focus:shadow-glow-sm focus:outline-none transition-all"
-            />
-            <div className="mt-2 flex gap-2">
-              <button
-                onClick={handleSaveEdit}
-                className="rounded-xl gradient-accent px-4 py-1.5 text-caption font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.97] transition-all duration-200"
-              >
-                Save
-              </button>
-              <button
-                onClick={handleCancelEdit}
-                className="rounded-xl border border-bot-border/50 px-4 py-1.5 text-caption text-bot-muted hover:text-bot-text transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Expandable Details */}
-        {!editing && step.details && (
-          <div className="px-4 pb-2">
-            <button
-              onClick={() => setDetailsOpen((v) => !v)}
-              className="flex items-center gap-1.5 text-caption text-bot-muted/60 hover:text-bot-muted transition-colors"
-            >
-              <ChevronDown className={cn("h-3 w-3 transition-transform duration-200", detailsOpen && "rotate-180")} />
-              Details
-            </button>
-            {detailsOpen && (
-              <div className="mt-2 rounded-xl border border-bot-border/30 bg-bot-elevated/50 px-3 py-2.5 animate-fadeUp">
-                <p className="text-caption text-bot-muted/80 whitespace-pre-wrap leading-relaxed">
-                  {step.details}
-                </p>
+        {/* ── Expandable body ── */}
+        {expanded && (
+          <>
+            {/* Inline edit details textarea */}
+            {editing && (
+              <div className="px-4 pb-3">
+                <textarea
+                  value={editDetails}
+                  onChange={(e) => setEditDetails(e.target.value)}
+                  rows={3}
+                  placeholder="Details (optional)"
+                  className="w-full resize-none rounded-xl border border-bot-border/50 bg-bot-elevated/60 px-3 py-2 text-caption text-bot-text placeholder:text-bot-muted/40 focus:border-bot-accent/50 focus:shadow-glow-sm focus:outline-none transition-all"
+                />
+                <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={handleSaveEdit}
+                    className="rounded-xl gradient-accent px-4 py-1.5 text-caption font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.97] transition-all duration-200"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={handleCancelEdit}
+                    className="rounded-xl border border-bot-border/50 px-4 py-1.5 text-caption text-bot-muted hover:text-bot-text transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             )}
-          </div>
-        )}
 
-        {/* Live progress (executing) */}
-        {stepProgress && (
-          <div className="px-4 pb-2">
-            <button
-              onClick={() => setProgressOpen((v) => !v)}
-              className="flex items-center gap-1.5 text-caption text-blue-400/70 hover:text-blue-400 transition-colors"
-            >
-              <Loader2 className="h-3 w-3 animate-spin" />
-              <span className="flex-1 text-left">Live output</span>
-              <ChevronDown className={cn("h-3 w-3 transition-transform duration-200", progressOpen && "rotate-180")} />
-            </button>
-            {progressOpen && (
-              <pre className="mt-2 max-h-36 overflow-auto rounded-xl border border-blue-500/20 bg-blue-500/5 px-3 py-2.5 font-mono text-[11px] leading-relaxed text-blue-300/70 whitespace-pre-wrap break-words animate-fadeUp">
-                {stepProgress}
-              </pre>
-            )}
-          </div>
-        )}
-
-        {/* Result (completed) */}
-        {isCompleted && step.result && (
-          <div className="px-4 pb-2">
-            <button
-              onClick={() => setResultOpen((v) => !v)}
-              className="flex items-center gap-1.5 text-caption text-bot-green/70 hover:text-bot-green transition-colors"
-            >
-              <Check className="h-3 w-3" />
-              <span className="flex-1 text-left">Result</span>
-              <ChevronDown className={cn("h-3 w-3 transition-transform duration-200", resultOpen && "rotate-180")} />
-            </button>
-            {resultOpen && (
-              <pre className="mt-2 max-h-40 overflow-auto rounded-xl border border-bot-green/20 bg-bot-green/5 px-3 py-2.5 font-mono text-[11px] leading-relaxed text-bot-green/70 whitespace-pre-wrap break-words animate-fadeUp">
-                {step.result}
-              </pre>
-            )}
-          </div>
-        )}
-
-        {/* Error (failed) */}
-        {isFailed && step.error && (
-          <div className="mx-4 mb-3 flex items-start gap-2 rounded-xl border border-bot-red/20 bg-bot-red/8 px-3 py-2.5">
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-bot-red" />
-            <p className="text-caption text-bot-red/80 leading-snug">{step.error}</p>
-          </div>
-        )}
-
-        {/* ── Action footer ──────────────────────────────────────── */}
-        {canAct && !editing && (
-          <div className="flex items-center gap-1.5 border-t border-bot-border/20 px-3 py-2">
-            {isPending && (
-              <>
+            {/* Expandable Details */}
+            {!editing && step.details && (
+              <div className="px-4 pb-2">
                 <button
-                  onClick={onApprove}
-                  className="flex items-center gap-1.5 rounded-xl border border-bot-green/30 bg-bot-green/10 px-3 py-1.5 text-caption font-semibold text-bot-green hover:bg-bot-green/20 hover:border-bot-green/50 active:scale-[0.97] transition-all duration-150"
+                  onClick={() => setDetailsOpen((v) => !v)}
+                  className="flex items-center gap-1.5 text-caption text-bot-muted/60 hover:text-bot-muted transition-colors"
                 >
-                  <Check className="h-3.5 w-3.5" />
-                  Approve
+                  <ChevronDown className={cn("h-3 w-3 transition-transform duration-200", detailsOpen && "rotate-180")} />
+                  Details
                 </button>
-                <button
-                  onClick={onReject}
-                  className="flex items-center gap-1.5 rounded-xl border border-bot-border/40 bg-bot-elevated/40 px-3 py-1.5 text-caption font-medium text-bot-muted hover:border-bot-red/30 hover:text-bot-red hover:bg-bot-red/8 active:scale-[0.97] transition-all duration-150"
-                >
-                  <X className="h-3.5 w-3.5" />
-                  Reject
-                </button>
-              </>
-            )}
-            {isApproved && (
-              <button
-                onClick={onReject}
-                className="flex items-center gap-1.5 rounded-xl border border-bot-border/40 bg-bot-elevated/40 px-3 py-1.5 text-caption font-medium text-bot-muted hover:border-bot-red/30 hover:text-bot-red hover:bg-bot-red/8 transition-all duration-150"
-              >
-                <X className="h-3.5 w-3.5" />
-                Undo
-              </button>
+                {detailsOpen && (
+                  <div className="mt-2 rounded-xl border border-bot-border/30 bg-bot-elevated/50 px-3 py-2.5 animate-fadeUp">
+                    <p className="text-caption text-bot-muted/80 whitespace-pre-wrap leading-relaxed">
+                      {step.details}
+                    </p>
+                  </div>
+                )}
+              </div>
             )}
 
-            <div className="ml-auto flex items-center gap-1">
-              <button
-                onClick={onMoveUp}
-                disabled={isFirst}
-                className="flex h-7 w-7 items-center justify-center rounded-lg text-bot-muted/60 hover:bg-bot-elevated hover:text-bot-text disabled:opacity-25 transition-all"
-                title="Move up"
-              >
-                <ArrowUp className="h-3.5 w-3.5" />
-              </button>
-              <button
-                onClick={onMoveDown}
-                disabled={isLast}
-                className="flex h-7 w-7 items-center justify-center rounded-lg text-bot-muted/60 hover:bg-bot-elevated hover:text-bot-text disabled:opacity-25 transition-all"
-                title="Move down"
-              >
-                <ArrowDown className="h-3.5 w-3.5" />
-              </button>
-              <button
-                onClick={() => setEditing(true)}
-                className="flex h-7 w-7 items-center justify-center rounded-lg text-bot-muted/60 hover:bg-bot-elevated hover:text-bot-text transition-all"
-                title="Edit step"
-              >
-                <Pencil className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ── Paused failure — retry / rollback / skip ──────────── */}
-        {isFailed && paused && (
-          <div className="border-t border-bot-red/20 px-3 py-2.5">
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-bot-red/60">
-              Step paused — choose an action
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {onRetry && (
+            {/* Live progress (executing) */}
+            {stepProgress && (
+              <div className="px-4 pb-2">
                 <button
-                  onClick={onRetry}
-                  className="flex items-center gap-1.5 rounded-xl border border-bot-amber/30 bg-bot-amber/10 px-3 py-1.5 text-caption font-semibold text-bot-amber hover:bg-bot-amber/20 hover:border-bot-amber/50 active:scale-[0.97] transition-all duration-150"
+                  onClick={() => setProgressOpen((v) => !v)}
+                  className="flex items-center gap-1.5 text-caption text-blue-400/70 hover:text-blue-400 transition-colors"
                 >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  Retry
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <span className="flex-1 text-left">Live output</span>
+                  <ChevronDown className={cn("h-3 w-3 transition-transform duration-200", progressOpen && "rotate-180")} />
                 </button>
-              )}
-              {onSkip && (
-                <button
-                  onClick={onSkip}
-                  className="flex items-center gap-1.5 rounded-xl border border-bot-border/50 bg-bot-elevated/40 px-3 py-1.5 text-caption font-medium text-bot-muted hover:text-bot-text hover:border-bot-border active:scale-[0.97] transition-all duration-150"
-                >
-                  <SkipForward className="h-3.5 w-3.5" />
-                  Skip
-                </button>
-              )}
-              {canRollback && onRollbackContinue && (
-                <button
-                  onClick={onRollbackContinue}
-                  className="flex items-center gap-1.5 rounded-xl border border-bot-red/25 bg-bot-red/8 px-3 py-1.5 text-caption font-medium text-bot-red/80 hover:bg-bot-red/15 hover:border-bot-red/40 active:scale-[0.97] transition-all duration-150"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  Rollback &amp; Continue
-                </button>
-              )}
-              {canRollback && onRollbackStop && (
-                <button
-                  onClick={onRollbackStop}
-                  className="flex items-center gap-1.5 rounded-xl border border-bot-red/25 bg-bot-red/8 px-3 py-1.5 text-caption font-medium text-bot-red/80 hover:bg-bot-red/15 hover:border-bot-red/40 active:scale-[0.97] transition-all duration-150"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  Rollback &amp; Stop
-                </button>
-              )}
-            </div>
-            {canRollback && (
-              <p className="mt-2 text-[10px] text-bot-muted/50">
-                Rollback uses <code className="font-mono">git checkout -- .</code> to undo uncommitted changes.
-              </p>
+                {progressOpen && (
+                  <pre className="mt-2 max-h-36 overflow-auto rounded-xl border border-blue-500/20 bg-blue-500/5 px-3 py-2.5 font-mono text-[11px] leading-relaxed text-blue-300/70 whitespace-pre-wrap break-words animate-fadeUp">
+                    {stepProgress}
+                  </pre>
+                )}
+              </div>
             )}
-          </div>
-        )}
 
-        {/* Executing footer pulse */}
-        {isExecuting && !stepProgress && (
-          <div className="flex items-center gap-2 border-t border-blue-500/15 px-4 py-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-ping" />
-            <span className="text-caption text-blue-400/70">Working…</span>
-          </div>
+            {/* Result (completed) */}
+            {isCompleted && step.result && (
+              <div className="px-4 pb-2">
+                <button
+                  onClick={() => setResultOpen((v) => !v)}
+                  className="flex items-center gap-1.5 text-caption text-bot-green/70 hover:text-bot-green transition-colors"
+                >
+                  <Check className="h-3 w-3" />
+                  <span className="flex-1 text-left">Result</span>
+                  <ChevronDown className={cn("h-3 w-3 transition-transform duration-200", resultOpen && "rotate-180")} />
+                </button>
+                {resultOpen && (
+                  <pre className="mt-2 max-h-40 overflow-auto rounded-xl border border-bot-green/20 bg-bot-green/5 px-3 py-2.5 font-mono text-[11px] leading-relaxed text-bot-green/70 whitespace-pre-wrap break-words animate-fadeUp">
+                    {step.result}
+                  </pre>
+                )}
+              </div>
+            )}
+
+            {/* Error (failed) */}
+            {isFailed && step.error && (
+              <div className="mx-4 mb-3 flex items-start gap-2 rounded-xl border border-bot-red/20 bg-bot-red/8 px-3 py-2.5">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-bot-red" />
+                <p className="text-caption text-bot-red/80 leading-snug">{step.error}</p>
+              </div>
+            )}
+
+            {/* ── Action footer ──────────────────────────────────────── */}
+            {canAct && !editing && (
+              <div className="flex items-center gap-1.5 border-t border-bot-border/20 px-3 py-2">
+                {isPending && (
+                  <>
+                    <button
+                      onClick={onApprove}
+                      className="flex items-center gap-1.5 rounded-xl border border-bot-green/30 bg-bot-green/10 px-3 py-1.5 text-caption font-semibold text-bot-green hover:bg-bot-green/20 hover:border-bot-green/50 active:scale-[0.97] transition-all duration-150"
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                      Approve
+                    </button>
+                    <button
+                      onClick={onReject}
+                      className="flex items-center gap-1.5 rounded-xl border border-bot-border/40 bg-bot-elevated/40 px-3 py-1.5 text-caption font-medium text-bot-muted hover:border-bot-red/30 hover:text-bot-red hover:bg-bot-red/8 active:scale-[0.97] transition-all duration-150"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      Reject
+                    </button>
+                  </>
+                )}
+                {isApproved && (
+                  <button
+                    onClick={onReject}
+                    className="flex items-center gap-1.5 rounded-xl border border-bot-border/40 bg-bot-elevated/40 px-3 py-1.5 text-caption font-medium text-bot-muted hover:border-bot-red/30 hover:text-bot-red hover:bg-bot-red/8 transition-all duration-150"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    Undo
+                  </button>
+                )}
+
+                <div className="ml-auto flex items-center gap-1">
+                  <button
+                    onClick={onMoveUp}
+                    disabled={isFirst}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg text-bot-muted/60 hover:bg-bot-elevated hover:text-bot-text disabled:opacity-25 transition-all"
+                    title="Move up"
+                  >
+                    <ArrowUp className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={onMoveDown}
+                    disabled={isLast}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg text-bot-muted/60 hover:bg-bot-elevated hover:text-bot-text disabled:opacity-25 transition-all"
+                    title="Move down"
+                  >
+                    <ArrowDown className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setEditing(true)}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg text-bot-muted/60 hover:bg-bot-elevated hover:text-bot-text transition-all"
+                    title="Edit step"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ── Paused failure — retry / rollback / skip ──────────── */}
+            {isFailed && paused && (
+              <div className="border-t border-bot-red/20 px-3 py-2.5">
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-bot-red/60">
+                  Step paused — choose an action
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {onRetry && (
+                    <button
+                      onClick={onRetry}
+                      className="flex items-center gap-1.5 rounded-xl border border-bot-amber/30 bg-bot-amber/10 px-3 py-1.5 text-caption font-semibold text-bot-amber hover:bg-bot-amber/20 hover:border-bot-amber/50 active:scale-[0.97] transition-all duration-150"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Retry
+                    </button>
+                  )}
+                  {onSkip && (
+                    <button
+                      onClick={onSkip}
+                      className="flex items-center gap-1.5 rounded-xl border border-bot-border/50 bg-bot-elevated/40 px-3 py-1.5 text-caption font-medium text-bot-muted hover:text-bot-text hover:border-bot-border active:scale-[0.97] transition-all duration-150"
+                    >
+                      <SkipForward className="h-3.5 w-3.5" />
+                      Skip
+                    </button>
+                  )}
+                  {canRollback && onRollbackContinue && (
+                    <button
+                      onClick={onRollbackContinue}
+                      className="flex items-center gap-1.5 rounded-xl border border-bot-red/25 bg-bot-red/8 px-3 py-1.5 text-caption font-medium text-bot-red/80 hover:bg-bot-red/15 hover:border-bot-red/40 active:scale-[0.97] transition-all duration-150"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Rollback &amp; Continue
+                    </button>
+                  )}
+                  {canRollback && onRollbackStop && (
+                    <button
+                      onClick={onRollbackStop}
+                      className="flex items-center gap-1.5 rounded-xl border border-bot-red/25 bg-bot-red/8 px-3 py-1.5 text-caption font-medium text-bot-red/80 hover:bg-bot-red/15 hover:border-bot-red/40 active:scale-[0.97] transition-all duration-150"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Rollback &amp; Stop
+                    </button>
+                  )}
+                </div>
+                {canRollback && (
+                  <p className="mt-2 text-[10px] text-bot-muted/50">
+                    Rollback uses <code className="font-mono">git checkout -- .</code> to undo uncommitted changes.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Executing footer pulse */}
+            {isExecuting && !stepProgress && (
+              <div className="flex items-center gap-2 border-t border-blue-500/15 px-4 py-2">
+                <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-ping" />
+                <span className="text-caption text-blue-400/70">Working…</span>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

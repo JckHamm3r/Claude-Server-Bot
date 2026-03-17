@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   X,
   CheckCheck,
@@ -7,6 +8,7 @@ import {
   Loader2,
   Trash2,
   Zap,
+  ChevronsUpDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ClaudePlan, ClaudePlanStep } from "@/lib/claude-db";
@@ -81,6 +83,10 @@ function ProgressBar({ status, steps }: { status: ClaudePlan["status"]; steps: C
   );
 }
 
+function shouldAutoExpand(step: ClaudePlanStep): boolean {
+  return ["executing", "failed", "pending", "approved"].includes(step.status);
+}
+
 export function PlanStepList({
   plan,
   onApprove,
@@ -109,6 +115,62 @@ export function PlanStepList({
 
   const approvedCount = steps.filter((s) => s.status === "approved").length;
   const pendingCount  = steps.filter((s) => s.status === "pending").length;
+
+  const [expandedSteps, setExpandedSteps] = useState<Set<string>>(() => {
+    const initial = new Set<string>();
+    for (const s of steps) {
+      if (shouldAutoExpand(s)) initial.add(s.id);
+    }
+    return initial;
+  });
+
+  const prevStatusRef = useRef<Map<string, ClaudePlanStep["status"]>>(new Map());
+
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    let changed = false;
+    const next = new Set(expandedSteps);
+
+    for (const step of steps) {
+      const oldStatus = prev.get(step.id);
+      if (oldStatus !== step.status) {
+        if (step.status === "executing" || step.status === "failed") {
+          next.add(step.id);
+          changed = true;
+        }
+        if (oldStatus === "executing" && step.status === "completed") {
+          next.delete(step.id);
+          changed = true;
+        }
+      }
+    }
+
+    const nextPrev = new Map<string, ClaudePlanStep["status"]>();
+    for (const step of steps) nextPrev.set(step.id, step.status);
+    prevStatusRef.current = nextPrev;
+
+    if (changed) setExpandedSteps(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [steps.map((s) => `${s.id}:${s.status}`).join(",")]);
+
+  const toggleStep = useCallback((stepId: string) => {
+    setExpandedSteps((prev) => {
+      const next = new Set(prev);
+      if (next.has(stepId)) next.delete(stepId);
+      else next.add(stepId);
+      return next;
+    });
+  }, []);
+
+  const expandAll = useCallback(() => {
+    setExpandedSteps(new Set(steps.map((s) => s.id)));
+  }, [steps]);
+
+  const collapseAll = useCallback(() => {
+    setExpandedSteps(new Set());
+  }, []);
+
+  const allExpanded = steps.length > 0 && steps.every((s) => expandedSteps.has(s.id));
 
   return (
     <div className="flex flex-col gap-3">
@@ -179,6 +241,16 @@ export function PlanStepList({
             )}
 
             <div className="ml-auto flex items-center gap-1.5">
+              {steps.length > 0 && (
+                <button
+                  onClick={allExpanded ? collapseAll : expandAll}
+                  className="flex items-center gap-1.5 rounded-xl border border-bot-border/40 px-3 py-1.5 text-caption text-bot-muted hover:border-bot-accent/30 hover:text-bot-text transition-all duration-150"
+                  title={allExpanded ? "Collapse all steps" : "Expand all steps"}
+                >
+                  <ChevronsUpDown className="h-3.5 w-3.5" />
+                  {allExpanded ? "Collapse All" : "Expand All"}
+                </button>
+              )}
               {(plan.status === "reviewing" || plan.status === "executing") && (
                 <button
                   onClick={onCancel}
@@ -220,6 +292,8 @@ export function PlanStepList({
                   isFirst={idx === 0}
                   isLast={idx === steps.length - 1}
                   totalSteps={steps.length}
+                  expanded={expandedSteps.has(step.id)}
+                  onToggleExpand={() => toggleStep(step.id)}
                   onApprove={() => onApprove(step.id)}
                   onReject={() => onReject(step.id)}
                   onMoveUp={() => {
