@@ -75,7 +75,7 @@ interface SecurityEvent {
   details: string | null;
 }
 
-export function SecuritySection({ experienceLevel = "expert" }: { experienceLevel?: string }) {
+export function SecuritySection() {
   const [activeTab, setActiveTab] = useState<SecuritySubTab>("guard_rails");
 
   // Guard Rails
@@ -563,7 +563,7 @@ export function SecuritySection({ experienceLevel = "expert" }: { experienceLeve
     { key: "ip_protection", label: "IP Protection", icon: <Wifi className="h-4 w-4" /> },
     { key: "sandbox", label: "Command Sandbox", icon: <Terminal className="h-4 w-4" /> },
     { key: "security_log", label: "Security Log", icon: <ScrollText className="h-4 w-4" /> },
-    ...(experienceLevel === "expert" ? [{ key: "firewall" as const, label: "Firewall", icon: <Flame className="h-4 w-4" /> }] : []),
+    { key: "firewall" as const, label: "Firewall", icon: <Flame className="h-4 w-4" /> },
   ];
 
   // Filter + counts
@@ -1137,7 +1137,7 @@ export function SecuritySection({ experienceLevel = "expert" }: { experienceLeve
       )}
 
       {/* ── Firewall (UFW) ────────────────────────────────────────────────── */}
-      {activeTab === "firewall" && experienceLevel === "expert" && (
+      {activeTab === "firewall" && (
         <div className="space-y-4">
           {/* Rollback confirmation modal */}
           {pendingUfw && (

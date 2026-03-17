@@ -562,6 +562,195 @@ const migrations: Record<number, () => void> = {
     `);
     addColumnSafe("users", "group_id", "TEXT REFERENCES user_groups(id) ON DELETE SET NULL");
   },
+  9: () => {
+    // Rename old system groups and add the full 5-group role hierarchy.
+    // Existing "Administrators" → "Technical Admin", "Default" → "Employee".
+    // New groups: Admin, Manager, Guest.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { randomUUID } = require('crypto') as { randomUUID: () => string };
+
+    const upsertPerm = db.prepare(
+      "INSERT INTO group_permissions (group_id, category, permission_key, permission_value) VALUES (?, ?, ?, ?) ON CONFLICT(group_id, category, permission_key) DO UPDATE SET permission_value = excluded.permission_value"
+    );
+
+    function applyPerms(groupId: string, perms: [string, string, string][]) {
+      for (const [cat, key, val] of perms) {
+        upsertPerm.run(groupId, cat, key, val);
+      }
+    }
+
+    const ALL_SETTINGS = JSON.stringify([
+      "general","notifications","bot_identity","customization","templates",
+      "user_management","user_groups","security","rate_limits","budgets","api_key","secrets",
+      "system","services","service_manager","packages","updates","project",
+      "domains","smtp","backup","database","activity_log"
+    ]);
+    const ALL_TABS = JSON.stringify(["chat","agents","plan","jobs","memory","files","terminal"]);
+
+    // ── Technical Admin (was "Administrators") ──────────────────────────────
+    const techAdminRow = db.prepare("SELECT id FROM user_groups WHERE name = 'Administrators'").get() as { id: string } | undefined;
+    if (techAdminRow) {
+      db.prepare("UPDATE user_groups SET name=?, description=?, color=?, icon=?, updated_at=datetime('now') WHERE id=?").run(
+        'Technical Admin', 'Full server access including terminal, security, and all infrastructure controls.',
+        '#ef4444', 'shield-check', techAdminRow.id
+      );
+      applyPerms(techAdminRow.id, [
+        ['platform','sessions_create','true'],['platform','sessions_view_others','true'],
+        ['platform','sessions_collaborate','true'],['platform','templates_view','true'],
+        ['platform','templates_manage','true'],['platform','memories_view','true'],
+        ['platform','memories_manage','true'],['platform','files_browse','true'],
+        ['platform','files_upload','true'],['platform','terminal_access','true'],
+        ['platform','observe_only','false'],
+        ['platform','visible_tabs',ALL_TABS],
+        ['platform','visible_settings',ALL_SETTINGS],
+        ['ai','commands_allowed','[]'],['ai','commands_blocked','[]'],
+        ['ai','shell_access','true'],['ai','full_trust_allowed','true'],
+        ['ai','directories_allowed','[]'],['ai','directories_blocked','[]'],
+        ['ai','filetypes_allowed','[]'],['ai','filetypes_blocked','[]'],
+        ['ai','read_only','false'],
+        ['session','max_active','0'],['session','max_turns','0'],
+        ['session','models_allowed','[]'],['session','delegation_enabled','true'],
+        ['session','delegation_max_depth','10'],['session','default_model',''],
+        ['session','default_template',''],
+        ['prompt','system_prompt_append',''],['prompt','default_context',''],
+        ['prompt','communication_style','expert'],
+      ]);
+    }
+
+    // ── Employee (was "Default") ─────────────────────────────────────────────
+    const employeeRow = db.prepare("SELECT id FROM user_groups WHERE name = 'Default'").get() as { id: string } | undefined;
+    if (employeeRow) {
+      db.prepare("UPDATE user_groups SET name=?, description=?, color=?, icon=?, updated_at=datetime('now') WHERE id=?").run(
+        'Employee', 'Standard employee access. Can create sessions and use AI within sandboxed AI permissions.',
+        '#6366f1', 'user', employeeRow.id
+      );
+      applyPerms(employeeRow.id, [
+        ['platform','sessions_create','true'],['platform','sessions_view_others','false'],
+        ['platform','sessions_collaborate','true'],['platform','templates_view','true'],
+        ['platform','templates_manage','false'],['platform','memories_view','true'],
+        ['platform','memories_manage','false'],['platform','files_browse','false'],
+        ['platform','files_upload','false'],['platform','terminal_access','false'],
+        ['platform','observe_only','false'],
+        ['platform','visible_tabs',JSON.stringify(["chat","agents","plan","memory"])],
+        ['platform','visible_settings',JSON.stringify(["general","notifications"])],
+        ['ai','commands_allowed','[]'],['ai','commands_blocked','[]'],
+        ['ai','shell_access','true'],['ai','full_trust_allowed','false'],
+        ['ai','directories_allowed','[]'],['ai','directories_blocked','[]'],
+        ['ai','filetypes_allowed','[]'],['ai','filetypes_blocked','[]'],
+        ['ai','read_only','false'],
+        ['session','max_active','5'],['session','max_turns','200'],
+        ['session','models_allowed','[]'],['session','delegation_enabled','false'],
+        ['session','delegation_max_depth','1'],['session','default_model',''],
+        ['session','default_template',''],
+        ['prompt','system_prompt_append',''],['prompt','default_context',''],
+        ['prompt','communication_style','intermediate'],
+      ]);
+    }
+
+    // ── Admin (new) ──────────────────────────────────────────────────────────
+    const existingAdmin = db.prepare("SELECT id FROM user_groups WHERE name = 'Admin'").get();
+    if (!existingAdmin) {
+      const adminId = randomUUID();
+      db.prepare("INSERT OR IGNORE INTO user_groups (id, name, description, color, icon, is_system) VALUES (?, ?, ?, ?, ?, ?)").run(
+        adminId, 'Admin',
+        'Platform administrator. Manages users, settings, and content. No infrastructure or security access.',
+        '#f97316', 'shield', 1
+      );
+      applyPerms(adminId, [
+        ['platform','sessions_create','true'],['platform','sessions_view_others','true'],
+        ['platform','sessions_collaborate','true'],['platform','templates_view','true'],
+        ['platform','templates_manage','true'],['platform','memories_view','true'],
+        ['platform','memories_manage','true'],['platform','files_browse','true'],
+        ['platform','files_upload','true'],['platform','terminal_access','false'],
+        ['platform','observe_only','false'],
+        ['platform','visible_tabs',JSON.stringify(["chat","agents","plan","jobs","memory","files"])],
+        ['platform','visible_settings',JSON.stringify([
+          "general","notifications","bot_identity","templates","user_management","user_groups",
+          "rate_limits","budgets","system","services","updates","activity_log"
+        ])],
+        ['ai','commands_allowed','[]'],['ai','commands_blocked','[]'],
+        ['ai','shell_access','true'],['ai','full_trust_allowed','false'],
+        ['ai','directories_allowed','[]'],['ai','directories_blocked','[]'],
+        ['ai','filetypes_allowed','[]'],['ai','filetypes_blocked','[]'],
+        ['ai','read_only','false'],
+        ['session','max_active','0'],['session','max_turns','0'],
+        ['session','models_allowed','[]'],['session','delegation_enabled','true'],
+        ['session','delegation_max_depth','5'],['session','default_model',''],
+        ['session','default_template',''],
+        ['prompt','system_prompt_append',''],['prompt','default_context',''],
+        ['prompt','communication_style','expert'],
+      ]);
+    }
+
+    // ── Manager (new) ────────────────────────────────────────────────────────
+    const existingManager = db.prepare("SELECT id FROM user_groups WHERE name = 'Manager'").get();
+    if (!existingManager) {
+      const managerId = randomUUID();
+      db.prepare("INSERT OR IGNORE INTO user_groups (id, name, description, color, icon, is_system) VALUES (?, ?, ?, ?, ?, ?)").run(
+        managerId, 'Manager',
+        'Team manager with elevated collaboration access. Can oversee users and view activity.',
+        '#8b5cf6', 'briefcase', 1
+      );
+      applyPerms(managerId, [
+        ['platform','sessions_create','true'],['platform','sessions_view_others','true'],
+        ['platform','sessions_collaborate','true'],['platform','templates_view','true'],
+        ['platform','templates_manage','true'],['platform','memories_view','true'],
+        ['platform','memories_manage','false'],['platform','files_browse','true'],
+        ['platform','files_upload','true'],['platform','terminal_access','false'],
+        ['platform','observe_only','false'],
+        ['platform','visible_tabs',JSON.stringify(["chat","agents","plan","memory","files"])],
+        ['platform','visible_settings',JSON.stringify([
+          "general","notifications","bot_identity","templates","user_management",
+          "rate_limits","budgets","activity_log"
+        ])],
+        ['ai','commands_allowed','[]'],['ai','commands_blocked','[]'],
+        ['ai','shell_access','true'],['ai','full_trust_allowed','false'],
+        ['ai','directories_allowed','[]'],['ai','directories_blocked','[]'],
+        ['ai','filetypes_allowed','[]'],['ai','filetypes_blocked','[]'],
+        ['ai','read_only','false'],
+        ['session','max_active','10'],['session','max_turns','0'],
+        ['session','models_allowed','[]'],['session','delegation_enabled','true'],
+        ['session','delegation_max_depth','3'],['session','default_model',''],
+        ['session','default_template',''],
+        ['prompt','system_prompt_append',''],['prompt','default_context',''],
+        ['prompt','communication_style','intermediate'],
+      ]);
+    }
+
+    // ── Guest (new) ──────────────────────────────────────────────────────────
+    const existingGuest = db.prepare("SELECT id FROM user_groups WHERE name = 'Guest'").get();
+    if (!existingGuest) {
+      const guestId = randomUUID();
+      db.prepare("INSERT OR IGNORE INTO user_groups (id, name, description, color, icon, is_system) VALUES (?, ?, ?, ?, ?, ?)").run(
+        guestId, 'Guest',
+        'Read-only observer. Can view sessions shared with them but cannot create sessions or interact with AI.',
+        '#94a3b8', 'eye', 1
+      );
+      applyPerms(guestId, [
+        ['platform','sessions_create','false'],['platform','sessions_view_others','false'],
+        ['platform','sessions_collaborate','false'],['platform','templates_view','false'],
+        ['platform','templates_manage','false'],['platform','memories_view','false'],
+        ['platform','memories_manage','false'],['platform','files_browse','false'],
+        ['platform','files_upload','false'],['platform','terminal_access','false'],
+        ['platform','observe_only','true'],
+        ['platform','visible_tabs',JSON.stringify(["chat"])],
+        ['platform','visible_settings',JSON.stringify(["general"])],
+        ['ai','commands_allowed','[]'],['ai','commands_blocked','[]'],
+        ['ai','shell_access','false'],['ai','full_trust_allowed','false'],
+        ['ai','directories_allowed','[]'],['ai','directories_blocked','[]'],
+        ['ai','filetypes_allowed','[]'],['ai','filetypes_blocked','[]'],
+        ['ai','read_only','true'],
+        ['session','max_active','0'],['session','max_turns','0'],
+        ['session','models_allowed','[]'],['session','delegation_enabled','false'],
+        ['session','delegation_max_depth','1'],['session','default_model',''],
+        ['session','default_template',''],
+        ['prompt','system_prompt_append',''],['prompt','default_context',''],
+        ['prompt','communication_style','beginner'],
+      ]);
+    }
+
+    console.log('[db] Migration 9: applied 5-group role hierarchy');
+  },
 };
 
 const LATEST_SCHEMA_VERSION = Math.max(...Object.keys(migrations).map(Number));
@@ -574,96 +763,7 @@ for (let v = currentVersion + 1; v <= LATEST_SCHEMA_VERSION; v++) {
   }
 }
 
-// Seed system groups
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { randomUUID } = require('crypto') as { randomUUID: () => string };
-  const existingGroups = db.prepare("SELECT COUNT(*) as count FROM user_groups").get() as { count: number };
-  if (existingGroups.count === 0) {
-    const adminGroupId = randomUUID();
-    const defaultGroupId = randomUUID();
-
-    db.prepare("INSERT OR IGNORE INTO user_groups (id, name, description, color, icon, is_system) VALUES (?, ?, ?, ?, ?, ?)").run(
-      adminGroupId, 'Administrators', 'Full platform access with all permissions enabled', '#ef4444', 'shield', 1
-    );
-    db.prepare("INSERT OR IGNORE INTO user_groups (id, name, description, color, icon, is_system) VALUES (?, ?, ?, ?, ?, ?)").run(
-      defaultGroupId, 'Default', 'Standard user group with sensible defaults', '#6366f1', 'users', 1
-    );
-
-    const defaultPerms: [string, string, string][] = [
-      ['platform', 'sessions_create', 'true'],
-      ['platform', 'sessions_view_others', 'false'],
-      ['platform', 'sessions_collaborate', 'true'],
-      ['platform', 'templates_view', 'true'],
-      ['platform', 'templates_manage', 'false'],
-      ['platform', 'memories_view', 'true'],
-      ['platform', 'memories_manage', 'true'],
-      ['platform', 'files_browse', 'true'],
-      ['platform', 'files_upload', 'true'],
-      ['platform', 'terminal_access', 'true'],
-      ['ai', 'commands_allowed', '[]'],
-      ['ai', 'commands_blocked', '[]'],
-      ['ai', 'shell_access', 'true'],
-      ['ai', 'full_trust_allowed', 'true'],
-      ['ai', 'directories_allowed', '[]'],
-      ['ai', 'directories_blocked', '[]'],
-      ['ai', 'filetypes_allowed', '[]'],
-      ['ai', 'filetypes_blocked', '[]'],
-      ['ai', 'read_only', 'false'],
-      ['session', 'max_active', '0'],
-      ['session', 'max_turns', '0'],
-      ['session', 'models_allowed', '[]'],
-      ['session', 'delegation_enabled', 'true'],
-      ['session', 'delegation_max_depth', '5'],
-      ['session', 'default_model', ''],
-      ['session', 'default_template', ''],
-      ['prompt', 'system_prompt_append', ''],
-      ['prompt', 'default_context', ''],
-    ];
-    const insertPerm = db.prepare("INSERT OR IGNORE INTO group_permissions (group_id, category, permission_key, permission_value) VALUES (?, ?, ?, ?)");
-    for (const [cat, key, val] of defaultPerms) {
-      insertPerm.run(defaultGroupId, cat, key, val);
-    }
-
-    const adminPerms: [string, string, string][] = [
-      ['platform', 'sessions_create', 'true'],
-      ['platform', 'sessions_view_others', 'true'],
-      ['platform', 'sessions_collaborate', 'true'],
-      ['platform', 'templates_view', 'true'],
-      ['platform', 'templates_manage', 'true'],
-      ['platform', 'memories_view', 'true'],
-      ['platform', 'memories_manage', 'true'],
-      ['platform', 'files_browse', 'true'],
-      ['platform', 'files_upload', 'true'],
-      ['platform', 'terminal_access', 'true'],
-      ['ai', 'commands_allowed', '[]'],
-      ['ai', 'commands_blocked', '[]'],
-      ['ai', 'shell_access', 'true'],
-      ['ai', 'full_trust_allowed', 'true'],
-      ['ai', 'directories_allowed', '[]'],
-      ['ai', 'directories_blocked', '[]'],
-      ['ai', 'filetypes_allowed', '[]'],
-      ['ai', 'filetypes_blocked', '[]'],
-      ['ai', 'read_only', 'false'],
-      ['session', 'max_active', '0'],
-      ['session', 'max_turns', '0'],
-      ['session', 'models_allowed', '[]'],
-      ['session', 'delegation_enabled', 'true'],
-      ['session', 'delegation_max_depth', '10'],
-      ['session', 'default_model', ''],
-      ['session', 'default_template', ''],
-      ['prompt', 'system_prompt_append', ''],
-      ['prompt', 'default_context', ''],
-    ];
-    for (const [cat, key, val] of adminPerms) {
-      insertPerm.run(adminGroupId, cat, key, val);
-    }
-
-    console.log('[db] Seeded system groups: Administrators, Default');
-  }
-} catch (err) {
-  console.error('[db] Failed to seed system groups:', err);
-}
+// Legacy seed removed — migration 9 handles all system group creation and updates.
 
 // Reset stale statuses on startup (server restart means no session is running)
 db.exec("UPDATE sessions SET status = 'idle' WHERE status IN ('running', 'needs_attention')");

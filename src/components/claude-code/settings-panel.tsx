@@ -95,7 +95,8 @@ export function SettingsPanel() {
   const [sidebarSearch, setSidebarSearch] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const userProfile = useUserProfile();
-  const userExperienceLevel = userProfile.experience_level;
+  const groupPermissions = userProfile.groupPermissions;
+  const userIsAdmin = userProfile.isAdmin || isAdmin;
 
   // Project state
   const [projectRoot, setProjectRoot] = useState(process.env.NEXT_PUBLIC_CLAUDE_PROJECT_ROOT ?? "");
@@ -422,7 +423,7 @@ export function SettingsPanel() {
     );
   }
 
-  type SectionDef = { key: SectionKey; label: string; adminOnly?: boolean; expertAdminOnly?: boolean; icon: LucideIcon };
+  type SectionDef = { key: SectionKey; label: string; icon: LucideIcon };
   type SectionGroup = { label: string; sections: SectionDef[] };
 
   const sectionGroups: SectionGroup[] = [
@@ -436,69 +437,58 @@ export function SettingsPanel() {
     {
       label: "Bot",
       sections: [
-        { key: "bot_identity", label: "Bot Identity", adminOnly: true, icon: Bot },
-        { key: "customization", label: "Customization", adminOnly: true, icon: Palette },
-        { key: "templates", label: "Templates", adminOnly: true, icon: FileText },
+        { key: "bot_identity", label: "Bot Identity", icon: Bot },
+        { key: "customization", label: "Customization", icon: Palette },
+        { key: "templates", label: "Templates", icon: FileText },
       ],
     },
     {
       label: "Access & Security",
       sections: [
-        { key: "user_management", label: "User Management", adminOnly: true, icon: Users },
-        { key: "user_groups", label: "User Groups", adminOnly: true, icon: Users2 },
-        { key: "security", label: "Security", adminOnly: true, icon: Shield },
-        { key: "rate_limits", label: "Rate Limits", adminOnly: true, icon: Gauge },
-        { key: "budgets", label: "Budgets", adminOnly: true, icon: Wallet },
-        { key: "api_key", label: "API Key (SDK)", adminOnly: true, icon: Key },
-        { key: "secrets", label: "Secrets", expertAdminOnly: true, icon: Lock },
+        { key: "user_management", label: "User Management", icon: Users },
+        { key: "user_groups", label: "User Groups", icon: Users2 },
+        { key: "security", label: "Security", icon: Shield },
+        { key: "rate_limits", label: "Rate Limits", icon: Gauge },
+        { key: "budgets", label: "Budgets", icon: Wallet },
+        { key: "api_key", label: "API Key (SDK)", icon: Key },
+        { key: "secrets", label: "Secrets", icon: Lock },
       ],
     },
     {
       label: "Server",
       sections: [
-        { key: "system", label: "System", adminOnly: true, icon: Monitor },
-        { key: "services", label: "Services", adminOnly: true, icon: Server },
-        { key: "service_manager", label: "Service Manager", adminOnly: true, icon: Cog },
-        { key: "packages", label: "Packages", adminOnly: true, icon: Package },
-        { key: "updates", label: "Updates", adminOnly: true, icon: ArrowUpCircle },
-        { key: "project", label: "Project", adminOnly: true, icon: FolderOpen },
+        { key: "system", label: "System", icon: Monitor },
+        { key: "services", label: "Services", icon: Server },
+        { key: "service_manager", label: "Service Manager", icon: Cog },
+        { key: "packages", label: "Packages", icon: Package },
+        { key: "updates", label: "Updates", icon: ArrowUpCircle },
+        { key: "project", label: "Project", icon: FolderOpen },
       ],
     },
     {
       label: "Networking & Data",
       sections: [
-        { key: "domains", label: "Domains", adminOnly: true, icon: Globe },
-        { key: "smtp", label: "Email / SMTP", adminOnly: true, icon: Mail },
-        { key: "backup", label: "Backup & Restore", adminOnly: true, icon: Archive },
-        { key: "database", label: "Database", adminOnly: true, icon: Database },
-        { key: "activity_log", label: "Activity Log", adminOnly: true, icon: ScrollText },
+        { key: "domains", label: "Domains", icon: Globe },
+        { key: "smtp", label: "Email / SMTP", icon: Mail },
+        { key: "backup", label: "Backup & Restore", icon: Archive },
+        { key: "database", label: "Database", icon: Database },
+        { key: "activity_log", label: "Activity Log", icon: ScrollText },
       ],
     },
   ];
 
   const allSections: SectionDef[] = sectionGroups.flatMap((g) => g.sections);
 
-  const levelSections: Record<string, string[]> = {
-    beginner: ["general", "bot_identity", "notifications"],
-    intermediate: [
-      "general", "bot_identity", "customization", "rate_limits",
-      "user_management", "user_groups", "project", "notifications", "activity_log",
-      "backup", "database", "system", "services", "packages", "smtp", "budgets", "api_key",
-    ],
-    expert: allSections.map((s) => s.key),
-  };
-
-  const visibleLevelSections = levelSections[userExperienceLevel] ?? levelSections.expert;
+  // Admins (isAdmin=true or groupPermissions=null) see all sections.
+  // Non-admins see only sections in their group's visible_settings list.
+  const visibleSettingKeys: Set<string> = userIsAdmin
+    ? new Set(allSections.map((s) => s.key))
+    : new Set(groupPermissions?.platform?.visible_settings ?? ["general", "notifications"]);
 
   const visibleGroups = sectionGroups
     .map((g) => ({
       ...g,
-      sections: g.sections.filter(
-        (s) =>
-          (!s.adminOnly || isAdmin) &&
-          (!s.expertAdminOnly || (isAdmin && userExperienceLevel === "expert")) &&
-          visibleLevelSections.includes(s.key)
-      ),
+      sections: g.sections.filter((s) => visibleSettingKeys.has(s.key)),
     }))
     .filter((g) => g.sections.length > 0);
 
@@ -629,17 +619,15 @@ export function SettingsPanel() {
               <SettingRow title="Session Auto-Naming" description="Automatically name new sessions based on the first message sent.">
                 <Toggle checked={settings.auto_naming_enabled} onChange={(v) => update({ auto_naming_enabled: v })} />
               </SettingRow>
-              {userExperienceLevel !== "beginner" && (
-                <>
-                  <SettingRow
-                    title="Full Trust Mode"
-                    description="Skip confirmation prompts for destructive operations."
-                    warning={settings.full_trust_mode}
-                    warningText="Full Trust Mode is active. Claude will execute destructive operations without confirmation."
-                  >
-                    <Toggle checked={settings.full_trust_mode} onChange={(v) => update({ full_trust_mode: v })} danger />
-                  </SettingRow>
-                  <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5">
+              <SettingRow
+                title="Full Trust Mode"
+                description="Skip confirmation prompts for destructive operations."
+                warning={settings.full_trust_mode}
+                warningText="Full Trust Mode is active. Claude will execute destructive operations without confirmation."
+              >
+                <Toggle checked={settings.full_trust_mode} onChange={(v) => update({ full_trust_mode: v })} danger />
+              </SettingRow>
+              <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5">
                     <div className="mb-3">
                       <p className="text-body font-medium text-bot-text">Custom Default Context</p>
                       <p className="mt-0.5 text-caption text-bot-muted">Prepended to every new session as additional context for Claude.</p>
@@ -653,8 +641,6 @@ export function SettingsPanel() {
                       className="w-full rounded-xl border border-bot-border/40 bg-bot-elevated/40 px-4 py-2.5 text-body text-bot-text placeholder:text-bot-muted/50 outline-none focus:border-bot-accent/50 focus:shadow-glow-sm transition-all duration-200 resize-none"
                     />
                   </div>
-                </>
-              )}
             </div>
             <div className="mt-4 flex items-center gap-2 text-caption">
               {saving && <span className="text-bot-muted">Saving…</span>}
@@ -1020,7 +1006,7 @@ export function SettingsPanel() {
         {/* ── Notifications ── */}
         {activeSection === "notifications" && <NotificationsSection />}
 
-        {activeSection === "security" && <SecuritySection experienceLevel={userExperienceLevel} />}
+        {activeSection === "security" && <SecuritySection />}
 
         {/* ── Templates ── */}
         {activeSection === "templates" && <TemplatesSection />}
@@ -1564,21 +1550,14 @@ function Toggle({
   );
 }
 
-// ── Profile Section (experience level, server purpose, project type) ─────────
+// ── Profile Section (auto summary, server purpose, project type) ─────────────
 
-function ProfileSection({ isAdmin = false }: { isAdmin?: boolean }) {
+function ProfileSection({ isAdmin: _isAdmin = false }: { isAdmin?: boolean }) {
   const profile = useUserProfile();
-  const [experienceLevel, setExperienceLevel] = useState(profile.experience_level);
   const [autSummary, setAutoSummary] = useState(profile.auto_summary);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const bp = getBasePath();
-
-  const LEVEL_OPTIONS = [
-    { id: "beginner", label: "🌱 Beginner", desc: "Plain language, step-by-step" },
-    { id: "intermediate", label: "🔧 Intermediate", desc: "Technical when needed" },
-    { id: "expert", label: "⚡ Expert", desc: "Full detail, no hand-holding" },
-  ];
 
   async function save() {
     setSaving(true);
@@ -1587,12 +1566,11 @@ function ProfileSection({ isAdmin = false }: { isAdmin?: boolean }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...(isAdmin && { experience_level: experienceLevel }),
           auto_summary: autSummary,
           update_claude_md: true,
         }),
       });
-      invalidateProfileCache(); // force refetch on next render
+      invalidateProfileCache();
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } finally { setSaving(false); }
@@ -1600,35 +1578,6 @@ function ProfileSection({ isAdmin = false }: { isAdmin?: boolean }) {
 
   return (
     <div className="rounded-xl border border-bot-border/30 bg-bot-surface/50 backdrop-blur-sm p-5 space-y-4">
-      <div>
-        <p className="text-body font-medium text-bot-text">Experience Level</p>
-        <p className="mt-0.5 text-caption text-bot-muted">
-          {isAdmin
-            ? "Changes how the assistant communicates and which features are shown."
-            : "Your experience level is set by an admin and determines how the assistant communicates."}
-        </p>
-      </div>
-      <div className="grid grid-cols-3 gap-2">
-        {LEVEL_OPTIONS.map((opt) => (
-          <button key={opt.id}
-            onClick={() => isAdmin && setExperienceLevel(opt.id as typeof experienceLevel)}
-            disabled={!isAdmin}
-            className={cn(
-              "rounded-xl border px-3 py-3 text-left text-caption transition-all duration-200",
-              experienceLevel === opt.id
-                ? "border-bot-accent bg-bot-accent/10 text-bot-accent"
-                : "border-bot-border/40 text-bot-text/80",
-              isAdmin && experienceLevel !== opt.id && "hover:border-bot-accent/40 hover:bg-bot-elevated/30",
-              !isAdmin && "cursor-not-allowed opacity-70"
-            )}>
-            <div className="font-medium">{opt.label}</div>
-            <div className={cn("text-[10px] mt-0.5", experienceLevel === opt.id ? "text-bot-accent/70" : "text-bot-muted/60")}>{opt.desc}</div>
-          </button>
-        ))}
-      </div>
-      {!isAdmin && (
-        <p className="text-caption text-bot-muted/70 italic">Contact an admin to change your experience level.</p>
-      )}
       <div className="flex items-center justify-between">
         <div>
           <p className="text-body text-bot-text">Summarize completed actions</p>

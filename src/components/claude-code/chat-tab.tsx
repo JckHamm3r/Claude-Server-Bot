@@ -17,6 +17,7 @@ import { TypingIndicator } from "./typing-indicator";
 import { useChatSocket } from "@/hooks/use-chat-socket";
 import { getSocket } from "@/lib/socket";
 import type { ChatMessage } from "@/types/chat";
+import { useUserProfile } from "@/hooks/use-user-profile";
 
 interface ChatTabProps {
   isWidget?: boolean;
@@ -26,6 +27,9 @@ const ACTIVE_SESSION_KEY = "claude:activeSessionId";
 
 export function ChatTab({ isWidget = false }: ChatTabProps) {
   const { status: sessionStatus, data: sessionData } = useSession();
+  const userProfile = useUserProfile();
+  const isObserveOnly = !userProfile.isAdmin && (userProfile.groupPermissions?.platform?.observe_only ?? false);
+  const canCreateSessions = userProfile.isAdmin || (userProfile.groupPermissions?.platform?.sessions_create ?? true);
   const currentEmail = sessionData?.user?.email ?? null;
   const userObj = sessionData?.user as { firstName?: string; lastName?: string; email?: string } | undefined;
   const currentUserInfo = (() => {
@@ -280,6 +284,56 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
     },
     [chat],
   );
+
+  // Listen for AI help requests from settings panels (e.g. domain setup errors)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { message } = (e as CustomEvent<{ message: string }>).detail;
+      if (!message) return;
+      // Create a new session named "Domain Setup Help" and send the prefilled message
+      const id = crypto.randomUUID();
+      const sessionName = "Domain Setup Help";
+      const optimistic = {
+        id,
+        name: sessionName,
+        tags: [],
+        created_by: "",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        skip_permissions: false,
+        model: DEFAULT_MODEL,
+        provider_type: "sdk",
+        status: "idle" as const,
+        personality: "professional" as const,
+        claude_session_id: null,
+        context_journal: null,
+      };
+      setSessions((prev) => [optimistic, ...prev]);
+      chat.resetSessionState();
+      chat.setSessionModel(DEFAULT_MODEL);
+      chat.setSessionUsage(null);
+      chat.activeSessionRef.current = optimistic;
+      setActiveSession(optimistic);
+      chat.freshSessionsRef.current.add(id);
+      chat.initializedSessionsRef.current.add(id);
+      chat.emit("claude:create_session", {
+        sessionId: id,
+        skipPermissions: false,
+        model: DEFAULT_MODEL,
+        provider_type: "sdk",
+        personality: "professional",
+      });
+      chat.emit("claude:set_active_session", { sessionId: id });
+      chat.emit("claude:rename_session", { sessionId: id, name: sessionName });
+      try { localStorage.setItem(ACTIVE_SESSION_KEY, id); } catch { /* ignore */ }
+      // Send the prefilled message after a short delay to allow session init
+      setTimeout(() => {
+        chat.handleSend(message);
+      }, 400);
+    };
+    window.addEventListener("octoby:open-ai-help", handler);
+    return () => window.removeEventListener("octoby:open-ai-help", handler);
+  }, [chat, setSessions, setActiveSession]);
 
   const handleModelChange = useCallback(
     (model: string) => {
@@ -765,12 +819,17 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
         {!activeSession ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 text-bot-muted">
             <p className="text-body">Select a session or create a new one.</p>
+            {canCreateSessions && !isObserveOnly && (
             <button
               onClick={() => setShowNewDialog(true)}
               className="rounded-lg bg-bot-accent px-5 py-2.5 text-body font-medium text-white hover:bg-bot-accent/80 transition-colors"
             >
               New Session
             </button>
+            )}
+            {isObserveOnly && (
+              <p className="text-caption text-bot-muted">Your account is in observe-only mode.</p>
+            )}
           </div>
         ) : (
           <MessageList
@@ -802,10 +861,16 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
 
         <TypingIndicator typingUsers={chat.typingUsers} />
 
+        {isObserveOnly && (
+          <div className="mx-4 mb-2 rounded-lg border border-bot-border/40 bg-bot-surface/60 px-4 py-2.5 text-caption text-bot-muted text-center">
+            You are in observe-only mode — you can view this session but cannot send messages.
+          </div>
+        )}
+
         <ChatInput
           ref={chat.chatInputRef}
           onSend={handleSendWithAutoName}
-          disabled={!chat.connected || !activeSession}
+          disabled={!chat.connected || !activeSession || isObserveOnly}
           isRunning={chat.isRunning}
           aiPaused={chat.aiPaused}
           pendingCount={chat.pendingCount}

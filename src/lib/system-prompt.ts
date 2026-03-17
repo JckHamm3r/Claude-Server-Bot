@@ -13,13 +13,17 @@ interface BuildSystemPromptOpts {
   personality?: string;
   personalityCustom?: string;
   templateSystemPrompt?: string;
-  experienceLevel?: string;
+  communicationStyle?: string;
   autoSummary?: boolean;
   includeAgentTools?: boolean;
   /** When set, injects per-session context journal and the save instruction. */
   sessionId?: string;
-  /** Optional text appended after the template/identity block and before project CLAUDE.md. */
+  /** Optional text appended after the auto-generated role block. */
   groupPromptAppend?: string;
+  /** Full group permissions for the current user — used to build the role awareness block. */
+  groupPermissions?: import("./claude-db").GroupPermissions | null;
+  /** Display name of the user's group (e.g. "Employee"). */
+  groupName?: string;
 }
 
 function getExperienceLevelInstruction(level: string, autoSummary: boolean): string {
@@ -56,7 +60,68 @@ function getExperienceLevelInstruction(level: string, autoSummary: boolean): str
 }
 
 /**
- * Read CLAUDE.md from the project root if it exists.
+ * Builds a concise <user-role> block injected into the system prompt so Claude
+ * understands the user's role and knows not to suggest unavailable features.
+ * Returns an empty string for admins (null groupPermissions).
+ */
+function buildRoleAwarenessBlock(
+  groupName: string | undefined,
+  groupPermissions: import("./claude-db").GroupPermissions | null | undefined
+): string {
+  if (!groupPermissions) return "";
+  const name = groupName ?? "User";
+  const p = groupPermissions.platform;
+  const ai = groupPermissions.ai;
+  const sess = groupPermissions.session;
+
+  if (p.observe_only) {
+    return `<user-role>\nRole: ${name} | Observe-only. This user can only view sessions — they cannot create sessions or interact with you.\n</user-role>`;
+  }
+
+  const lines: string[] = [`Role: ${name}`];
+
+  // Visible tabs
+  const tabs = (p.visible_tabs ?? []).map((t) => t.charAt(0).toUpperCase() + t.slice(1));
+  if (tabs.length > 0) lines.push(`Tabs: ${tabs.join(", ")}`);
+
+  // Key restrictions
+  const restrictions: string[] = [];
+  if (!p.terminal_access) restrictions.push("no terminal access");
+  if (!p.files_browse) restrictions.push("no file browsing");
+  if (!p.sessions_view_others) restrictions.push("cannot view others' sessions");
+  if (!p.templates_manage) restrictions.push("cannot manage templates");
+  if (!p.memories_manage) restrictions.push("cannot manage memories");
+  if (ai.read_only) restrictions.push("AI is in read-only mode (no file writes)");
+  if (!ai.shell_access) restrictions.push("no shell access");
+  if (!ai.full_trust_allowed) restrictions.push("no full-trust mode");
+  if (restrictions.length > 0) lines.push(`Restrictions: ${restrictions.join(", ")}`);
+
+  // Session limits
+  const limits: string[] = [];
+  if (sess.max_active > 0) limits.push(`max ${sess.max_active} active sessions`);
+  if (sess.max_turns > 0) limits.push(`max ${sess.max_turns} turns per session`);
+  if (!sess.delegation_enabled) limits.push("no sub-agent delegation");
+  if (limits.length > 0) lines.push(`Session limits: ${limits.join(", ")}`);
+
+  // Settings access summary
+  const visSettings = p.visible_settings ?? [];
+  const hasAdminSettings = visSettings.some((s) => !["general", "notifications"].includes(s));
+  if (!hasAdminSettings) lines.push("Settings access: personal settings only (no admin sections)");
+
+  // Behavioral directive
+  const directives: string[] = [];
+  if (!p.terminal_access) directives.push("terminal commands");
+  if (!p.files_browse) directives.push("file management");
+  if (!hasAdminSettings) directives.push("admin configuration changes");
+  if (ai.read_only) directives.push("file write operations");
+  if (directives.length > 0) {
+    lines.push(`Do not suggest ${directives.join(", ")} to this user — these features are unavailable for their role.`);
+  }
+
+  return `<user-role>\n${lines.join("\n")}\n</user-role>`;
+}
+
+/**
  * Checks CLAUDE.md and .claude/CLAUDE.md (same precedence as the SDK).
  * We read this ourselves instead of using settingSources: ['project']
  * to avoid loading .claude/settings.json permission rules.
@@ -119,11 +184,13 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
     personality,
     personalityCustom,
     templateSystemPrompt,
-    experienceLevel = "expert",
+    communicationStyle = "expert",
     autoSummary = true,
     includeAgentTools = true,
     sessionId,
     groupPromptAppend,
+    groupPermissions,
+    groupName,
   } = opts;
 
   let systemPrompt: string | undefined;
@@ -138,7 +205,7 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
     if (selfIdentity) parts.push(selfIdentity);
     const personalityPrefix = getPersonalityPrefix(personality ?? "professional", personalityCustom);
     if (personalityPrefix) parts.push(personalityPrefix);
-    const levelInstruction = getExperienceLevelInstruction(experienceLevel, autoSummary);
+    const levelInstruction = getExperienceLevelInstruction(communicationStyle, autoSummary);
     if (levelInstruction) parts.push(levelInstruction);
     systemPrompt = parts.length > 0 ? parts.join("\n\n") : undefined;
   }
@@ -149,7 +216,11 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
       : templateSystemPrompt;
   }
 
-  // Inject group-level context/instructions if provided
+  // Inject role awareness block (auto-generated from group permissions) + optional custom append
+  const roleBlock = buildRoleAwarenessBlock(groupName, groupPermissions);
+  if (roleBlock) {
+    systemPrompt = systemPrompt ? systemPrompt + "\n\n" + roleBlock : roleBlock;
+  }
   if (groupPromptAppend) {
     const groupSection = `\n## Group Context\n${groupPromptAppend}`;
     systemPrompt = systemPrompt

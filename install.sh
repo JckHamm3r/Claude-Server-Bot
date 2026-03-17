@@ -753,17 +753,67 @@ screen_configure() {
     prompt_yn "Do you have a domain name? (optional — can add later)" "n" && has_domain_result=0 || has_domain_result=$?
     [ "$has_domain_result" -eq 2 ] && { NEXT_STEP=1; return; }
     if [ "$has_domain_result" -eq 0 ]; then
-      if ! prompt_input "Domain" ""; then NEXT_STEP=1; return; fi
-      DOMAIN="$REPLY"
+      while true; do
+        if ! prompt_input "Domain" ""; then NEXT_STEP=1; return; fi
+        DOMAIN="$REPLY"
+        if [ -z "$DOMAIN" ]; then break; fi
+        if echo "$DOMAIN" | grep -qE '^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$'; then
+          break
+        fi
+        error "Invalid domain format. Enter a valid hostname (e.g. bot.example.com)."
+      done
+    fi
+  fi
+
+  # Validate CLI-provided domain format too
+  if [ -n "$DOMAIN" ]; then
+    if ! echo "$DOMAIN" | grep -qE '^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$'; then
+      error "Invalid domain format: $DOMAIN"; exit 1
     fi
   fi
 
   if [ -n "$DOMAIN" ]; then
     info "Domain: $DOMAIN"
+
+    # DNS resolution check with IP comparison
     DNS_RESOLVED=false
-    command -v dig &>/dev/null && dig +short "$DOMAIN" 2>/dev/null | grep -q '.' && DNS_RESOLVED=true
-    command -v host &>/dev/null && ! $DNS_RESOLVED && host "$DOMAIN" &>/dev/null && DNS_RESOLVED=true
-    ! $DNS_RESOLVED && warn "Domain doesn't resolve yet — configure DNS before requesting certs."
+    DNS_RESOLVED_IPS=""
+    if command -v dig &>/dev/null; then
+      DNS_RESOLVED_IPS=$(dig +short "$DOMAIN" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
+      [ -n "$DNS_RESOLVED_IPS" ] && DNS_RESOLVED=true
+    fi
+    if ! $DNS_RESOLVED && command -v host &>/dev/null; then
+      DNS_RESOLVED_IPS=$(host -t A "$DOMAIN" 2>/dev/null | grep "has address" | awk '{print $NF}' || true)
+      [ -n "$DNS_RESOLVED_IPS" ] && DNS_RESOLVED=true
+    fi
+    if ! $DNS_RESOLVED && command -v getent &>/dev/null; then
+      DNS_RESOLVED_IPS=$(getent hosts "$DOMAIN" 2>/dev/null | awk '{print $1}' || true)
+      [ -n "$DNS_RESOLVED_IPS" ] && DNS_RESOLVED=true
+    fi
+
+    # Detect server's own public IP
+    SERVER_PUBLIC_IP=""
+    SERVER_PUBLIC_IP=$(curl -sf --max-time 3 https://api.ipify.org 2>/dev/null) || true
+    [ -z "$SERVER_PUBLIC_IP" ] && SERVER_PUBLIC_IP=$(curl -sf --max-time 3 https://ifconfig.me 2>/dev/null) || true
+
+    if $DNS_RESOLVED; then
+      info "DNS resolved: $DOMAIN → $DNS_RESOLVED_IPS"
+      if [ -n "$SERVER_PUBLIC_IP" ]; then
+        if echo "$DNS_RESOLVED_IPS" | grep -qF "$SERVER_PUBLIC_IP"; then
+          info "DNS points to this server ($SERVER_PUBLIC_IP) ✓"
+        else
+          warn "DNS mismatch: $DOMAIN resolves to $DNS_RESOLVED_IPS but this server's IP is $SERVER_PUBLIC_IP."
+          warn "Update your A record to point to $SERVER_PUBLIC_IP before certificates can be issued."
+        fi
+      fi
+    else
+      warn "Domain $DOMAIN does not resolve yet."
+      if [ -n "$SERVER_PUBLIC_IP" ]; then
+        warn "Create an A record:  $DOMAIN → $SERVER_PUBLIC_IP"
+      else
+        warn "Create an A record pointing $DOMAIN to this server's public IP."
+      fi
+    fi
 
     if [ -n "$CLI_HTTPS" ]; then
       case "$CLI_HTTPS" in
@@ -786,6 +836,30 @@ screen_configure() {
         2) USE_HTTPS=true; HTTPS_METHOD="cloudflare"; SETUP_CF_TUNNEL=true ;;
         *) USE_HTTPS=true; HTTPS_METHOD="selfsigned" ;;
       esac
+    fi
+
+    # If Let's Encrypt was chosen but DNS isn't ready, offer alternatives
+    if [ "$HTTPS_METHOD" = "letsencrypt" ] && ! $DNS_RESOLVED && ! $UNATTENDED; then
+      echo ""
+      warn "Let's Encrypt requires DNS to resolve to this server before it can issue a certificate."
+      echo ""
+      echo -e "  ${BOLD}How would you like to proceed?${NC}"
+      echo ""
+      echo -e "    ${CYAN}1${NC}  Use self-signed cert now, switch to Let's Encrypt later from Settings"
+      echo -e "    ${CYAN}2${NC}  Skip HTTPS entirely — configure later from Settings"
+      echo -e "    ${CYAN}3${NC}  Try anyway (certbot will likely fail)"
+      echo ""
+      if ! prompt_input "Choice" "1"; then NEXT_STEP=1; return; fi
+      case "$REPLY" in
+        2) USE_HTTPS=false; HTTPS_METHOD="none"; SETUP_NGINX=false ;;
+        3) : ;; # proceed with letsencrypt as-is
+        *) HTTPS_METHOD="selfsigned"; SETUP_NGINX=false ;;
+      esac
+    fi
+
+    # If Let's Encrypt and nginx chosen, remind about port 80
+    if [ "$HTTPS_METHOD" = "letsencrypt" ] && $SETUP_NGINX; then
+      hint "Let's Encrypt requires port 80 open from the internet for the HTTP-01 challenge."
     fi
 
     if [ "$HTTPS_METHOD" = "selfsigned" ]; then
@@ -1286,14 +1360,51 @@ server {
 }
 NGINX
   [ -n "$nginx_link" ] && sudo ln -sf "$nginx_conf" "$nginx_link"
+
+  # Suppress nginx version disclosure globally (survives certbot rewrites of the vhost)
+  local main_nginx_conf="/etc/nginx/nginx.conf"
+  if [ -f "$main_nginx_conf" ] && ! grep -q 'server_tokens off' "$main_nginx_conf"; then
+    sudo sed -i 's/^\(\s*\)# server_tokens off;/\1server_tokens off;/' "$main_nginx_conf" 2>/dev/null || true
+    if ! grep -q 'server_tokens off' "$main_nginx_conf"; then
+      sudo sed -i '/^\s*http\s*{/a\\tserver_tokens off;' "$main_nginx_conf" 2>/dev/null || true
+    fi
+  fi
+
   sudo nginx -t -q && sudo systemctl reload nginx
   info "nginx configured"
 
   if $USE_HTTPS && [ "$HTTPS_METHOD" = "letsencrypt" ]; then
     command -v certbot &>/dev/null || { echo "  Installing certbot..."; install_pkg certbot python3-certbot-nginx; }
     CERTBOT_EMAIL="${CERTBOT_EMAIL:-$ADMIN_EMAIL}"
-    sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$CERTBOT_EMAIL" --redirect -q
-    info "Let's Encrypt certificate issued"
+    local certbot_log
+    certbot_log="$(mktemp)"
+    if sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$CERTBOT_EMAIL" --redirect -q 2>"$certbot_log"; then
+      info "Let's Encrypt certificate issued"
+      # Verify the cert was actually written
+      if [ ! -d "/etc/letsencrypt/live/$DOMAIN" ]; then
+        warn "Certbot reported success but certificate directory not found — verify with: sudo certbot certificates"
+      fi
+    else
+      local raw_err
+      raw_err=$(tail -10 "$certbot_log" 2>/dev/null | tr '\n' ' ')
+      rm -f "$certbot_log"
+      echo ""
+      if echo "$raw_err" | grep -qi "too many certificates\|rate limit"; then
+        error "Let's Encrypt rate limit reached for $DOMAIN. You can issue at most 5 certificates per domain per week. Wait before retrying."
+      elif echo "$raw_err" | grep -qi "connection refused\|timeout\|could not connect"; then
+        error "Let's Encrypt could not reach $DOMAIN on port 80. Ensure port 80 is open in your firewall and DNS is correct."
+      elif echo "$raw_err" | grep -qi "dns\|NXDOMAIN\|no valid ip"; then
+        error "Let's Encrypt DNS check failed for $DOMAIN. Verify your A record is correct and fully propagated."
+      elif echo "$raw_err" | grep -qi "already exists\|not yet due"; then
+        warn "A certificate for $DOMAIN already exists and is not yet due for renewal."
+      else
+        error "Certbot failed for $DOMAIN: ${raw_err:-unknown error}"
+      fi
+      hint "You can retry SSL setup later from Settings → Domains once the issue is resolved."
+      rm -f "$certbot_log"
+      return
+    fi
+    rm -f "$certbot_log"
     node -e "
 const fs = require('fs');
 const envPath = process.argv[1];
@@ -1374,19 +1485,20 @@ setup_systemd() {
   fi
   check_sudo || return
   systemctl cat "${SERVICE_NAME}.service" &>/dev/null 2>&1 && sudo systemctl stop "${SERVICE_NAME}.service" 2>/dev/null || true
-  # SECURITY NOTE: The sudoers entry grants passwordless access to setup-domain.sh.
-  # Argument validation is enforced inside setup-domain.sh itself (domain format,
+  # SECURITY NOTE: The sudoers entry grants passwordless access to setup-domain.sh and remove-domain.sh.
+  # Argument validation is enforced inside each script itself (domain format,
   # port range, slug charset, path traversal checks) rather than in sudoers patterns,
   # which have limited regex support and are fragile to maintain.
   local sudoers_file="/etc/sudoers.d/claude-bot"
-  echo "$USER ALL=(ALL) NOPASSWD: /bin/systemctl restart ${SERVICE_NAME}.service, /usr/local/bin/setup-domain.sh [a-zA-Z0-9._-]* [0-9]* [a-zA-Z0-9_-]* [a-zA-Z0-9]* /[a-zA-Z0-9/_-]* *" | sudo tee "$sudoers_file" > /dev/null
+  echo "$USER ALL=(ALL) NOPASSWD: /bin/systemctl restart ${SERVICE_NAME}.service, /usr/local/bin/setup-domain.sh [a-zA-Z0-9._-]* [0-9]* [a-zA-Z0-9_-]* [a-zA-Z0-9]* /[a-zA-Z0-9/_-]* *, /usr/local/bin/remove-domain.sh [a-zA-Z0-9._-]*" | sudo tee "$sudoers_file" > /dev/null
   sudo chmod 0440 "$sudoers_file"
   if ! sudo visudo -c -f "$sudoers_file" >/dev/null 2>&1; then
     warn "Sudoers argument restriction failed validation — falling back to unrestricted entry"
-    echo "$USER ALL=(ALL) NOPASSWD: /bin/systemctl restart ${SERVICE_NAME}.service, /usr/local/bin/setup-domain.sh" | sudo tee "$sudoers_file" > /dev/null
+    echo "$USER ALL=(ALL) NOPASSWD: /bin/systemctl restart ${SERVICE_NAME}.service, /usr/local/bin/setup-domain.sh, /usr/local/bin/remove-domain.sh" | sudo tee "$sudoers_file" > /dev/null
     sudo chmod 0440 "$sudoers_file"
   fi
   [ -f "$INSTALL_DIR/scripts/setup-domain.sh" ] && sudo cp "$INSTALL_DIR/scripts/setup-domain.sh" /usr/local/bin/setup-domain.sh && sudo chmod +x /usr/local/bin/setup-domain.sh
+  [ -f "$INSTALL_DIR/scripts/remove-domain.sh" ] && sudo cp "$INSTALL_DIR/scripts/remove-domain.sh" /usr/local/bin/remove-domain.sh && sudo chmod +x /usr/local/bin/remove-domain.sh
   local pnpm_bin node_bin
   pnpm_bin=$(command -v pnpm)
   node_bin=$(command -v node)

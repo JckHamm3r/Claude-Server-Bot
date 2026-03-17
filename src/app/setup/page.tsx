@@ -4,11 +4,10 @@ import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { CheckCircle2, XCircle, Loader2, Key, Sparkles, ChevronRight, Server, User } from "lucide-react";
+import { CheckCircle2, XCircle, Loader2, Key, Sparkles, Server, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { EXPERIENCE_LEVELS, SERVER_PURPOSES } from "@/lib/user-profile-constants";
-import type { ExperienceLevel } from "@/lib/user-profile-constants";
+import { SERVER_PURPOSES } from "@/lib/user-profile-constants";
 
 // Steps:
 //  1 = AdminName (your first & last name)
@@ -16,10 +15,9 @@ import type { ExperienceLevel } from "@/lib/user-profile-constants";
 //  3 = APIKey
 //  4 = TestClaude
 //  5 = ProjectDir
-//  6 = ExperienceLevel
-//  7 = ServerProfile
-//  8 = Done
-type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+//  6 = ServerProfile
+//  7 = Done
+type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 const STEPS = [
   { n: 1, label: "You" },
@@ -27,9 +25,8 @@ const STEPS = [
   { n: 3, label: "API Key" },
   { n: 4, label: "Test" },
   { n: 5, label: "Project" },
-  { n: 6, label: "Level" },
-  { n: 7, label: "Server" },
-  { n: 8, label: "Done" },
+  { n: 6, label: "Server" },
+  { n: 7, label: "Done" },
 ];
 
 function getBasePath() {
@@ -44,23 +41,6 @@ const stepVariants = {
   exit: { opacity: 0, x: -20 },
 };
 
-// ── Level quiz ──────────────────────────────────────────────────────────────
-const QUIZ_QUESTIONS = [
-  { q: "Have you ever typed commands into a terminal window?", yes: 1, no: -1 },
-  { q: "Have you written code before in any language?", yes: 1, no: -1 },
-  { q: "Have you set up a web server or hosted a website yourself?", yes: 2, no: 0 },
-  { q: "Do you know what nginx, Docker, or Python are?", yes: 2, no: 0 },
-];
-
-function recommendLevel(answers: (boolean | null)[]): ExperienceLevel {
-  const score = answers.reduce((s, a, i) => {
-    if (a === null) return s;
-    return s + (a ? QUIZ_QUESTIONS[i].yes : QUIZ_QUESTIONS[i].no);
-  }, 0);
-  if (score <= 0) return "beginner";
-  if (score <= 3) return "intermediate";
-  return "expert";
-}
 
 export default function SetupPage() {
   const bp = getBasePath();
@@ -92,14 +72,6 @@ export default function SetupPage() {
   const [projectStatus, setProjectStatus] = useState<{ hasClaudeMd: boolean; hasClaudeDir: boolean } | null>(null);
   const [savingProject, setSavingProject] = useState(false);
   const [projectError, setProjectError] = useState("");
-
-  // Step 6 — Experience level
-  const [level, setLevel] = useState<ExperienceLevel | null>(null);
-  const [showQuiz, setShowQuiz] = useState(false);
-  const [quizAnswers, setQuizAnswers] = useState<(boolean | null)[]>(QUIZ_QUESTIONS.map(() => null));
-  const [quizIdx, setQuizIdx] = useState(0);
-  const [quizDone, setQuizDone] = useState(false);
-  const [quizRecommendation, setQuizRecommendation] = useState<ExperienceLevel | null>(null);
 
   // Step 7 — Server purpose
   const [selectedPurposes, setSelectedPurposes] = useState<string[]>([]);
@@ -229,19 +201,6 @@ export default function SetupPage() {
     finally { setSavingProject(false); }
   }
 
-  function handleQuizAnswer(answer: boolean) {
-    const newAnswers = [...quizAnswers];
-    newAnswers[quizIdx] = answer;
-    setQuizAnswers(newAnswers);
-    if (quizIdx < QUIZ_QUESTIONS.length - 1) {
-      setQuizIdx(quizIdx + 1);
-    } else {
-      const recommendation = recommendLevel(newAnswers);
-      setQuizRecommendation(recommendation);
-      setQuizDone(true);
-    }
-  }
-
   function togglePurpose(id: string) {
     setSelectedPurposes((prev) =>
       prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]
@@ -258,7 +217,6 @@ export default function SetupPage() {
       await fetch(`${bp}/api/users/profile`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          experience_level: level ?? "intermediate",
           server_purposes: purposes,
           project_type: projectType,
           profile_wizard_complete: true,
@@ -275,7 +233,7 @@ export default function SetupPage() {
       window.location.href = bp || "/";
     } catch (err) { setError(String(err)); }
     finally { setSaving(false); }
-  }, [bp, level, selectedPurposes, customPurpose, projectType]);
+  }, [bp, selectedPurposes, customPurpose, projectType]);
 
   const progressPercent = ((step - 1) / (STEPS.length - 1)) * 100;
   const displayName = firstName.trim() || "there";
@@ -563,100 +521,9 @@ export default function SetupPage() {
               </motion.div>
             )}
 
-            {/* ── STEP 6: Experience Level ── */}
+            {/* ── STEP 6: Server Purpose ── */}
             {step === 6 && (
               <motion.div key="s6" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-5">
-                {!showQuiz ? (
-                  <>
-                    <div>
-                      <h2 className="text-subtitle font-semibold text-bot-text mb-1">How should I communicate with you?</h2>
-                      <p className="text-body text-bot-muted">This changes how your assistant explains things. You can always change it later.</p>
-                    </div>
-
-                    <div className="space-y-3">
-                      {EXPERIENCE_LEVELS.map((lvl) => (
-                        <button key={lvl.id} onClick={() => setLevel(lvl.id)}
-                          className={cn(
-                            "w-full text-left rounded-xl border p-4 transition-all duration-200",
-                            level === lvl.id ? "border-bot-accent bg-bot-accent/10 shadow-glow-sm" : "border-bot-border/50 hover:border-bot-accent/50 hover:bg-bot-elevated/30"
-                          )}>
-                          <div className="flex items-center gap-3 mb-1.5">
-                            <span className="text-xl">{lvl.emoji}</span>
-                            <span className="text-body font-semibold text-bot-text">{lvl.label}</span>
-                            {level === lvl.id && <CheckCircle2 className="h-4 w-4 text-bot-accent ml-auto" />}
-                          </div>
-                          <p className="text-caption text-bot-muted pl-8">{lvl.tagline}</p>
-                        </button>
-                      ))}
-                    </div>
-
-                    <button onClick={() => { setShowQuiz(true); setQuizIdx(0); setQuizAnswers(QUIZ_QUESTIONS.map(() => null)); setQuizDone(false); }}
-                      className="w-full text-caption text-bot-muted hover:text-bot-accent transition-colors flex items-center justify-center gap-1 py-1">
-                      Not sure? Answer a few questions <ChevronRight className="h-3 w-3" />
-                    </button>
-
-                    <button onClick={() => setStep(7)} disabled={!level}
-                      className="w-full rounded-xl gradient-accent px-4 py-3 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] disabled:opacity-50 transition-all duration-200">
-                      Continue →
-                    </button>
-                  </>
-                ) : !quizDone ? (
-                  <>
-                    <div>
-                      <h2 className="text-subtitle font-semibold text-bot-text mb-1">Quick question {quizIdx + 1} of {QUIZ_QUESTIONS.length}</h2>
-                      <p className="text-body text-bot-text mt-4">{QUIZ_QUESTIONS[quizIdx].q}</p>
-                    </div>
-                    <div className="flex gap-3">
-                      <button onClick={() => handleQuizAnswer(true)}
-                        className="flex-1 rounded-xl border border-bot-green/40 bg-bot-green/10 text-bot-green px-4 py-3 text-body font-semibold hover:bg-bot-green/20 transition-all duration-200">
-                        Yes
-                      </button>
-                      <button onClick={() => handleQuizAnswer(false)}
-                        className="flex-1 rounded-xl border border-bot-border/40 text-bot-muted px-4 py-3 text-body font-semibold hover:bg-bot-elevated/40 hover:text-bot-text transition-all duration-200">
-                        No
-                      </button>
-                    </div>
-                    <button onClick={() => setShowQuiz(false)} className="w-full text-caption text-bot-muted hover:text-bot-text transition-colors py-1">← Back to choose manually</button>
-                  </>
-                ) : (
-                  <>
-                    <div>
-                      <h2 className="text-subtitle font-semibold text-bot-text mb-1">We recommend…</h2>
-                    </div>
-                    {quizRecommendation && (() => {
-                      const rec = EXPERIENCE_LEVELS.find((l) => l.id === quizRecommendation)!;
-                      return (
-                        <div className="rounded-xl border border-bot-accent bg-bot-accent/10 p-5 space-y-3">
-                          <div className="flex items-center gap-2">
-                            <span className="text-2xl">{rec.emoji}</span>
-                            <span className="text-body font-bold text-bot-text">{rec.label}</span>
-                          </div>
-                          <p className="text-caption text-bot-muted">{rec.description}</p>
-                          <ul className="space-y-1">
-                            {rec.bullets.map((b) => (
-                              <li key={b} className="text-caption text-bot-text flex items-start gap-1.5">
-                                <span className="text-bot-accent mt-0.5">✓</span>{b}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      );
-                    })()}
-                    <div className="space-y-2">
-                      <button onClick={() => { setLevel(quizRecommendation!); setShowQuiz(false); setStep(7); }}
-                        className="w-full rounded-xl gradient-accent px-4 py-3 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 transition-all duration-200">
-                        Use this — Continue →
-                      </button>
-                      <button onClick={() => setShowQuiz(false)} className="w-full text-caption text-bot-muted hover:text-bot-text transition-colors py-1">Choose a different level</button>
-                    </div>
-                  </>
-                )}
-              </motion.div>
-            )}
-
-            {/* ── STEP 7: Server Purpose ── */}
-            {step === 7 && (
-              <motion.div key="s7" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-5">
                 <div>
                   <h2 className="text-subtitle font-semibold text-bot-text mb-1">What is this server for?</h2>
                   <p className="text-body text-bot-muted">This helps your assistant give better advice. Pick all that apply.</p>
@@ -699,16 +566,16 @@ export default function SetupPage() {
                   </div>
                 </div>
 
-                <button onClick={() => setStep(8)}
+                <button onClick={() => setStep(7)}
                   className="w-full rounded-xl gradient-accent px-4 py-3 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] transition-all duration-200">
                   Continue →
                 </button>
               </motion.div>
             )}
 
-            {/* ── STEP 8: Done ── */}
-            {step === 8 && (
-              <motion.div key="s8" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-6 text-center">
+            {/* ── STEP 7: Done ── */}
+            {step === 7 && (
+              <motion.div key="s7" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-6 text-center">
                 <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 200, damping: 15, delay: 0.1 }}
                   className="flex flex-col items-center gap-3">
                   <div className="relative">
@@ -728,16 +595,6 @@ export default function SetupPage() {
                       {[firstName.trim(), lastName.trim()].filter(Boolean).join(" ")}
                     </span>
                   </div>
-                  {level && (() => {
-                    const lvl = EXPERIENCE_LEVELS.find((l) => l.id === level)!;
-                    return (
-                      <div className="flex items-center gap-2">
-                        <span>{lvl.emoji}</span>
-                        <span className="text-caption text-bot-muted">Experience:</span>
-                        <span className="text-caption text-bot-text font-medium">{lvl.label}</span>
-                      </div>
-                    );
-                  })()}
                   {(selectedPurposes.length > 0 || customPurpose) && (
                     <div className="flex items-start gap-2">
                       <span>🖥</span>

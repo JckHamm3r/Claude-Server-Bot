@@ -25,6 +25,7 @@ import {
   removeSessionParticipant,
   listSessionParticipants,
   getUserGroupPermissions,
+  getUserGroup,
 } from "../lib/claude-db";
 import { AVAILABLE_MODELS, DEFAULT_MODEL } from "../lib/models";
 import { isSDKAvailable } from "../lib/claude";
@@ -65,6 +66,19 @@ export function registerSessionHandlers(ctx: HandlerContext) {
           return;
         }
 
+        // Block observe-only users (e.g. Guest) from creating sessions
+        if (!isAdmin) {
+          const observeCheckPerms = getUserGroupPermissions(email);
+          if (observeCheckPerms.platform.observe_only) {
+            socket.emit("claude:error", { sessionId, message: "Your account is in observe-only mode. Session creation is not permitted." });
+            return;
+          }
+          if (!observeCheckPerms.platform.sessions_create) {
+            socket.emit("claude:error", { sessionId, message: "Your account does not have permission to create sessions." });
+            return;
+          }
+        }
+
         // Apply template if provided
         let templateSystemPrompt: string | undefined;
         if (templateId) {
@@ -87,14 +101,17 @@ export function registerSessionHandlers(ctx: HandlerContext) {
 
         const userSettings = getUserSettings(email);
         const groupPerms = isAdmin ? null : getUserGroupPermissions(email);
+        const userGroup = isAdmin ? null : getUserGroup(email);
         const systemPrompt = await buildSystemPrompt({
           interfaceType: interface_type,
           personality: sessionPersonality,
           personalityCustom: personality_custom,
           templateSystemPrompt,
-          experienceLevel: userSettings.experience_level,
+          communicationStyle: groupPerms?.prompt?.communication_style || "expert",
           autoSummary: userSettings.auto_summary,
           sessionId,
+          groupPermissions: groupPerms,
+          groupName: userGroup?.name,
           groupPromptAppend: groupPerms?.prompt?.system_prompt_append || undefined,
         });
         if (interface_type === "customization_interface") {
@@ -351,11 +368,14 @@ export function registerSessionHandlers(ctx: HandlerContext) {
       if (!hasResumeId) {
         const rejoinSettings = getUserSettings(email);
         const rejoinGroupPerms = isAdmin ? null : getUserGroupPermissions(email);
+        const rejoinUserGroup = isAdmin ? null : getUserGroup(email);
         const systemPrompt = await buildSystemPrompt({
           personality: dbSession.personality ?? undefined,
-          experienceLevel: rejoinSettings.experience_level,
+          communicationStyle: rejoinGroupPerms?.prompt?.communication_style || "expert",
           autoSummary: rejoinSettings.auto_summary,
           sessionId,
+          groupPermissions: rejoinGroupPerms,
+          groupName: rejoinUserGroup?.name,
           groupPromptAppend: rejoinGroupPerms?.prompt?.system_prompt_append || undefined,
         });
         sessionProvider.createSession(sessionId, {

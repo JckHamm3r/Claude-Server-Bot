@@ -20,6 +20,81 @@ json_fail()  {
   exit 0
 }
 
+# ─── DNS + reachability pre-checks ────────────────────────────────────────────
+# Resolve domain IPs using whatever tool is available
+_resolve_ips() {
+  local domain="$1"
+  local ips=""
+  if command -v dig &>/dev/null; then
+    ips=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
+    [ -z "$ips" ] && ips=$(dig +short "$domain" AAAA 2>/dev/null | grep -v '^\.' || true)
+  fi
+  if [ -z "$ips" ] && command -v host &>/dev/null; then
+    ips=$(host -t A "$domain" 2>/dev/null | grep "has address" | awk '{print $NF}' || true)
+  fi
+  if [ -z "$ips" ] && command -v getent &>/dev/null; then
+    ips=$(getent hosts "$domain" 2>/dev/null | awk '{print $1}' || true)
+  fi
+  echo "$ips"
+}
+
+# Get this server's public IP
+_server_public_ip() {
+  local ip=""
+  # Try AWS IMDSv2 first (works on EC2)
+  local token
+  token=$(curl -sf --max-time 2 -X PUT -H "X-aws-ec2-metadata-token-ttl-seconds: 5" \
+    http://169.254.169.254/latest/api/token 2>/dev/null) || true
+  if [ -n "$token" ]; then
+    ip=$(curl -sf --max-time 2 -H "X-aws-ec2-metadata-token: $token" \
+      http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null) || true
+  fi
+  [ -z "$ip" ] && ip=$(curl -sf --max-time 3 https://api.ipify.org 2>/dev/null) || true
+  [ -z "$ip" ] && ip=$(curl -sf --max-time 3 https://ifconfig.me 2>/dev/null) || true
+  echo "$ip"
+}
+
+# Check if port 80 is accessible on the domain from outside
+_check_port80() {
+  local domain="$1"
+  # curl with very short timeout — just testing TCP connection
+  curl -sf --max-time 5 --connect-timeout 5 -o /dev/null \
+    "http://${domain}/" 2>/dev/null && echo "open" || echo "closed"
+}
+
+SERVER_IP=$(_server_public_ip)
+DNS_IPS=$(_resolve_ips "$DOMAIN")
+DNS_RESOLVED=false
+IP_MATCH=false
+
+if [ -n "$DNS_IPS" ]; then
+  DNS_RESOLVED=true
+  if [ -n "$SERVER_IP" ] && echo "$DNS_IPS" | grep -qF "$SERVER_IP"; then
+    IP_MATCH=true
+  fi
+fi
+
+# Hard-fail if DNS doesn't resolve at all — certbot will fail too
+if ! $DNS_RESOLVED; then
+  if [ -n "$SERVER_IP" ]; then
+    json_fail "DNS for ${DOMAIN} does not resolve yet. Create an A record pointing ${DOMAIN} to ${SERVER_IP} and wait for propagation, then retry."
+  else
+    json_fail "DNS for ${DOMAIN} does not resolve yet. Create an A record pointing ${DOMAIN} to this server's public IP and wait for propagation, then retry."
+  fi
+fi
+
+# Warn-as-fail if DNS resolves but to the wrong IP
+if ! $IP_MATCH && [ -n "$SERVER_IP" ]; then
+  RESOLVED_DISPLAY=$(echo "$DNS_IPS" | tr '\n' ' ' | sed 's/ $//')
+  json_fail "DNS mismatch: ${DOMAIN} resolves to ${RESOLVED_DISPLAY} but this server's IP is ${SERVER_IP}. Update your A record to point to ${SERVER_IP} and wait for DNS propagation, then retry."
+fi
+
+# Check port 80 reachability (required for Let's Encrypt HTTP-01 challenge)
+PORT80_STATUS=$(_check_port80 "$DOMAIN")
+if [ "$PORT80_STATUS" = "closed" ]; then
+  json_fail "Port 80 is not reachable on ${DOMAIN}. Ensure port 80 (HTTP) is open in your firewall or cloud security group — Let's Encrypt requires it to issue certificates."
+fi
+
 # Validate domain format
 if ! echo "$DOMAIN" | grep -qE '^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$'; then
   json_fail "Invalid domain format: $DOMAIN"
@@ -175,11 +250,31 @@ fi
 CERTBOT_EMAIL="${ADMIN_EMAIL:-admin@$DOMAIN}"
 certbot_log=$(mktemp /tmp/certbot-XXXXXX.log)
 if ! certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$CERTBOT_EMAIL" --redirect -q 2>"$certbot_log"; then
-  err_msg=$(tail -5 "$certbot_log" 2>/dev/null | tr '\n' ' ')
+  raw_err=$(tail -10 "$certbot_log" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g')
   rm -f "$certbot_log"
-  json_fail "Certbot failed: ${err_msg:-unknown error}"
+
+  # Translate common certbot errors into actionable messages
+  friendly_err=""
+  if echo "$raw_err" | grep -qi "too many certificates\|rate limit"; then
+    friendly_err="Let's Encrypt rate limit reached for ${DOMAIN}. You can issue at most 5 certificates per domain per week. Wait before retrying, or use a different subdomain."
+  elif echo "$raw_err" | grep -qi "connection refused\|timeout\|could not connect"; then
+    friendly_err="Let's Encrypt could not reach ${DOMAIN} on port 80. Ensure port 80 is open and DNS is correctly propagated, then retry."
+  elif echo "$raw_err" | grep -qi "dns\|NXDOMAIN\|no valid ip"; then
+    friendly_err="Let's Encrypt DNS check failed for ${DOMAIN}. Verify your A record is correct and fully propagated, then retry."
+  elif echo "$raw_err" | grep -qi "already exists\|certificate not yet due"; then
+    friendly_err="A certificate for ${DOMAIN} already exists and is not yet due for renewal. If the nginx config is correct, your SSL is already active."
+  else
+    friendly_err="Certificate issuance failed for ${DOMAIN}. Details: ${raw_err:-unknown error}. Check that DNS resolves to this server and port 80 is reachable."
+  fi
+
+  json_fail "$friendly_err"
 fi
 rm -f "$certbot_log"
+
+# Verify the certificate was actually written
+if [ ! -d "/etc/letsencrypt/live/${DOMAIN}" ]; then
+  json_fail "Certbot reported success but no certificate was found at /etc/letsencrypt/live/${DOMAIN}. Try running: sudo certbot --nginx -d ${DOMAIN}"
+fi
 
 # Update .env NEXTAUTH_URL if install dir provided
 if [ -n "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/.env" ]; then

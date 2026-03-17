@@ -16,34 +16,39 @@ import { motion } from "framer-motion";
 import { NotificationBell } from "@/components/claude-code/notification-bell";
 import { UserProfileDropdown } from "@/components/user-profile-dropdown";
 import { useUserProfile } from "@/hooks/use-user-profile";
-import { LEVEL_VISIBLE_TABS } from "@/lib/user-profile-constants";
 
 type TabKey = "chat" | "agents" | "plan" | "jobs" | "memory" | "settings" | "terminal" | "files";
 
-const ALL_TABS: { key: TabKey; label: string; icon: typeof MessageSquare; adminOnly?: boolean }[] = [
+const ALL_TABS: { key: TabKey; label: string; icon: typeof MessageSquare }[] = [
   { key: "chat",     label: "Chat",      icon: MessageSquare },
   { key: "plan",     label: "Plan Mode", icon: ListChecks },
   { key: "agents",   label: "Agents",    icon: Bot },
   { key: "memory",   label: "Memory",    icon: Brain },
-  { key: "files",    label: "Files",     icon: FolderTree, adminOnly: true },
-  { key: "terminal", label: "Terminal",  icon: TerminalSquare, adminOnly: true },
-  { key: "jobs",     label: "Jobs",      icon: Timer, adminOnly: true },
+  { key: "files",    label: "Files",     icon: FolderTree },
+  { key: "terminal", label: "Terminal",  icon: TerminalSquare },
+  { key: "jobs",     label: "Jobs",      icon: Timer },
 ];
 
 export default function DashboardPage() {
   const { data: session } = useSession();
   const isAdmin = Boolean((session?.user as { isAdmin?: boolean })?.isAdmin);
   const profile = useUserProfile();
-  const levelKey = profile.experience_level as keyof typeof LEVEL_VISIBLE_TABS;
-  const allowedTabKeys = LEVEL_VISIBLE_TABS[levelKey] ?? LEVEL_VISIBLE_TABS.expert;
+  // Admins (groupPermissions=null) see all tabs; others are limited to their group's visible_tabs
+  const allowedTabKeys: string[] = profile.isAdmin
+    ? ALL_TABS.map((t) => t.key)
+    : (profile.groupPermissions?.platform?.visible_tabs ?? ["chat"]);
 
-  const TABS = ALL_TABS.filter((t) => {
-    if (t.adminOnly && !isAdmin) return false;
-    return allowedTabKeys.includes(t.key);
-  });
+  const TABS = ALL_TABS.filter((t) => allowedTabKeys.includes(t.key));
 
   const [activeTab, setActiveTab] = useState<TabKey>("chat");
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+
+  // Switch to chat tab when AI help is requested from any settings section
+  useEffect(() => {
+    const handler = () => setActiveTab("chat");
+    window.addEventListener("octoby:open-ai-help", handler);
+    return () => window.removeEventListener("octoby:open-ai-help", handler);
+  }, []);
   const [indicatorStyle, setIndicatorStyle] = useState({ left: 0, width: 0 });
 
   useEffect(() => {

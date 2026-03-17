@@ -22,7 +22,6 @@ interface AdminUser {
   last_name: string;
   avatar_url: string | null;
   created_at: string;
-  experience_level?: string;
   group_id: string | null;
   group_name: string | null;
   group_color: string | null;
@@ -154,7 +153,6 @@ export function UserManagementSection() {
   const [editLast, setEditLast] = useState("");
   const [editGroupId, setEditGroupId] = useState("");
   const [editIsAdmin, setEditIsAdmin] = useState(false);
-  const [editLevel, setEditLevel] = useState<"beginner" | "intermediate" | "expert">("intermediate");
   const [editSaving, setEditSaving] = useState(false);
   const [editPassword, setEditPassword] = useState<string | null>(null);
 
@@ -259,7 +257,6 @@ export function UserManagementSection() {
           last_name: addLast.trim(),
           avatar_url: null,
           created_at: new Date().toISOString(),
-          experience_level: "intermediate",
           group_id: addGroupId || null,
           group_name: grp?.name ?? null,
           group_color: grp?.color ?? null,
@@ -285,7 +282,6 @@ export function UserManagementSection() {
     setEditLast(u.last_name ?? "");
     setEditGroupId(u.group_id ?? "");
     setEditIsAdmin(!!u.is_admin);
-    setEditLevel((u.experience_level as "beginner" | "intermediate" | "expert") ?? "intermediate");
     setEditPassword(null);
     setConfirmDeleteEmail(null);
   };
@@ -304,7 +300,6 @@ export function UserManagementSection() {
       body.first_name = editFirst;
       body.last_name = editLast;
       body.is_admin = editIsAdmin;
-      body.experience_level = editLevel;
       body.group_id = editGroupId || null;
 
       const res = await fetch(apiUrl("/api/users"), {
@@ -327,7 +322,6 @@ export function UserManagementSection() {
                   first_name: editFirst,
                   last_name: editLast,
                   is_admin: editIsAdmin ? 1 : 0,
-                  experience_level: editLevel,
                   group_id: editGroupId || null,
                   group_name: grp?.name ?? null,
                   group_color: grp?.color ?? null,
@@ -783,25 +777,6 @@ export function UserManagementSection() {
                             ))}
                           </select>
                           <ChevronDown className="pointer-events-none absolute right-2 bottom-2.5 h-3.5 w-3.5 text-bot-muted" />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-caption font-medium text-bot-muted">Experience Level</label>
-                          <div className="flex gap-1">
-                            {(["beginner", "intermediate", "expert"] as const).map((lvl) => (
-                              <button
-                                key={lvl}
-                                onClick={() => setEditLevel(lvl)}
-                                className={cn(
-                                  "flex-1 rounded-md border px-2 py-1.5 text-caption capitalize transition-colors",
-                                  editLevel === lvl
-                                    ? "border-bot-accent bg-bot-accent/15 text-bot-accent font-medium"
-                                    : "border-bot-border text-bot-muted hover:border-bot-accent/50 hover:text-bot-text"
-                                )}
-                              >
-                                {lvl.slice(0, lvl === "intermediate" ? 6 : undefined)}
-                              </button>
-                            ))}
-                          </div>
                         </div>
                         <div>
                           <label className="mb-1 block text-caption font-medium text-bot-muted">Admin</label>

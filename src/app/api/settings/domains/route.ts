@@ -239,12 +239,28 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "Missing id query parameter" }, { status: 400 });
   }
 
-  const domain = db.prepare("SELECT id FROM domains WHERE id = ?").get(id);
+  const domain = db.prepare("SELECT id, hostname FROM domains WHERE id = ?").get(id) as
+    | { id: string; hostname: string }
+    | undefined;
   if (!domain) {
     return NextResponse.json({ error: "Domain not found" }, { status: 404 });
   }
 
+  // Attempt cleanup of nginx config and certs before removing from DB
+  let cleanupResult: { ok: boolean; error?: string } | null = null;
+  try {
+    const { stdout } = await execFileAsync(
+      "sudo",
+      ["/usr/local/bin/remove-domain.sh", domain.hostname],
+      { timeout: 30000 }
+    );
+    cleanupResult = JSON.parse(stdout.trim());
+  } catch {
+    // Cleanup failure is non-fatal — remove from DB regardless
+    cleanupResult = null;
+  }
+
   db.prepare("DELETE FROM domains WHERE id = ?").run(id);
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, cleanup: cleanupResult });
 }

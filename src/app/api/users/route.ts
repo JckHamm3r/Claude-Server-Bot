@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import db from "@/lib/db";
-import { getUserSettings, updateUserSettings, assignUserToGroup, getGroup } from "@/lib/claude-db";
+import { assignUserToGroup, getGroup } from "@/lib/claude-db";
 
 function generatePassword(): string {
   const len = Math.floor(Math.random() * 47) + 80; // 80–126 chars
@@ -32,11 +32,7 @@ export async function GET() {
     LEFT JOIN user_groups g ON g.id = u.group_id
     ORDER BY u.created_at ASC
   `).all() as Array<{ email: string; is_admin: number; first_name: string; last_name: string; avatar_url: string | null; created_at: string; group_id: string | null; group_name: string | null; group_color: string | null; group_icon: string | null }>;
-  const usersWithLevel = users.map((u) => {
-    const settings = getUserSettings(u.email);
-    return { ...u, experience_level: settings.experience_level };
-  });
-  return NextResponse.json({ users: usersWithLevel });
+  return NextResponse.json({ users: users });
 }
 
 export async function POST(request: NextRequest) {
@@ -128,14 +124,14 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: { email: string; newEmail?: string; is_admin?: boolean; resetPassword?: boolean; experience_level?: string; first_name?: string; last_name?: string; group_id?: string | null };
+  let body: { email: string; newEmail?: string; is_admin?: boolean; resetPassword?: boolean; first_name?: string; last_name?: string; group_id?: string | null };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { email, newEmail, is_admin, resetPassword, experience_level, first_name, last_name, group_id } = body;
+  const { email, newEmail, is_admin, resetPassword, first_name, last_name, group_id } = body;
   if (!email || typeof email !== "string") {
     return NextResponse.json({ error: "Missing email" }, { status: 400 });
   }
@@ -184,14 +180,6 @@ export async function PATCH(request: NextRequest) {
     const hash = await bcrypt.hash(password, 12);
     db.prepare("UPDATE users SET hash = ?, must_change_password = 1 WHERE email = ?").run(hash, effectiveEmail);
     result.password = password;
-  }
-
-  if (experience_level !== undefined) {
-    const validLevels = ["beginner", "intermediate", "expert"];
-    if (!validLevels.includes(experience_level)) {
-      return NextResponse.json({ error: "Invalid experience_level" }, { status: 400 });
-    }
-    updateUserSettings(effectiveEmail, { experience_level });
   }
 
   if (first_name !== undefined) {

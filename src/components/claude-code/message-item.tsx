@@ -36,7 +36,6 @@ interface MessageItemProps {
   isRunning?: boolean;
   isInteractive?: boolean;
   botAvatarUrl?: string | null;
-  experienceLevel?: string;
   userInfo?: UserDisplayInfo;
   aiPaused?: boolean;
 }
@@ -265,7 +264,6 @@ export const MessageItem = memo(function MessageItem({
   isRunning,
   isInteractive,
   botAvatarUrl,
-  experienceLevel,
   userInfo,
   aiPaused,
 }: MessageItemProps) {
@@ -377,7 +375,6 @@ export const MessageItem = memo(function MessageItem({
             disabled={!isInteractive}
             sandboxCategory={p.sandboxCategory}
             sandboxReason={p.sandboxReason}
-            experienceLevel={experienceLevel}
           />
         </div>
       );

@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback, KeyboardEvent } from "react";
 import {
   Plus, Pencil, Trash2, X, ArrowLeft, Users, Shield, Terminal,
-  FolderOpen, Settings, FileText, MessageSquare, ChevronDown, ChevronUp, Copy
+  FolderOpen, Settings, FileText, MessageSquare, ChevronDown, ChevronUp, Copy, Layout
 } from "lucide-react";
 import { cn, apiUrl } from "@/lib/utils";
 
@@ -31,6 +31,9 @@ interface GroupPermissions {
     files_browse: boolean;
     files_upload: boolean;
     terminal_access: boolean;
+    observe_only: boolean;
+    visible_tabs: string[];
+    visible_settings: string[];
   };
   ai: {
     commands_allowed: string[];
@@ -55,6 +58,7 @@ interface GroupPermissions {
   prompt: {
     system_prompt_append: string;
     default_context: string;
+    communication_style: string;
   };
 }
 
@@ -83,6 +87,9 @@ const DEFAULT_PERMISSIONS: GroupPermissions = {
     files_browse: true,
     files_upload: false,
     terminal_access: false,
+    observe_only: false,
+    visible_tabs: ["chat", "agents", "plan", "memory"],
+    visible_settings: ["general", "notifications"],
   },
   ai: {
     commands_allowed: [],
@@ -107,6 +114,7 @@ const DEFAULT_PERMISSIONS: GroupPermissions = {
   prompt: {
     system_prompt_append: "",
     default_context: "",
+    communication_style: "intermediate",
   },
 };
 
@@ -194,7 +202,7 @@ function ToggleRow({
         <span
           className={cn(
             "inline-block h-4 w-4 rounded-full bg-white shadow transition-transform mt-0.5",
-            checked ? "translate-x-4.5" : "translate-x-0.5"
+            checked ? "translate-x-4" : "translate-x-0.5"
           )}
         />
       </button>
@@ -204,7 +212,7 @@ function ToggleRow({
 
 // ── Group List ───────────────────────────────────────────────────────────────
 
-type EditorTab = "members" | "platform" | "ai" | "files" | "sessions" | "prompt";
+type EditorTab = "members" | "platform" | "ai" | "files" | "sessions" | "prompt" | "ui_access";
 
 export function UserGroupsSection() {
   const [groups, setGroups] = useState<UserGroup[]>([]);
@@ -489,6 +497,7 @@ const EDITOR_TABS: { id: EditorTab; label: string; icon: React.ReactNode }[] = [
   { id: "files", label: "Files & Dirs", icon: <FolderOpen className="h-3.5 w-3.5" /> },
   { id: "sessions", label: "Sessions", icon: <Settings className="h-3.5 w-3.5" /> },
   { id: "prompt", label: "Prompt", icon: <FileText className="h-3.5 w-3.5" /> },
+  { id: "ui_access", label: "UI Access", icon: <Layout className="h-3.5 w-3.5" /> },
 ];
 
 function GroupEditor({
@@ -795,6 +804,15 @@ function GroupEditor({
             loading={loadingPerms}
           />
         )}
+        {activeTab === "ui_access" && (
+          <UIAccessTab
+            perms={permissions.platform}
+            onChange={(p) => upd("platform")(p)}
+            onSave={() => savePermSection("platform")}
+            saving={savingPerms}
+            loading={loadingPerms}
+          />
+        )}
       </div>
 
       {/* AI Assistant Panel */}
@@ -946,6 +964,7 @@ function PlatformTab({
     { key: "files_browse", label: "Browse Files", desc: "Navigate the file system" },
     { key: "files_upload", label: "Upload Files", desc: "Upload files to the server" },
     { key: "terminal_access", label: "Terminal Access", desc: "Access the built-in terminal" },
+    { key: "observe_only", label: "Observe Only", desc: "User can only view sessions — cannot create sessions or interact with AI" },
   ];
 
   return (
@@ -1173,6 +1192,19 @@ function PromptTab({
   return (
     <div className="space-y-4">
       <div>
+        <label className="mb-1 block text-caption font-medium text-bot-muted">Communication Style</label>
+        <p className="mb-1.5 text-[11px] text-bot-muted">Controls how Claude communicates with users in this group.</p>
+        <select
+          value={perms.communication_style}
+          onChange={(e) => onChange({ communication_style: e.target.value })}
+          className="w-full rounded-md border border-bot-border bg-bot-bg px-3 py-2 text-body text-bot-text outline-none focus:border-bot-accent"
+        >
+          <option value="expert">Expert — terse, fully technical, no hand-holding</option>
+          <option value="intermediate">Intermediate — technical but explains complex parts</option>
+          <option value="beginner">Beginner — plain language, step-by-step, no jargon</option>
+        </select>
+      </div>
+      <div>
         <label className="mb-1 block text-caption font-medium text-bot-muted">System Prompt Append</label>
         <p className="mb-1.5 text-[11px] text-bot-muted">Appended to the system prompt for all sessions in this group.</p>
         <textarea
@@ -1196,6 +1228,148 @@ function PromptTab({
       </div>
       <div className="flex justify-end pt-1">
         <SaveButton onClick={onSave} saving={saving} label="Save Prompt" />
+      </div>
+    </div>
+  );
+}
+
+// ── UI Access Tab ─────────────────────────────────────────────────────────────
+
+const ALL_TABS: { id: string; label: string }[] = [
+  { id: "chat", label: "Chat" },
+  { id: "agents", label: "Agents" },
+  { id: "plan", label: "Plan" },
+  { id: "jobs", label: "Jobs" },
+  { id: "memory", label: "Memory" },
+  { id: "files", label: "Files" },
+  { id: "terminal", label: "Terminal" },
+];
+
+const ALL_SETTINGS_SECTIONS: { id: string; label: string; group: string }[] = [
+  { id: "general", label: "General", group: "User" },
+  { id: "notifications", label: "Notifications", group: "User" },
+  { id: "bot_identity", label: "Bot Identity", group: "Bot" },
+  { id: "customization", label: "Customization", group: "Bot" },
+  { id: "templates", label: "Templates", group: "Bot" },
+  { id: "user_management", label: "User Management", group: "Access & Security" },
+  { id: "user_groups", label: "User Groups", group: "Access & Security" },
+  { id: "security", label: "Security", group: "Access & Security" },
+  { id: "rate_limits", label: "Rate Limits", group: "Access & Security" },
+  { id: "budgets", label: "Budgets", group: "Access & Security" },
+  { id: "api_key", label: "API Key (SDK)", group: "Access & Security" },
+  { id: "secrets", label: "Secrets", group: "Access & Security" },
+  { id: "system", label: "System", group: "Server" },
+  { id: "services", label: "Services", group: "Server" },
+  { id: "service_manager", label: "Service Manager", group: "Server" },
+  { id: "packages", label: "Packages", group: "Server" },
+  { id: "updates", label: "Updates", group: "Server" },
+  { id: "project", label: "Project", group: "Server" },
+  { id: "domains", label: "Domains", group: "Networking & Data" },
+  { id: "smtp", label: "Email / SMTP", group: "Networking & Data" },
+  { id: "backup", label: "Backup & Restore", group: "Networking & Data" },
+  { id: "database", label: "Database", group: "Networking & Data" },
+  { id: "activity_log", label: "Activity Log", group: "Networking & Data" },
+];
+
+function UIAccessTab({
+  perms,
+  onChange,
+  onSave,
+  saving,
+  loading,
+}: {
+  perms: GroupPermissions["platform"];
+  onChange: (p: Partial<GroupPermissions["platform"]>) => void;
+  onSave: () => void;
+  saving: boolean;
+  loading: boolean;
+}) {
+  if (loading) return <p className="text-body text-bot-muted py-4">Loading…</p>;
+
+  const toggleTab = (tabId: string) => {
+    const current = perms.visible_tabs ?? [];
+    const next = current.includes(tabId) ? current.filter((t) => t !== tabId) : [...current, tabId];
+    onChange({ visible_tabs: next });
+  };
+
+  const toggleSetting = (sectionId: string) => {
+    const current = perms.visible_settings ?? [];
+    const next = current.includes(sectionId) ? current.filter((s) => s !== sectionId) : [...current, sectionId];
+    onChange({ visible_settings: next });
+  };
+
+  const settingGroups = ALL_SETTINGS_SECTIONS.reduce<Record<string, typeof ALL_SETTINGS_SECTIONS>>((acc, s) => {
+    if (!acc[s.group]) acc[s.group] = [];
+    acc[s.group].push(s);
+    return acc;
+  }, {});
+
+  return (
+    <div className="space-y-6">
+      <p className="text-caption text-bot-muted">
+        Controls which tabs and settings sections are visible to users in this group.
+        Admins always bypass these restrictions.
+      </p>
+
+      {/* Sidebar Tabs */}
+      <div>
+        <h3 className="mb-2 text-body font-medium text-bot-text">Visible Tabs</h3>
+        <div className="flex flex-wrap gap-2">
+          {ALL_TABS.map((tab) => {
+            const active = (perms.visible_tabs ?? []).includes(tab.id);
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => toggleTab(tab.id)}
+                className={cn(
+                  "rounded-md border px-3 py-1.5 text-caption font-medium transition-colors",
+                  active
+                    ? "border-bot-accent bg-bot-accent/15 text-bot-accent"
+                    : "border-bot-border bg-bot-bg text-bot-muted hover:border-bot-accent/50 hover:text-bot-text"
+                )}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Settings Sections */}
+      <div>
+        <h3 className="mb-3 text-body font-medium text-bot-text">Visible Settings Sections</h3>
+        <div className="space-y-4">
+          {Object.entries(settingGroups).map(([groupName, sections]) => (
+            <div key={groupName}>
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-bot-muted">{groupName}</p>
+              <div className="flex flex-wrap gap-2">
+                {sections.map((section) => {
+                  const active = (perms.visible_settings ?? []).includes(section.id);
+                  return (
+                    <button
+                      key={section.id}
+                      type="button"
+                      onClick={() => toggleSetting(section.id)}
+                      className={cn(
+                        "rounded-md border px-3 py-1.5 text-caption font-medium transition-colors",
+                        active
+                          ? "border-bot-accent bg-bot-accent/15 text-bot-accent"
+                          : "border-bot-border bg-bot-bg text-bot-muted hover:border-bot-accent/50 hover:text-bot-text"
+                      )}
+                    >
+                      {section.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex justify-end pt-1">
+        <SaveButton onClick={onSave} saving={saving} label="Save UI Access" />
       </div>
     </div>
   );

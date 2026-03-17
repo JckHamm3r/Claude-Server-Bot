@@ -1454,6 +1454,9 @@ export interface GroupPermissions {
     files_browse: boolean;
     files_upload: boolean;
     terminal_access: boolean;
+    observe_only: boolean;
+    visible_tabs: string[];
+    visible_settings: string[];
   };
   ai: {
     commands_allowed: string[];
@@ -1478,6 +1481,7 @@ export interface GroupPermissions {
   prompt: {
     system_prompt_append: string;
     default_context: string;
+    communication_style: string;
   };
 }
 
@@ -1493,6 +1497,9 @@ export const DEFAULT_GROUP_PERMISSIONS: GroupPermissions = {
     files_browse: true,
     files_upload: true,
     terminal_access: true,
+    observe_only: false,
+    visible_tabs: ["chat", "agents", "plan", "memory"],
+    visible_settings: ["general", "notifications"],
   },
   ai: {
     commands_allowed: [],
@@ -1517,6 +1524,7 @@ export const DEFAULT_GROUP_PERMISSIONS: GroupPermissions = {
   prompt: {
     system_prompt_append: '',
     default_context: '',
+    communication_style: 'intermediate',
   },
 };
 
@@ -1538,7 +1546,15 @@ export function getGroupPermissions(groupId: string): GroupPermissions {
     const { category, permission_key: key, permission_value: value } = row;
     if (category === 'platform') {
       const k = key as keyof GroupPermissions['platform'];
-      if (k in perms.platform) (perms.platform as Record<string, unknown>)[k] = parsePermValue(value, 'bool');
+      if (k in perms.platform) {
+        if (['visible_tabs', 'visible_settings'].includes(key)) {
+          (perms.platform as Record<string, unknown>)[k] = parsePermValue(value, 'array');
+        } else if (key === 'observe_only') {
+          (perms.platform as Record<string, unknown>)[k] = parsePermValue(value, 'bool');
+        } else {
+          (perms.platform as Record<string, unknown>)[k] = parsePermValue(value, 'bool');
+        }
+      }
     } else if (category === 'ai') {
       if (['commands_allowed', 'commands_blocked', 'directories_allowed', 'directories_blocked', 'filetypes_allowed', 'filetypes_blocked'].includes(key)) {
         (perms.ai as Record<string, unknown>)[key] = parsePermValue(value, 'array');

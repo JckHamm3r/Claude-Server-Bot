@@ -71,11 +71,6 @@ async function getExpertAdminEmail(): Promise<string | null> {
     .get(email) as { is_admin: number } | undefined;
   if (!user?.is_admin) return null;
 
-  const settings = db
-    .prepare("SELECT experience_level FROM user_settings WHERE email = ?")
-    .get(email) as { experience_level: string } | undefined;
-  if ((settings?.experience_level ?? "expert") !== "expert") return null;
-
   return email;
 }
 

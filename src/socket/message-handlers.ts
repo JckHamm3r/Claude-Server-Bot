@@ -15,6 +15,8 @@ import {
   canModifySession,
   getUpload,
   getUserSettings,
+  getUserGroupPermissions,
+  getUserGroup,
 } from "../lib/claude-db";
 import db from "../lib/db";
 import { logActivity } from "../lib/activity-log";
@@ -104,11 +106,17 @@ async function ensureSessionAlive(
 
   console.log(`[session] Rebuilding GC'd session ${sessionId} for user ${email}`);
   const userSettings = getUserSettings(email);
+  const isAdmin = Boolean((db.prepare("SELECT is_admin FROM users WHERE email = ?").get(email) as { is_admin?: number } | undefined)?.is_admin);
+  const msgGroupPerms = isAdmin ? null : getUserGroupPermissions(email);
+  const msgUserGroup = isAdmin ? null : getUserGroup(email);
   const systemPrompt = await buildSystemPrompt({
     personality: dbSession.personality ?? undefined,
-    experienceLevel: userSettings.experience_level,
+    communicationStyle: msgGroupPerms?.prompt?.communication_style || "expert",
     autoSummary: userSettings.auto_summary,
     sessionId,
+    groupPermissions: msgGroupPerms,
+    groupName: msgUserGroup?.name,
+    groupPromptAppend: msgGroupPerms?.prompt?.system_prompt_append || undefined,
   });
 
   sessionProvider.createSession(sessionId, {
@@ -139,6 +147,15 @@ export function registerMessageHandlers(ctx: HandlerContext) {
         if (!canAccessSession(sessionId, email)) {
           socket.emit("claude:error", { sessionId, message: "Access denied" });
           return;
+        }
+
+        // Block observe-only users from sending messages
+        if (!ctx.isAdmin) {
+          const msgPerms = getUserGroupPermissions(email);
+          if (msgPerms.platform.observe_only) {
+            socket.emit("claude:error", { sessionId, message: "Your account is in observe-only mode. You cannot interact with sessions." });
+            return;
+          }
         }
 
         // Rate limiting

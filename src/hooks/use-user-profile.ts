@@ -2,22 +2,69 @@
 
 import { useState, useEffect } from "react";
 import { apiUrl } from "@/lib/utils";
-import type { ExperienceLevel } from "@/lib/user-profile-constants";
+import type { GroupPermissions } from "@/lib/claude-db";
 
 export interface UserProfile {
-  experience_level: ExperienceLevel;
-  server_purposes: string[];
-  project_type: string;
   auto_summary: boolean;
   profile_wizard_complete: boolean;
+  server_purposes: string[];
+  project_type: string;
+  /** Group permissions for the current user (null = admin with no restrictions) */
+  groupPermissions: GroupPermissions | null;
+  /** True when the user is a platform admin (bypasses group restrictions) */
+  isAdmin: boolean;
 }
 
+const DEFAULT_PERMISSIONS: GroupPermissions = {
+  platform: {
+    sessions_create: true,
+    sessions_view_others: false,
+    sessions_collaborate: true,
+    templates_view: true,
+    templates_manage: false,
+    memories_view: true,
+    memories_manage: false,
+    files_browse: true,
+    files_upload: false,
+    terminal_access: false,
+    observe_only: false,
+    visible_tabs: ["chat", "agents", "plan", "memory"],
+    visible_settings: ["general", "notifications"],
+  },
+  ai: {
+    commands_allowed: [],
+    commands_blocked: [],
+    shell_access: false,
+    full_trust_allowed: false,
+    directories_allowed: [],
+    directories_blocked: [],
+    filetypes_allowed: [],
+    filetypes_blocked: [],
+    read_only: false,
+  },
+  session: {
+    max_active: 0,
+    max_turns: 0,
+    models_allowed: [],
+    delegation_enabled: false,
+    delegation_max_depth: 2,
+    default_model: "",
+    default_template: "",
+  },
+  prompt: {
+    system_prompt_append: "",
+    default_context: "",
+    communication_style: "intermediate",
+  },
+};
+
 const DEFAULT_PROFILE: UserProfile = {
-  experience_level: "expert",
-  server_purposes: [],
-  project_type: "",
   auto_summary: true,
   profile_wizard_complete: false,
+  server_purposes: [],
+  project_type: "",
+  groupPermissions: DEFAULT_PERMISSIONS,
+  isAdmin: false,
 };
 
 let cachedProfile: UserProfile | null = null;
@@ -30,15 +77,21 @@ function broadcastProfile(p: UserProfile) {
 
 export async function fetchAndCacheProfile(): Promise<UserProfile> {
   try {
-    const res = await fetch(apiUrl("/api/users/profile"));
-    if (!res.ok) return DEFAULT_PROFILE;
-    const data = await res.json() as Partial<UserProfile>;
+    const [profileRes, permsRes] = await Promise.all([
+      fetch(apiUrl("/api/users/profile")),
+      fetch(apiUrl("/api/groups/my-permissions")),
+    ]);
+
+    const profileData = profileRes.ok ? await profileRes.json() as Record<string, unknown> : {};
+    const permsData = permsRes.ok ? await permsRes.json() as { permissions: GroupPermissions; isAdmin: boolean } : null;
+
     const profile: UserProfile = {
-      experience_level: (data.experience_level as ExperienceLevel) ?? "expert",
-      server_purposes: data.server_purposes ?? [],
-      project_type: data.project_type ?? "",
-      auto_summary: data.auto_summary ?? true,
-      profile_wizard_complete: data.profile_wizard_complete ?? false,
+      auto_summary: (profileData.auto_summary as boolean) ?? true,
+      profile_wizard_complete: (profileData.profile_wizard_complete as boolean) ?? false,
+      server_purposes: (profileData.server_purposes as string[]) ?? [],
+      project_type: (profileData.project_type as string) ?? "",
+      groupPermissions: permsData?.isAdmin ? null : (permsData?.permissions ?? DEFAULT_PERMISSIONS),
+      isAdmin: permsData?.isAdmin ?? false,
     };
     broadcastProfile(profile);
     return profile;
