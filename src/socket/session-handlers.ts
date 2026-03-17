@@ -32,6 +32,7 @@ import { getAppSetting } from "../lib/app-settings";
 import { dispatchNotification } from "../lib/notifications";
 import { buildSystemPrompt } from "../lib/system-prompt";
 import db from "../lib/db";
+import { releaseAllSessionLocks, cancelAllSessionQueuedOps } from "../lib/file-lock-manager";
 
 export function registerSessionHandlers(ctx: HandlerContext) {
   const { socket, io, email, isAdmin } = ctx;
@@ -99,6 +100,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         sessionProvider.createSession(sessionId, {
           skipPermissions,
           model: sessionModel,
+          userEmail: email,
           ...(systemPrompt ? { systemPrompt } : {}),
         });
 
@@ -211,7 +213,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
     },
   );
 
-  socket.on("claude:delete_session", ({ sessionId }: { sessionId: string }) => {
+  socket.on("claude:delete_session", async ({ sessionId }: { sessionId: string }) => {
     try {
       if (!canModifySession(sessionId, email)) return;
       const sp = ctx.getSessionProvider(sessionId);
@@ -224,6 +226,14 @@ export function registerSessionHandlers(ctx: HandlerContext) {
       ctx.sessionStartTimes.delete(sessionId);
       ctx.sessionProviders.delete(sessionId);
       ctx.sessionEventBuffers.delete(sessionId);
+
+      // Release all file locks held by this session
+      await releaseAllSessionLocks(sessionId).catch((err) => {
+        console.error("[file-lock] Error releasing session locks:", err);
+      });
+
+      // Cancel all queued operations for this session
+      cancelAllSessionQueuedOps(sessionId);
 
       // Clean up upload files from disk
       try {
@@ -344,6 +354,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         sessionProvider.createSession(sessionId, {
           skipPermissions: dbSession.skip_permissions,
           model: dbSession.model,
+          userEmail: email,
           ...(systemPrompt ? { systemPrompt } : {}),
           ...(dbSession.claude_session_id ? { claudeSessionId: dbSession.claude_session_id } : {}),
         });

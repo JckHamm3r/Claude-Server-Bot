@@ -3,6 +3,13 @@ import * as fs from "fs";
 import * as path from "path";
 import type { ClaudeCodeProvider, ParsedOutput, TokenUsage } from "./provider";
 import { updateClaudeSessionId } from "../claude-db";
+import { 
+  acquireLock, 
+  queueOperation, 
+  releaseLock, 
+  extractFilePathsFromTool,
+  lockEventEmitter 
+} from "../file-lock-manager";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -14,6 +21,11 @@ interface PermissionResolver {
 interface QueuedMessage {
   content: string;
   resolve: () => void;
+}
+
+interface QueuedOperationResolver {
+  resolve: (result: { behavior: "allow" | "deny"; message?: string; updatedInput?: Record<string, unknown> }) => void;
+  toolInput: Record<string, unknown>;
 }
 
 interface SDKSessionState {
@@ -36,6 +48,10 @@ interface SDKSessionState {
   messageReady: (() => void) | null;
   streamActive: boolean;
   streamEnded: boolean;
+  // File lock tracking
+  activeLocks: Map<string, string[]>; // toolCallId -> file paths
+  queuedOperations: Map<string, QueuedOperationResolver>; // toolCallId -> resolver
+  userEmail: string;
 }
 
 const sessions = new Map<string, SDKSessionState>();
@@ -114,7 +130,7 @@ function resetTimers(state: SDKSessionState): void {
   }, SDK_TIMEOUT_MS);
 }
 
-function getOrCreate(sessionId: string): SDKSessionState {
+function getOrCreate(sessionId: string, userEmail = ""): SDKSessionState {
   if (!sessions.has(sessionId)) {
     sessions.set(sessionId, {
       emitter: new EventEmitter(),
@@ -133,10 +149,16 @@ function getOrCreate(sessionId: string): SDKSessionState {
       messageReady: null,
       streamActive: false,
       streamEnded: false,
+      activeLocks: new Map(),
+      queuedOperations: new Map(),
+      userEmail,
     });
   }
   const state = sessions.get(sessionId)!;
   state.lastActivity = Date.now();
+  if (userEmail && !state.userEmail) {
+    state.userEmail = userEmail;
+  }
   return state;
 }
 
@@ -345,6 +367,59 @@ async function startStreamingSession(
       toolInput: Record<string, unknown>,
       callOpts: { signal: AbortSignal; toolUseID: string },
     ) => {
+      // NEW: File lock check for write operations
+      if (["Write", "StrReplace", "Delete", "Bash", "Shell"].includes(toolName)) {
+        const filePaths = extractFilePathsFromTool(toolName, toolInput);
+
+        if (filePaths.length > 0) {
+          // Try to acquire locks for all files
+          const lockResults = await Promise.all(
+            filePaths.map((filePath) => acquireLock(sessionId, state.userEmail, toolName, callOpts.toolUseID, filePath))
+          );
+
+          // Check if any locks were not acquired
+          const failedLocks = lockResults.filter((result) => !result.acquired);
+
+          if (failedLocks.length > 0) {
+            // At least one file is locked - queue the entire operation
+            const failedLock = failedLocks[0]; // Show info about first failed lock
+
+            // Queue operations for all files
+            await Promise.all(
+              filePaths.map((filePath) =>
+                queueOperation(sessionId, state.userEmail, toolName, callOpts.toolUseID, toolInput, filePath)
+              )
+            );
+
+            // Emit queue notification to user
+            state.emitter.emit("output", {
+              type: "file_queued",
+              filePath: filePaths[0],
+              queuePosition: failedLock.queuePosition,
+              lockedBy: failedLock.lockedBy,
+              toolCallId: callOpts.toolUseID,
+              toolName,
+              message: `File operation queued. ${filePaths[0]} is currently being modified by ${failedLock.lockedBy?.userName || "another user"}.`,
+            } as ParsedOutput);
+
+            // Wait for lock to be released and operation to execute
+            return new Promise((resolve) => {
+              state.queuedOperations.set(callOpts.toolUseID, { resolve, toolInput });
+
+              const onAbort = () => {
+                state.queuedOperations.delete(callOpts.toolUseID);
+                resolve({ behavior: "deny", message: "Operation cancelled while queued" });
+              };
+              callOpts.signal.addEventListener("abort", onAbort, { once: true });
+            });
+          }
+
+          // All locks acquired - store for cleanup on completion
+          state.activeLocks.set(callOpts.toolUseID, filePaths);
+        }
+      }
+
+      // Continue with existing permission logic...
       if (state.allowedTools.has(toolName)) {
         return { behavior: "allow" as const, updatedInput: toolInput };
       }
@@ -380,11 +455,38 @@ async function startStreamingSession(
   state.messageQueue = [];
   state.messageReady = null;
 
+  // Set up listener for queued operations becoming ready
+  const queueExecutingHandler = (event: {
+    queueId: string;
+    sessionId: string;
+    toolCallId: string;
+    toolInput: Record<string, unknown>;
+  }) => {
+    if (event.sessionId === sessionId && state.queuedOperations.has(event.toolCallId)) {
+      const queued = state.queuedOperations.get(event.toolCallId);
+      if (queued) {
+        state.queuedOperations.delete(event.toolCallId);
+        // Resolve with allow so the tool executes
+        queued.resolve({ behavior: "allow", updatedInput: event.toolInput });
+      }
+    }
+  };
+  lockEventEmitter.on("queue_executing", queueExecutingHandler);
+
+  // Clean up listener when session closes
+  const originalCleanup = cleanupSession;
+  const cleanupWithLockListener = (s: SDKSessionState) => {
+    lockEventEmitter.off("queue_executing", queueExecutingHandler);
+    originalCleanup(s);
+  };
+
   // Start output processing in background
   processOutputStream(state, queryFn, options, sessionId).catch((err) => {
     console.error(`[sdk] Stream processing error for session ${sessionId}:`, err);
     state.emitter.emit("output", { type: "error", message: String(err) } as ParsedOutput);
     state.emitter.emit("output", { type: "done" } as ParsedOutput);
+  }).finally(() => {
+    lockEventEmitter.off("queue_executing", queueExecutingHandler);
   });
 }
 
@@ -678,6 +780,19 @@ async function processOutputStream(
               } as ParsedOutput);
 
               activeToolCalls.delete(tb.tool_use_id);
+
+              // NEW: Release locks when tool completes
+              if (state.activeLocks.has(tb.tool_use_id)) {
+                const filePaths = state.activeLocks.get(tb.tool_use_id) ?? [];
+                state.activeLocks.delete(tb.tool_use_id);
+                
+                // Release locks asynchronously (don't block the stream)
+                for (const filePath of filePaths) {
+                  releaseLock(filePath, tb.tool_use_id).catch((err) => {
+                    console.error(`[sdk] Error releasing lock for ${filePath}:`, err);
+                  });
+                }
+              }
             }
           }
         }
@@ -823,7 +938,7 @@ async function processOutputStream(
 
 export const sdkProvider: ClaudeCodeProvider = {
   createSession(sessionId, opts = {}) {
-    const state = getOrCreate(sessionId);
+    const state = getOrCreate(sessionId, opts.userEmail);
     state.skipPermissions = opts.skipPermissions ?? false;
     if (opts.systemPrompt) state.systemPrompt = opts.systemPrompt;
     if (opts.model) state.model = opts.model;

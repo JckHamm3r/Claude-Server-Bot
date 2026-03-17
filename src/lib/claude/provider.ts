@@ -21,7 +21,7 @@ export interface UserQuestion {
 }
 
 export interface ParsedOutput {
-  type: "text" | "streaming" | "options" | "confirm" | "diff" | "progress" | "done" | "error" | "permission_request" | "security_warn" | "usage" | "tool_call" | "tool_result" | "user_question" | "session_id" | "compacting" | "compact_done";
+  type: "text" | "streaming" | "options" | "confirm" | "diff" | "progress" | "done" | "error" | "permission_request" | "security_warn" | "usage" | "tool_call" | "tool_result" | "user_question" | "session_id" | "compacting" | "compact_done" | "file_queued";
   content?: string;
   choices?: string[];       // for 'options'
   prompt?: string;          // for 'confirm'
@@ -35,16 +35,22 @@ export interface ParsedOutput {
   warnType?: string;        // for 'security_warn'
   usage?: TokenUsage;       // for 'usage'
   retryable?: boolean;      // for 'error' — whether the error is retryable
-  toolCallId?: string;      // for 'tool_call' | 'tool_result'
+  toolCallId?: string;      // for 'tool_call' | 'tool_result' | 'file_queued'
   toolStatus?: "running" | "done" | "error"; // for 'tool_call' | 'tool_result'
   toolResult?: string;      // for 'tool_result'
   exitCode?: number;        // for 'tool_result'
   questions?: UserQuestion[]; // for 'user_question'
   claudeSessionId?: string;   // for 'session_id' — SDK session resume ID
+  filePath?: string;        // for 'file_queued' — the file that is locked
+  queuePosition?: number;   // for 'file_queued' — position in queue
+  lockedBy?: {              // for 'file_queued' — who holds the lock
+    userEmail: string;
+    userName: string;
+  };
 }
 
 export interface ClaudeCodeProvider {
-  createSession(sessionId: string, opts?: { skipPermissions?: boolean; systemPrompt?: string; model?: string; claudeSessionId?: string }): void;
+  createSession(sessionId: string, opts?: { skipPermissions?: boolean; systemPrompt?: string; model?: string; claudeSessionId?: string; userEmail?: string }): void;
   sendMessage(sessionId: string, message: string, opts?: { skipPermissions?: boolean; model?: string; inputFiles?: string[] }): void;
   interrupt(sessionId: string): void;
   /** Kill active process and remove all state — use for permanent deletion. */

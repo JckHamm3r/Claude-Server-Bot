@@ -1,7 +1,7 @@
 import type { Server, Socket } from "socket.io";
 import { getClaudeProvider } from "../lib/claude";
 import type { ClaudeCodeProvider, TokenUsage } from "../lib/claude/provider";
-import { saveMessage, updateSessionStatus, updateClaudeSessionId, getSession, getMessages, getUserSettings, renameSession, listSessions } from "../lib/claude-db";
+import { saveMessage, updateSessionStatus, updateClaudeSessionId, getSession, getMessages, getUserSettings, renameSession, listSessions, getUser } from "../lib/claude-db";
 import type { SessionStatus } from "../lib/claude-db";
 import { generateSessionName } from "../lib/claude/session-namer";
 import { getToken } from "next-auth/jwt";
@@ -23,6 +23,13 @@ import { registerMessageHandlers } from "./message-handlers";
 import { registerSecurityHandlers } from "./security-handlers";
 import { registerPresenceHandlers } from "./presence-handlers";
 import { registerPlanHandlers } from "./plan-handlers";
+import { 
+  lockEventEmitter, 
+  initFileLockManager, 
+  shutdownFileLockManager,
+  cancelQueuedOperation,
+  getSessionQueuedOperations 
+} from "../lib/file-lock-manager";
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
@@ -304,6 +311,9 @@ export function registerHandlers(io: Server) {
     try { db.pragma("incremental_vacuum"); } catch { /* ignore */ }
   }, 5 * 60_000);
 
+  // Initialize file lock manager
+  initFileLockManager();
+
   const provider = getClaudeProvider();
 
   // Wire notification emitter so dispatchNotification can push real-time events
@@ -319,6 +329,72 @@ export function registerHandlers(io: Server) {
   // Wire broadcaster so REST API routes can push real-time events to all clients
   setBroadcaster((event: string, data: unknown) => {
     io.emit(event, data);
+  });
+
+  // Set up file lock event listeners
+  lockEventEmitter.on("operation_queued", (event: {
+    queueId: string;
+    sessionId: string;
+    userEmail: string;
+    filePath: string;
+    toolName: string;
+    toolCallId: string;
+    position: number;
+  }) => {
+    const user = getUser(event.userEmail);
+    const userName = user ? `${user.first_name || ""} ${user.last_name || ""}`.trim() || user.email : event.userEmail;
+    
+    io.to(`session:${event.sessionId}`).emit("file:operation_queued", {
+      sessionId: event.sessionId,
+      queueId: event.queueId,
+      filePath: event.filePath,
+      queuePosition: event.position,
+      toolName: event.toolName,
+      toolCallId: event.toolCallId,
+      userEmail: event.userEmail,
+      userName,
+    });
+  });
+
+  lockEventEmitter.on("queue_executing", (event: {
+    queueId: string;
+    sessionId: string;
+    userEmail: string;
+    filePath: string;
+    toolName: string;
+    toolCallId: string;
+  }) => {
+    io.to(`session:${event.sessionId}`).emit("file:queue_executing", {
+      sessionId: event.sessionId,
+      queueId: event.queueId,
+      filePath: event.filePath,
+      toolCallId: event.toolCallId,
+    });
+  });
+
+  lockEventEmitter.on("lock_released", (event: {
+    filePath: string;
+    toolCallId: string;
+  }) => {
+    io.emit("file:lock_released", {
+      filePath: event.filePath,
+      toolCallId: event.toolCallId,
+    });
+  });
+
+  lockEventEmitter.on("operation_cancelled", (event: {
+    queueId: string;
+    sessionId: string;
+    userEmail: string;
+    filePath: string;
+    toolCallId: string;
+  }) => {
+    io.to(`session:${event.sessionId}`).emit("file:operation_cancelled", {
+      sessionId: event.sessionId,
+      queueId: event.queueId,
+      filePath: event.filePath,
+      toolCallId: event.toolCallId,
+    });
   });
 
   // Session status helper: updates DB and broadcasts to all sockets
@@ -422,6 +498,21 @@ export function registerHandlers(io: Server) {
           tc.result = parsed.toolResult;
           tc.exitCode = parsed.exitCode;
         }
+      }
+
+      // Handle file queued notifications
+      if (parsed.type === "file_queued") {
+        io.to(`session:${sessionId}`).emit("file:operation_queued", {
+          sessionId,
+          filePath: parsed.filePath,
+          queuePosition: parsed.queuePosition,
+          lockedBy: parsed.lockedBy,
+          toolName: parsed.toolName,
+          toolCallId: parsed.toolCallId,
+        });
+        // Also send as regular output so it appears in the UI
+        io.to(`session:${sessionId}`).emit("claude:output", { sessionId, parsed, submittedBy });
+        return;
       }
 
       // Guard rails: intercept permission_request for protected paths
@@ -660,5 +751,23 @@ export function registerHandlers(io: Server) {
     registerSecurityHandlers(ctx);
     registerPresenceHandlers(ctx);
     registerPlanHandlers(ctx);
+
+    // File lock handlers
+    socket.on("file:cancel_queued_operation", async ({ queueId }: { queueId: string }) => {
+      const cancelled = cancelQueuedOperation(queueId, email);
+      if (cancelled) {
+        console.log(`[file-lock] User ${email} cancelled queued operation: ${queueId}`);
+      }
+    });
+
+    socket.on("file:get_queue_status", async ({ sessionId }: { sessionId: string }, callback: (data: unknown) => void) => {
+      try {
+        const operations = getSessionQueuedOperations(sessionId);
+        callback({ success: true, operations });
+      } catch (err) {
+        console.error("[file-lock] Error getting queue status:", err);
+        callback({ success: false, error: String(err) });
+      }
+    });
   });
 }

@@ -859,3 +859,254 @@ export function getMemories(): Memory[] {
     "SELECT id, title, content, created_by, created_at, updated_at FROM memories ORDER BY created_at ASC"
   ).all() as Memory[];
 }
+
+// ==================== FILE LOCKS ====================
+
+export interface FileLock {
+  file_path: string;
+  session_id: string;
+  user_email: string;
+  tool_name: string;
+  tool_call_id: string;
+  locked_at: string;
+}
+
+export interface QueuedOperation {
+  id: string;
+  file_path: string;
+  session_id: string;
+  user_email: string;
+  tool_name: string;
+  tool_call_id: string;
+  tool_input: string;
+  queued_at: string;
+  status: "queued" | "executing" | "completed" | "failed" | "cancelled";
+  started_at: string | null;
+  completed_at: string | null;
+  error: string | null;
+}
+
+/**
+ * Create a file lock
+ * Returns true if lock was created, false if file is already locked
+ */
+export function createFileLock(
+  sessionId: string,
+  userEmail: string,
+  toolName: string,
+  toolCallId: string,
+  filePath: string
+): boolean {
+  try {
+    db.prepare(
+      "INSERT INTO file_locks (file_path, session_id, user_email, tool_name, tool_call_id) VALUES (?, ?, ?, ?, ?)"
+    ).run(filePath, sessionId, userEmail, toolName, toolCallId);
+    return true;
+  } catch (err: unknown) {
+    // Primary key violation means file is already locked
+    if (err instanceof Error && err.message.includes("UNIQUE constraint failed")) {
+      return false;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Remove a file lock
+ */
+export function removeFileLock(filePath: string, toolCallId: string): void {
+  db.prepare("DELETE FROM file_locks WHERE file_path = ? AND tool_call_id = ?").run(filePath, toolCallId);
+}
+
+/**
+ * Get the current lock for a file
+ */
+export function getFileLock(filePath: string): FileLock | null {
+  const result = db.prepare(
+    "SELECT file_path, session_id, user_email, tool_name, tool_call_id, locked_at FROM file_locks WHERE file_path = ?"
+  ).get(filePath);
+  return result as FileLock | null;
+}
+
+/**
+ * Get all locks for a session
+ */
+export function getSessionLocks(sessionId: string): FileLock[] {
+  return db.prepare(
+    "SELECT file_path, session_id, user_email, tool_name, tool_call_id, locked_at FROM file_locks WHERE session_id = ?"
+  ).all(sessionId) as FileLock[];
+}
+
+/**
+ * Remove all locks for a session
+ */
+export function removeSessionLocks(sessionId: string): void {
+  db.prepare("DELETE FROM file_locks WHERE session_id = ?").run(sessionId);
+}
+
+/**
+ * Remove stale locks (older than timeout in minutes)
+ */
+export function removeStaleLocks(timeoutMinutes: number): FileLock[] {
+  const staleLocks = db.prepare(
+    `SELECT file_path, session_id, user_email, tool_name, tool_call_id, locked_at 
+     FROM file_locks 
+     WHERE datetime(locked_at) < datetime('now', '-' || ? || ' minutes')`
+  ).all(timeoutMinutes) as FileLock[];
+
+  if (staleLocks.length > 0) {
+    db.prepare(
+      `DELETE FROM file_locks WHERE datetime(locked_at) < datetime('now', '-' || ? || ' minutes')`
+    ).run(timeoutMinutes);
+  }
+
+  return staleLocks;
+}
+
+// ==================== FILE OPERATION QUEUE ====================
+
+/**
+ * Create a queued operation
+ */
+export function createQueuedOperation(data: {
+  filePath: string;
+  sessionId: string;
+  userEmail: string;
+  toolName: string;
+  toolCallId: string;
+  toolInput: string;
+}): string {
+  const result = db.prepare(
+    `INSERT INTO file_operation_queue (file_path, session_id, user_email, tool_name, tool_call_id, tool_input)
+     VALUES (?, ?, ?, ?, ?, ?)
+     RETURNING id`
+  ).get(data.filePath, data.sessionId, data.userEmail, data.toolName, data.toolCallId, data.toolInput) as { id: string };
+  return result.id;
+}
+
+/**
+ * Get the next queued operation for a file (oldest first)
+ */
+export function getNextQueuedOperation(filePath: string): QueuedOperation | null {
+  const result = db.prepare(
+    `SELECT id, file_path, session_id, user_email, tool_name, tool_call_id, tool_input, 
+            queued_at, status, started_at, completed_at, error
+     FROM file_operation_queue
+     WHERE file_path = ? AND status = 'queued'
+     ORDER BY queued_at ASC
+     LIMIT 1`
+  ).get(filePath);
+  return result as QueuedOperation | null;
+}
+
+/**
+ * Update the status of a queued operation
+ */
+export function updateQueuedOperationStatus(
+  queueId: string,
+  status: "queued" | "executing" | "completed" | "failed" | "cancelled",
+  error?: string
+): void {
+  if (status === "executing") {
+    db.prepare(
+      "UPDATE file_operation_queue SET status = ?, started_at = datetime('now') WHERE id = ?"
+    ).run(status, queueId);
+  } else if (status === "completed" || status === "failed" || status === "cancelled") {
+    db.prepare(
+      "UPDATE file_operation_queue SET status = ?, completed_at = datetime('now'), error = ? WHERE id = ?"
+    ).run(status, error ?? null, queueId);
+  } else {
+    db.prepare("UPDATE file_operation_queue SET status = ? WHERE id = ?").run(status, queueId);
+  }
+}
+
+/**
+ * Get all queued operations for a session
+ */
+export function getSessionQueuedOps(sessionId: string): QueuedOperation[] {
+  return db.prepare(
+    `SELECT id, file_path, session_id, user_email, tool_name, tool_call_id, tool_input,
+            queued_at, status, started_at, completed_at, error
+     FROM file_operation_queue
+     WHERE session_id = ? AND status IN ('queued', 'executing')
+     ORDER BY queued_at ASC`
+  ).all(sessionId) as QueuedOperation[];
+}
+
+/**
+ * Get a queued operation by ID
+ */
+export function getQueuedOperation(queueId: string): QueuedOperation | null {
+  const result = db.prepare(
+    `SELECT id, file_path, session_id, user_email, tool_name, tool_call_id, tool_input,
+            queued_at, status, started_at, completed_at, error
+     FROM file_operation_queue
+     WHERE id = ?`
+  ).get(queueId);
+  return result as QueuedOperation | null;
+}
+
+/**
+ * Cancel a queued operation
+ */
+export function cancelQueuedOperation(queueId: string): boolean {
+  const result = db.prepare(
+    "UPDATE file_operation_queue SET status = 'cancelled', completed_at = datetime('now') WHERE id = ? AND status = 'queued'"
+  ).run(queueId);
+  return result.changes > 0;
+}
+
+/**
+ * Cancel all queued operations for a session
+ */
+export function cancelSessionQueuedOps(sessionId: string): void {
+  db.prepare(
+    "UPDATE file_operation_queue SET status = 'cancelled', completed_at = datetime('now') WHERE session_id = ? AND status = 'queued'"
+  ).run(sessionId);
+}
+
+/**
+ * Get the queue position for a specific operation
+ */
+export function getQueuePosition(filePath: string, queueId: string): number {
+  const result = db.prepare(
+    `SELECT COUNT(*) as position
+     FROM file_operation_queue
+     WHERE file_path = ? AND status = 'queued' AND queued_at < (
+       SELECT queued_at FROM file_operation_queue WHERE id = ?
+     )`
+  ).get(filePath, queueId) as { position: number };
+  return result.position + 1; // +1 because count starts at 0
+}
+
+/**
+ * Get queue length for a file
+ */
+export function getQueueLength(filePath: string): number {
+  const result = db.prepare(
+    "SELECT COUNT(*) as count FROM file_operation_queue WHERE file_path = ? AND status = 'queued'"
+  ).get(filePath) as { count: number };
+  return result.count;
+}
+
+/**
+ * Get all active locks (for admin dashboard)
+ */
+export function getAllActiveLocks(): FileLock[] {
+  return db.prepare(
+    "SELECT file_path, session_id, user_email, tool_name, tool_call_id, locked_at FROM file_locks ORDER BY locked_at DESC"
+  ).all() as FileLock[];
+}
+
+/**
+ * Get all queued operations (for admin dashboard)
+ */
+export function getAllQueuedOperations(): QueuedOperation[] {
+  return db.prepare(
+    `SELECT id, file_path, session_id, user_email, tool_name, tool_call_id, tool_input,
+            queued_at, status, started_at, completed_at, error
+     FROM file_operation_queue
+     WHERE status IN ('queued', 'executing')
+     ORDER BY queued_at ASC`
+  ).all() as QueuedOperation[];
+}

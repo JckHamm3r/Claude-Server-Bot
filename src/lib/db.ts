@@ -203,6 +203,11 @@ const defaultAppSettings: Record<string, string> = {
   budget_limit_daily_usd: "0",
   budget_limit_monthly_usd: "0",
   message_retention_days: "0",
+  // File lock settings
+  file_lock_enabled: "true",
+  file_lock_timeout_minutes: "5",
+  file_lock_queue_max_size: "50",
+  file_lock_cleanup_interval_seconds: "60",
 };
 const insertSetting = db.prepare(
   "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)"
@@ -373,6 +378,38 @@ const migrations: Record<number, () => void> = {
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
       CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at DESC);
+    `);
+  },
+  3: () => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS file_locks (
+        file_path TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        user_email TEXT NOT NULL,
+        tool_name TEXT NOT NULL,
+        tool_call_id TEXT NOT NULL,
+        locked_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS file_operation_queue (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        file_path TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        user_email TEXT NOT NULL,
+        tool_name TEXT NOT NULL,
+        tool_call_id TEXT NOT NULL,
+        tool_input TEXT NOT NULL,
+        queued_at TEXT NOT NULL DEFAULT (datetime('now')),
+        status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued', 'executing', 'completed', 'failed', 'cancelled')),
+        started_at TEXT,
+        completed_at TEXT,
+        error TEXT,
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_queue_file_status ON file_operation_queue(file_path, status);
+      CREATE INDEX IF NOT EXISTS idx_queue_session ON file_operation_queue(session_id);
     `);
   },
 };
