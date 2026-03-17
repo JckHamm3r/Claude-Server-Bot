@@ -54,3 +54,4 @@ Desktop.ini
 # Test artifacts
 coverage/
 .nyc_output/
+certs/
