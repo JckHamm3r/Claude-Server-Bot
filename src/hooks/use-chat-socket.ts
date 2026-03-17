@@ -66,6 +66,15 @@ function finalizeRunningTools(msgs: ChatMessage[]): ChatMessage[] {
   return changed ? result : msgs;
 }
 
+function findLastStreamingId(msgs: ChatMessage[]): string | null {
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    if (m.sender_type === "claude" && m.parsed?.type === "streaming") return m.id;
+    if (m.sender_type === "admin") break;
+  }
+  return null;
+}
+
 // ── Named constants ──────────────────────────────────────────────────────────
 
 const WATCHDOG_POLL_MS = 15_000;
@@ -530,9 +539,10 @@ export function useChatSocket({
             // Finalize any streaming message into a "text" type so it
             // gets the usage badge and timestamp footer in the UI.
             let resolved = finalizeRunningTools(prev);
-            if (streamId) {
+            const targetId = streamId ?? findLastStreamingId(resolved);
+            if (targetId) {
               resolved = resolved.map((m) =>
-                m.id === streamId && m.parsed?.type === "streaming"
+                m.id === targetId && m.parsed?.type === "streaming"
                   ? { ...m, parsed: { ...m.parsed, type: "text" } }
                   : m,
               );
@@ -628,12 +638,24 @@ export function useChatSocket({
           return;
         }
 
-        setIsRunning(parsed.type !== "error");
         if (parsed.type === "error") {
+          setIsRunning(false);
           setHasError(true);
           setCurrentActivity(null);
-          setMessages((prev) => finalizeRunningTools(prev));
+          setMessages((prev) => [
+            ...finalizeRunningTools(prev),
+            {
+              id: crypto.randomUUID(),
+              sender_type: "claude" as const,
+              parsed,
+              content: parsed.message ?? "",
+              timestamp: new Date().toISOString(),
+            },
+          ]);
+          return;
         }
+
+        setIsRunning(true);
 
         if (parsed.type === "options" || parsed.type === "confirm" || parsed.type === "permission_request" || parsed.type === "user_question") {
           const interactionId = crypto.randomUUID();
@@ -667,6 +689,18 @@ export function useChatSocket({
                 return updated;
               }
             }
+            // Ref was lost (e.g. reconnect cleared it) — find the last
+            // Claude streaming message and update it to avoid duplicates.
+            for (let i = prev.length - 1; i >= 0; i--) {
+              const m = prev[i];
+              if (m.sender_type === "claude" && m.parsed?.type === "streaming") {
+                streamingMsgIdRef.current = m.id;
+                const updated = [...prev];
+                updated[i] = { ...m, content: parsed.content ?? "", parsed };
+                return updated;
+              }
+              if (m.sender_type === "admin") break;
+            }
             const newId = crypto.randomUUID();
             streamingMsgIdRef.current = newId;
             return [
@@ -687,11 +721,19 @@ export function useChatSocket({
           const refId = streamingMsgIdRef.current;
           let idx = refId ? prev.findIndex((m) => m.id === refId) : -1;
           if (idx < 0 && parsed.type === "text" && parsed.content) {
+            const incoming = parsed.content;
             for (let i = prev.length - 1; i >= 0; i--) {
               const m = prev[i];
-              if (m.sender_type === "claude" && (m.parsed?.type === "streaming" || m.parsed?.type === "text") && m.content === parsed.content) {
-                idx = i;
-                break;
+              if (m.sender_type === "admin") break;
+              if (
+                m.sender_type === "claude" &&
+                (m.parsed?.type === "streaming" || m.parsed?.type === "text") &&
+                m.content
+              ) {
+                if (m.content === incoming || incoming.startsWith(m.content)) {
+                  idx = i;
+                  break;
+                }
               }
             }
           }
