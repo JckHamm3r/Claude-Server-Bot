@@ -23,9 +23,9 @@ import {
   getQueueLength,
   type FileLock,
   type QueuedOperation,
+  getUser,
 } from "./claude-db";
 import { extractFilePaths } from "./file-path-extractor";
-import { getUser } from "./claude-db";
 import { getAppSetting } from "./app-settings";
 
 // Global event emitter for lock events

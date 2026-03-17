@@ -795,6 +795,29 @@ export function searchSessionMessages(sessionId: string, query: string, limit = 
   }
 }
 
+// ==================== USER HELPERS ====================
+
+export interface DbUser {
+  email: string;
+  is_admin: number;
+  first_name: string;
+  last_name: string;
+  avatar_url: string | null;
+  must_change_password: number;
+  created_at: string;
+}
+
+export function getUser(email: string): DbUser | null {
+  try {
+    const row = db
+      .prepare("SELECT email, is_admin, first_name, last_name, avatar_url, must_change_password, created_at FROM users WHERE email = ?")
+      .get(email) as DbUser | undefined;
+    return row ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // ==================== SESSION ACCESS CONTROL ====================
 
 export function isUserAdmin(email: string): boolean {
