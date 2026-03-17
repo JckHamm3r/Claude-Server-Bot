@@ -29,6 +29,7 @@ Octoby AI platform: Next.js 14 App Router + custom Socket.IO server + SQLite. Po
 | `.claude/docs/security.md` | Guard rails, command sandbox, IP protection — toggles and config keys |
 | `.claude/docs/api-routes.md` | All API route paths and their purpose |
 | `.claude/docs/ui-and-styling.md` | Tailwind theme variables, component list, chat widget embed instructions |
+| `.claude/docs/sub-agent-delegation-plan.md` | Design analysis and clarifying questions for sub-agent delegation feature |
 
 Read the relevant doc file when you need detail on a specific area. Do not guess — look it up.
 
