@@ -1,4 +1,4 @@
-import { getAppSetting } from "./app-settings";
+import { getAppSettingSync } from "./app-settings";
 import { dbGet, dbAll, dbRun } from "./db";
 
 // source_type values:
@@ -171,7 +171,7 @@ export function extractIP(
   headers: Record<string, string | string[] | undefined>,
   remoteAddress?: string
 ): string {
-  const trustedProxy = getAppSetting("trusted_proxy", "false") === "true";
+  const trustedProxy = getAppSettingSync("trusted_proxy", "false") === "true";
 
   if (trustedProxy) {
     const realIp = headers["x-real-ip"];
@@ -189,10 +189,10 @@ export function extractIP(
 
 export function getIPProtectionSettings() {
   return {
-    enabled: getAppSetting("ip_protection_enabled", "true") === "true",
-    maxAttempts: parseInt(getAppSetting("ip_max_attempts", "5"), 10),
-    windowMinutes: parseInt(getAppSetting("ip_window_minutes", "10"), 10),
-    blockDurationMinutes: parseInt(getAppSetting("ip_block_duration_minutes", "60"), 10),
+    enabled: getAppSettingSync("ip_protection_enabled", "true") === "true",
+    maxAttempts: parseInt(getAppSettingSync("ip_max_attempts", "5"), 10),
+    windowMinutes: parseInt(getAppSettingSync("ip_window_minutes", "10"), 10),
+    blockDurationMinutes: parseInt(getAppSettingSync("ip_block_duration_minutes", "60"), 10),
   };
 }
 
@@ -200,10 +200,10 @@ export function getIPProtectionSettings() {
 
 export function getApiAbuseSettings() {
   return {
-    enabled: getAppSetting("api_abuse_protection_enabled", "true") === "true",
-    maxRequests: parseInt(getAppSetting("api_abuse_max_requests", "200"), 10),
-    windowSeconds: parseInt(getAppSetting("api_abuse_window_seconds", "60"), 10),
-    blockMinutes: parseInt(getAppSetting("api_abuse_block_minutes", "30"), 10),
+    enabled: getAppSettingSync("api_abuse_protection_enabled", "true") === "true",
+    maxRequests: parseInt(getAppSettingSync("api_abuse_max_requests", "200"), 10),
+    windowSeconds: parseInt(getAppSettingSync("api_abuse_window_seconds", "60"), 10),
+    blockMinutes: parseInt(getAppSettingSync("api_abuse_block_minutes", "30"), 10),
   };
 }
 

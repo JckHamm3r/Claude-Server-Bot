@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
   const token = await requireAdmin(req);
   if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
 
-  const key = getAppSetting("anthropic_api_key", "");
+  const key = await getAppSetting("anthropic_api_key", "");
   // Return masked key for display
   const masked = key ? key.slice(0, 7) + "..." + key.slice(-4) : "";
   return NextResponse.json({ hasKey: !!key, maskedKey: masked });

@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const agents = getActiveAgents().map((a) => ({
+  const agents = (await getActiveAgents()).map((a) => ({
     name: a.name,
     description: a.description,
     icon: a.icon,

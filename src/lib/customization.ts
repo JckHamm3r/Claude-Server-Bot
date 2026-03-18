@@ -368,11 +368,14 @@ Each transformer directory contains:
    Entry file: handler.js
    Mounted at: /api/x/<id>/
    Export a default function: module.exports = function(req, res) { ... }
+   Read-only DB access: const { getSessionStats, queryReadonly } = require('${BOT_INSTALL_DIR}/src/lib/transformer-db');
 
 4. **hook** — Lifecycle event handlers
    Entry file: hooks.js
    Supported events: session:created, session:ended, message:sent, message:received, tool:executed
-   Export handlers: module.exports = { "session:created": async (data) => { ... } }
+   Export a register function: module.exports = function(events) { events.on('session:created', async (data) => { ... }); }
+   Read-only DB access: const { getSessionStats, queryReadonly } = require('${BOT_INSTALL_DIR}/src/lib/transformer-db');
+   Available DB helpers: getSessionStats(), getMessagesBySession(sessionId), getUserList(), queryReadonly(sql, params)
 
 5. **static** — Static file serving
    Entry directory: assets/
@@ -443,7 +446,9 @@ e) After each subsequent edit, commit the changes:
    git add -A && git commit -m "<description of change>"
 
 f) When finished, announce:
-   ✅ Transformer '<name>' created. Enable it from the Transformer gallery in Settings.`,
+   ✅ Transformer '<name>' created. Enable it from the Transformer gallery in Settings.
+
+STARTER TEMPLATES: Reference implementations are available at ${BOT_INSTALL_DIR}/data/starter-transformers/ — you can copy and modify these as a starting point.`,
 
     `🚨 FINAL REMINDER — CONSTRAINT ENFORCEMENT
 

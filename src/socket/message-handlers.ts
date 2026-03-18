@@ -25,6 +25,7 @@ import { checkBotConfigRequest } from "../lib/security-guard";
 import { dispatchNotification } from "../lib/notifications";
 import { runSubAgent } from "../lib/sub-agent-runner";
 import { buildSystemPrompt } from "../lib/system-prompt";
+import { transformerEvents } from "../lib/transformer-events";
 
 // Per-session AI chat pause state
 const aiPausedSessions = new Map<string, { paused: boolean; pausedAt: string | null; pausedBy: string | null }>();
@@ -421,7 +422,10 @@ export function registerMessageHandlers(ctx: HandlerContext) {
           await saveMessage(sessionId, "admin", content, email, "chat");
         }
 
-        // When AI is paused, save the message but don't forward to Claude.
+        // Emit lifecycle event for hook transformers
+        try {
+          transformerEvents.emit("message:sent", { sessionId, content, senderId: email });
+        } catch { /* hook errors must not affect message flow */ }
         // Broadcast it to other participants so everyone sees it in real time.
         if (isAiPaused(sessionId)) {
           io.to(`session:${sessionId}`).emit("claude:chat_broadcast", {

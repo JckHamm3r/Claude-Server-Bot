@@ -790,7 +790,7 @@ export function registerHandlers(io: Server) {
     registerJobHandlers(ctx);
     // File lock handlers
     socket.on("file:cancel_queued_operation", async ({ queueId }: { queueId: string }) => {
-      const cancelled = cancelQueuedOperation(queueId, email);
+      const cancelled = await cancelQueuedOperation(queueId, email);
       if (cancelled) {
         console.log(`[file-lock] User ${email} cancelled queued operation: ${queueId}`);
       }
@@ -798,7 +798,7 @@ export function registerHandlers(io: Server) {
 
     socket.on("file:get_queue_status", async ({ sessionId }: { sessionId: string }, callback: (data: unknown) => void) => {
       try {
-        const operations = getSessionQueuedOperations(sessionId);
+        const operations = await getSessionQueuedOperations(sessionId);
         callback({ success: true, operations });
       } catch (err) {
         console.error("[file-lock] Error getting queue status:", err);

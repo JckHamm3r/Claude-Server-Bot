@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
 
   // Build partial update
   const updates: string[] = ["updated_at = datetime('now')"];
-  const params: unknown[] = [];
+  const params: import("@libsql/client").InValue[] = [];
 
   if (name !== undefined) {
     updates.push("name = ?");

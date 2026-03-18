@@ -627,7 +627,7 @@ export function DomainsSection() {
           <button
             onClick={() =>
               openAiHelpSession({
-                hostname: newHostname.trim() || domains.find((d) => !d.verified)?.hostname ?? "your domain",
+                hostname: (newHostname.trim() || domains.find((d) => !d.verified)?.hostname) ?? "your domain",
                 serverIp: dnsCheck?.server_ip ?? null,
                 dnsCheck,
                 setupError,

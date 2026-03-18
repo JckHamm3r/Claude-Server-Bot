@@ -10,7 +10,7 @@ async function checkAdmin(): Promise<{ error: NextResponse } | { email: string }
   if (!session?.user?.email) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  if (!isUserAdmin(session.user.email)) {
+  if (!(await isUserAdmin(session.user.email))) {
     return { error: NextResponse.json({ error: "Forbidden — admin only" }, { status: 403 }) };
   }
   return { email: session.user.email };
@@ -20,7 +20,7 @@ export async function GET() {
   const auth = await checkAdmin();
   if ("error" in auth) return auth.error;
 
-  const jobs = listJobs();
+  const jobs = await listJobs();
   return NextResponse.json({ jobs });
 }
 
@@ -38,18 +38,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "name, script_path, and schedule are required" }, { status: 400 });
     }
 
-    const job = createJob({
+    const job = await createJob({
       name, description, script_path, schedule, schedule_display, working_directory,
       environment, max_retries, timeout_seconds, auto_disable_after,
       notify_on_failure, notify_on_success, tags, ai_generated,
     }, auth.email);
 
-    const result = installJob(job.id);
+    const result = await installJob(job.id);
     if (!result.ok) {
       return NextResponse.json({ job, warning: `Job created but systemd install failed: ${result.error}` });
     }
 
-    logActivity("job_created" as never, auth.email, { jobId: job.id, name: job.name });
+    await logActivity("job_created" as never, auth.email, { jobId: job.id, name: job.name });
 
     return NextResponse.json({ job }, { status: 201 });
   } catch (err) {

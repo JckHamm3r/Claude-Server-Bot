@@ -1,4 +1,4 @@
-import { getAppSetting } from "./app-settings";
+import { getAppSettingSync } from "./app-settings";
 
 export const SAFE_COMMANDS = [
   "ls", "cat", "echo", "grep", "find", "git", "node", "npm", "npx", "pnpm",
@@ -249,7 +249,7 @@ function classifySingleCommand(normalized: string, originalDisplay: string): Cla
 
   // Check custom always-blocked patterns
   try {
-    const alwaysBlocked: string[] = JSON.parse(getAppSetting("sandbox_always_blocked", "[]"));
+    const alwaysBlocked: string[] = JSON.parse(getAppSettingSync("sandbox_always_blocked", "[]"));
     for (const pattern of alwaysBlocked) {
       if (normalized.includes(pattern.toLowerCase().trim())) {
         return {
@@ -336,7 +336,7 @@ export function classifyCommand(
 
   // Check always-allowed whitelist (S2-03: runs after dangerous check)
   try {
-    const alwaysAllowed: string[] = JSON.parse(getAppSetting("sandbox_always_allowed", "[]"));
+    const alwaysAllowed: string[] = JSON.parse(getAppSettingSync("sandbox_always_allowed", "[]"));
     for (const pattern of alwaysAllowed) {
       const lp = pattern.toLowerCase().trim();
       if (normalized === lp || normalized.startsWith(lp + " ")) {
@@ -380,7 +380,7 @@ export function classifyCommand(
 
   // Check custom always-blocked patterns
   try {
-    const alwaysBlocked: string[] = JSON.parse(getAppSetting("sandbox_always_blocked", "[]"));
+    const alwaysBlocked: string[] = JSON.parse(getAppSettingSync("sandbox_always_blocked", "[]"));
     for (const pattern of alwaysBlocked) {
       if (normalized.includes(pattern.toLowerCase().trim())) {
         return {
@@ -425,5 +425,5 @@ export function classifyCommand(
 }
 
 export function isSandboxEnabled(): boolean {
-  return getAppSetting("sandbox_enabled", "true") === "true";
+  return getAppSettingSync("sandbox_enabled", "true") === "true";
 }

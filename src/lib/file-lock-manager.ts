@@ -26,7 +26,7 @@ import {
   getUser,
 } from "./claude-db";
 import { extractFilePaths } from "./file-path-extractor";
-import { getAppSetting } from "./app-settings";
+import { getAppSettingSync as getAppSetting } from "./app-settings";
 
 // Global event emitter for lock events
 export const lockEventEmitter = new EventEmitter();
@@ -98,7 +98,7 @@ export async function acquireLock(
   }
 
   // Try to create the lock
-  const lockCreated = createFileLock(sessionId, userEmail, toolName, toolCallId, filePath);
+  const lockCreated = await createFileLock(sessionId, userEmail, toolName, toolCallId, filePath);
 
   if (lockCreated) {
     console.log(`[file-lock] Lock acquired: ${filePath} by ${userEmail} (session: ${sessionId})`);
@@ -106,11 +106,11 @@ export async function acquireLock(
   }
 
   // Lock already exists, get the current lock holder
-  const existingLock = getFileLock(filePath);
+  const existingLock = await getFileLock(filePath);
   if (!existingLock) {
     // Race condition: lock was released between our attempt and now
     // Try again
-    const retryLock = createFileLock(sessionId, userEmail, toolName, toolCallId, filePath);
+    const retryLock = await createFileLock(sessionId, userEmail, toolName, toolCallId, filePath);
     if (retryLock) {
       return { acquired: true };
     }
@@ -124,7 +124,7 @@ export async function acquireLock(
   };
 
   if (existingLock) {
-    const lockHolder = getUser(existingLock.user_email);
+    const lockHolder = await getUser(existingLock.user_email);
     if (lockHolder) {
       lockedBy.userName = `${lockHolder.first_name || ""} ${lockHolder.last_name || ""}`.trim() || lockHolder.email;
     }
@@ -135,7 +135,7 @@ export async function acquireLock(
 
   return {
     acquired: false,
-    queuePosition: getQueueLength(filePath) + 1, // Current queue length + this new item
+    queuePosition: await getQueueLength(filePath) + 1, // Current queue length + this new item
     lockedBy,
   };
 }
@@ -151,7 +151,7 @@ export async function queueOperation(
   toolInput: Record<string, unknown>,
   filePath: string
 ): Promise<string> {
-  const queueId = createQueuedOperation({
+  const queueId = await createQueuedOperation({
     filePath,
     sessionId,
     userEmail,
@@ -160,7 +160,7 @@ export async function queueOperation(
     toolInput: JSON.stringify(toolInput),
   });
 
-  const position = getQueuePosition(filePath, queueId);
+  const position = await getQueuePosition(filePath, queueId);
 
   console.log(`[file-lock] Operation queued: ${filePath} by ${userEmail} (position: ${position}, queue ID: ${queueId})`);
 
@@ -183,7 +183,7 @@ export async function queueOperation(
  */
 export async function releaseLock(filePath: string, toolCallId: string): Promise<void> {
   // Remove the lock
-  removeFileLock(filePath, toolCallId);
+  await removeFileLock(filePath, toolCallId);
 
   console.log(`[file-lock] Lock released: ${filePath} (tool call: ${toolCallId})`);
 
@@ -194,16 +194,16 @@ export async function releaseLock(filePath: string, toolCallId: string): Promise
   });
 
   // Check if there are queued operations for this file
-  const nextOp = getNextQueuedOperation(filePath);
+  const nextOp = await getNextQueuedOperation(filePath);
 
   if (nextOp) {
     console.log(`[file-lock] Processing next queued operation for: ${filePath} (queue ID: ${nextOp.id})`);
 
     // Update status to executing
-    updateQueuedOperationStatus(nextOp.id, "executing");
+    await updateQueuedOperationStatus(nextOp.id, "executing");
 
     // Acquire the lock for the queued operation
-    const lockAcquired = createFileLock(
+    const lockAcquired = await createFileLock(
       nextOp.session_id,
       nextOp.user_email,
       nextOp.tool_name,
@@ -214,7 +214,7 @@ export async function releaseLock(filePath: string, toolCallId: string): Promise
     if (!lockAcquired) {
       // This shouldn't happen, but handle it
       console.error(`[file-lock] Failed to acquire lock for queued operation: ${nextOp.id}`);
-      updateQueuedOperationStatus(nextOp.id, "failed", "Failed to acquire lock");
+      await updateQueuedOperationStatus(nextOp.id, "failed", "Failed to acquire lock");
       return;
     }
 
@@ -235,7 +235,7 @@ export async function releaseLock(filePath: string, toolCallId: string): Promise
  * Release all locks for a session
  */
 export async function releaseAllSessionLocks(sessionId: string): Promise<void> {
-  const locks = getSessionLocks(sessionId);
+  const locks = await getSessionLocks(sessionId);
 
   console.log(`[file-lock] Releasing ${locks.length} lock(s) for session: ${sessionId}`);
 
@@ -248,8 +248,8 @@ export async function releaseAllSessionLocks(sessionId: string): Promise<void> {
 /**
  * Cancel a queued operation
  */
-export function cancelQueuedOperation(queueId: string, userEmail: string): boolean {
-  const operation = getQueuedOperation(queueId);
+export async function cancelQueuedOperation(queueId: string, userEmail: string): Promise<boolean> {
+  const operation = await getQueuedOperation(queueId);
 
   if (!operation) {
     return false;
@@ -257,14 +257,14 @@ export function cancelQueuedOperation(queueId: string, userEmail: string): boole
 
   // Check if user has permission to cancel (must be the owner or admin)
   if (operation.user_email !== userEmail) {
-    const user = getUser(userEmail);
+    const user = await getUser(userEmail);
     if (!user?.is_admin) {
       console.log(`[file-lock] User ${userEmail} not authorized to cancel queue ID: ${queueId}`);
       return false;
     }
   }
 
-  const cancelled = dbCancelQueuedOperation(queueId);
+  const cancelled = await dbCancelQueuedOperation(queueId);
 
   if (cancelled) {
     console.log(`[file-lock] Operation cancelled: ${queueId} by ${userEmail}`);
@@ -285,11 +285,11 @@ export function cancelQueuedOperation(queueId: string, userEmail: string): boole
 /**
  * Cancel all queued operations for a session
  */
-export function cancelAllSessionQueuedOps(sessionId: string): void {
-  const operations = getSessionQueuedOps(sessionId);
+export async function cancelAllSessionQueuedOps(sessionId: string): Promise<void> {
+  const operations = await getSessionQueuedOps(sessionId);
   console.log(`[file-lock] Cancelling ${operations.length} queued operation(s) for session: ${sessionId}`);
 
-  cancelSessionQueuedOps(sessionId);
+  await cancelSessionQueuedOps(sessionId);
 
   // Emit cancellation events
   for (const op of operations) {
@@ -306,13 +306,13 @@ export function cancelAllSessionQueuedOps(sessionId: string): void {
 /**
  * Get file lock status
  */
-export function getFileLockStatus(filePath: string): {
+export async function getFileLockStatus(filePath: string): Promise<{
   locked: boolean;
   lock?: FileLock;
   queueLength: number;
-} {
-  const lock = getFileLock(filePath);
-  const queueLength = getQueueLength(filePath);
+}> {
+  const lock = await getFileLock(filePath);
+  const queueLength = await getQueueLength(filePath);
 
   return {
     locked: lock !== null,
@@ -324,7 +324,7 @@ export function getFileLockStatus(filePath: string): {
 /**
  * Get all queued operations for a session
  */
-export function getSessionQueuedOperations(sessionId: string): QueuedOperation[] {
+export async function getSessionQueuedOperations(sessionId: string): Promise<QueuedOperation[]> {
   return getSessionQueuedOps(sessionId);
 }
 
@@ -333,19 +333,21 @@ export function getSessionQueuedOperations(sessionId: string): QueuedOperation[]
  */
 export function cleanupStaleLocks(): void {
   const timeoutMinutes = parseInt(getAppSetting("file_lock_timeout_minutes", "5"), 10);
-  const staleLocks = removeStaleLocks(timeoutMinutes);
+  removeStaleLocks(timeoutMinutes).then((staleLocks) => {
+    if (staleLocks.length > 0) {
+      console.log(`[file-lock] Cleaned up ${staleLocks.length} stale lock(s)`);
 
-  if (staleLocks.length > 0) {
-    console.log(`[file-lock] Cleaned up ${staleLocks.length} stale lock(s)`);
-
-    // Process queues for affected files
-    for (const lock of staleLocks) {
-      // Don't await here - let them process asynchronously
-      releaseLock(lock.file_path, lock.tool_call_id).catch((err) => {
-        console.error(`[file-lock] Error processing queue after stale lock cleanup:`, err);
-      });
+      // Process queues for affected files
+      for (const lock of staleLocks) {
+        // Don't await here - let them process asynchronously
+        releaseLock(lock.file_path, lock.tool_call_id).catch((err) => {
+          console.error(`[file-lock] Error processing queue after stale lock cleanup:`, err);
+        });
+      }
     }
-  }
+  }).catch((err) => {
+    console.error(`[file-lock] Error during stale lock cleanup:`, err);
+  });
 }
 
 /**

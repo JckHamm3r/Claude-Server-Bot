@@ -23,6 +23,38 @@ const KNOWN_SETTING_KEYS = [
   "message_retention_days",
 ];
 
+// In-memory settings cache for sync access (populated by warmSettingsCache)
+const settingsCache = new Map<string, string>();
+
+/**
+ * Pre-populate the in-memory cache for all known keys.
+ * Call once at server startup (after initDb) so that getAppSettingSync works.
+ */
+export async function warmSettingsCache(): Promise<void> {
+  for (const key of KNOWN_SETTING_KEYS) {
+    try {
+      const row = await dbGet<{ value: string }>(
+        "SELECT value FROM app_settings WHERE key = ?",
+        [key]
+      );
+      if (row?.value !== undefined) {
+        settingsCache.set(key, row.value);
+      }
+    } catch {
+      // ignore; sync callers will use their defaultValue
+    }
+  }
+}
+
+/**
+ * Synchronous settings read from in-memory cache.
+ * Falls back to `defaultValue` if the key is not cached.
+ * Use this only in code paths that cannot be made async (e.g., command-sandbox classifiers).
+ */
+export function getAppSettingSync(key: string, defaultValue = ""): string {
+  return settingsCache.get(key) ?? defaultValue;
+}
+
 /**
  * Returns a setting value from the database, falling back to `defaultValue`
  * on any error (DB unavailable, corrupt row, etc.).
@@ -40,12 +72,17 @@ export async function getAppSetting(key: string, defaultValue = ""): Promise<str
       "SELECT value FROM app_settings WHERE key = ?",
       [key]
     );
-    return row?.value ?? defaultValue;
+    const value = row?.value ?? defaultValue;
+    settingsCache.set(key, value);
+    return value;
   } catch {
     return defaultValue;
   }
 }
 
+/**
+ * Update both DB and cache atomically.
+ */
 export async function setAppSetting(key: string, value: string): Promise<void> {
   if (!KNOWN_SETTING_KEYS.includes(key)) {
     console.warn(
@@ -59,6 +96,7 @@ export async function setAppSetting(key: string, value: string): Promise<void> {
     "INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = datetime('now')",
     [key, value, value]
   );
+  settingsCache.set(key, value);
 }
 
 const PERSONALITY_PROMPTS: Record<string, string> = {

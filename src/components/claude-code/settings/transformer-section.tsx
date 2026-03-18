@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   Sparkles,
   Palette,
@@ -17,6 +17,41 @@ import { cn, apiUrl } from "@/lib/utils";
 import type { TransformerRecord, TransformerType } from "@/lib/transformer-types";
 import { TransformerCard } from "./transformer-card";
 import { CustomizationSection } from "./customization-section";
+
+/** Polls theme.css endpoint every 3s when mounted and injects changes live. */
+function ThemePreviewWatcher() {
+  const styleRef = useRef<HTMLStyleElement | null>(null);
+  const lastCssRef = useRef<string>("");
+
+  useEffect(() => {
+    const tag = document.createElement("style");
+    tag.setAttribute("data-transformer-preview", "true");
+    document.head.appendChild(tag);
+    styleRef.current = tag;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(apiUrl("/api/transformers/theme.css"), { cache: "no-store" });
+        if (res.ok) {
+          const css = await res.text();
+          if (css !== lastCssRef.current) {
+            lastCssRef.current = css;
+            if (styleRef.current) styleRef.current.textContent = css;
+          }
+        }
+      } catch { /* ignore */ }
+    };
+
+    poll();
+    const interval = setInterval(poll, 3000);
+    return () => {
+      clearInterval(interval);
+      styleRef.current?.remove();
+    };
+  }, []);
+
+  return null;
+}
 
 type View = "gallery" | "chat";
 
@@ -78,8 +113,9 @@ export function TransformerSection() {
     try {
       const res = await fetch(apiUrl("/api/transformers"));
       if (res.ok) {
-        const data = (await res.json()) as TransformerRecord[];
-        setTransformers(data);
+        const data = await res.json() as { transformers?: TransformerRecord[] } | TransformerRecord[];
+        const list = Array.isArray(data) ? data : (data as { transformers?: TransformerRecord[] }).transformers ?? [];
+        setTransformers(list);
       }
     } finally {
       setLoading(false);
@@ -124,6 +160,7 @@ export function TransformerSection() {
   if (view === "chat") {
     return (
       <div className="flex flex-col h-full">
+        <ThemePreviewWatcher />
         <div className="shrink-0 mb-3">
           <button
             onClick={goBack}

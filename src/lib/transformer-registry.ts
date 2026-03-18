@@ -72,6 +72,11 @@ function gitCommit(dirPath: string, message: string) {
 }
 
 class TransformerRegistry {
+  getTransformersDir(): string {
+    ensureTransformersDir();
+    return TRANSFORMERS_DIR;
+  }
+
   listTransformers(): TransformerRecord[] {
     ensureTransformersDir();
     const entries = fs.readdirSync(TRANSFORMERS_DIR, { withFileTypes: true });

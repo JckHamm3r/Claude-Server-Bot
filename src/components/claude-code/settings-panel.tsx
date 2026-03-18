@@ -41,6 +41,7 @@ import {
   Archive,
   ScrollText,
   ShieldCheck,
+  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 
@@ -57,7 +58,6 @@ import { SecretsSection } from "@/components/claude-code/settings/secrets-sectio
 import { UserManagementSection } from "@/components/claude-code/settings/user-management-section";
 import { UserGroupsSection } from "@/components/claude-code/settings/user-groups-section";
 import SecurityGroupsSection from "@/components/claude-code/settings/security-groups-section";
-import { CustomizationSection } from "@/components/claude-code/settings/customization-section";
 import { useUserProfile, invalidateProfileCache } from "@/hooks/use-user-profile";
 
 type SectionKey =
@@ -441,7 +441,7 @@ export function SettingsPanel() {
       label: "Bot",
       sections: [
         { key: "bot_identity", label: "Bot Identity", icon: Bot },
-        { key: "customization", label: "Customization", icon: Palette },
+        { key: "transformer", label: "Transformer", icon: Sparkles },
         { key: "templates", label: "Templates", icon: FileText },
       ],
     },
@@ -607,7 +607,7 @@ export function SettingsPanel() {
       </div>
 
       {/* Content */}
-      <div className={activeSection === "customization"
+      <div className={activeSection === "transformer"
         ? "flex-1 overflow-hidden p-6 flex flex-col"
         : "flex-1 overflow-y-auto p-8 pb-12 space-y-6"}>
 
@@ -720,8 +720,6 @@ export function SettingsPanel() {
           </div>
         )}
 
-        {/* ── Customization ── */}
-        {activeSection === "customization" && <CustomizationSection />}
 
         {/* ── Rate Limits ── */}
         {activeSection === "rate_limits" && (

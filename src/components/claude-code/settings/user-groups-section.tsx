@@ -953,7 +953,7 @@ function PlatformTab({
 }) {
   if (loading) return <p className="text-body text-bot-muted py-4">Loading…</p>;
 
-  const rows: { key: keyof GroupPermissions["platform"]; label: string; desc?: string }[] = [
+  const rows: { key: Exclude<keyof GroupPermissions["platform"], "visible_tabs" | "visible_settings">; label: string; desc?: string }[] = [
     { key: "sessions_create", label: "Create Sessions", desc: "Allow creating new AI sessions" },
     { key: "sessions_view_others", label: "View Others' Sessions", desc: "See sessions created by other users" },
     { key: "sessions_collaborate", label: "Collaborate on Sessions", desc: "Join and interact in others' sessions" },
@@ -1249,7 +1249,7 @@ const ALL_SETTINGS_SECTIONS: { id: string; label: string; group: string }[] = [
   { id: "general", label: "General", group: "User" },
   { id: "notifications", label: "Notifications", group: "User" },
   { id: "bot_identity", label: "Bot Identity", group: "Bot" },
-  { id: "customization", label: "Customization", group: "Bot" },
+  { id: "transformer", label: "Transformer", group: "Bot" },
   { id: "templates", label: "Templates", group: "Bot" },
   { id: "user_management", label: "User Management", group: "Access & Security" },
   { id: "user_groups", label: "User Groups", group: "Access & Security" },

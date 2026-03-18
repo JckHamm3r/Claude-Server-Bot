@@ -20,6 +20,7 @@ import {
 import { cn, apiUrl } from "@/lib/utils";
 import type { TransformerRecord, TransformerType } from "@/lib/transformer-types";
 import { TransformerConfigEditor } from "./transformer-config-editor";
+import { TransformerLogViewer } from "./transformer-log-viewer";
 
 interface TransformerCardProps {
   transformer: TransformerRecord;
@@ -334,6 +335,19 @@ export function TransformerCard({
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Log viewer (api + hook types) */}
+          {(transformer.type === "api" || transformer.type === "hook") && (
+            <div className="space-y-2">
+              <h4 className="text-xs font-semibold text-bot-text uppercase tracking-wide">
+                Logs
+              </h4>
+              <TransformerLogViewer
+                transformerId={transformer.id}
+                transformerName={transformer.name}
+              />
             </div>
           )}
 

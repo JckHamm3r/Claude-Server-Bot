@@ -1,5 +1,5 @@
 import { execSync, exec } from "child_process";
-import { getAppSetting } from "./app-settings";
+import { getAppSettingSync as getAppSetting } from "./app-settings";
 
 export interface Fail2BanStatus {
   available: boolean;

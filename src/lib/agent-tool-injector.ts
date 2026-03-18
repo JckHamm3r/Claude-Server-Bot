@@ -7,8 +7,8 @@ import { randomUUID } from "crypto";
  * Tells Claude about available agents and how to invoke them via the
  * internal sub-agent API using the WebFetch tool.
  */
-export function buildAgentToolBlock(): string {
-  const agents = getActiveAgents();
+export async function buildAgentToolBlock(): Promise<string> {
+  const agents = await getActiveAgents();
   if (agents.length === 0) return "";
 
   const secret = getOrCreateInternalSecret();

@@ -9,14 +9,14 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!isUserAdmin(session.user.email)) {
+  if (!(await isUserAdmin(session.user.email))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const job = getJob(params.id);
+  const job = await getJob(params.id);
   if (!job) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const result = runJobNow(params.id, session.user.email);
+  const result = await runJobNow(params.id, session.user.email);
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: 500 });
   }

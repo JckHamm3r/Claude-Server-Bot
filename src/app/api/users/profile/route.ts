@@ -6,7 +6,7 @@ import { applyProfileToClaudeMd } from "@/lib/user-profile-context";
 export async function GET(req: NextRequest) {
   const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET ?? "" });
   if (!token?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const settings = getUserSettings(token.email as string);
+  const settings = await getUserSettings(token.email as string);
   return NextResponse.json({
     server_purposes: settings.server_purposes,
     project_type: settings.project_type,
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
 
   const email = token.email as string;
 
-  const updated = updateUserSettings(email, {
+  const updated = await updateUserSettings(email, {
     ...(body.server_purposes !== undefined && { server_purposes: body.server_purposes }),
     ...(body.project_type !== undefined && { project_type: body.project_type }),
     ...(body.auto_summary !== undefined && { auto_summary: body.auto_summary }),

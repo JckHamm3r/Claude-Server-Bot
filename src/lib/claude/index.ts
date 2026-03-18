@@ -14,16 +14,7 @@ function getSDKProvider(): ClaudeCodeProvider {
 }
 
 export function isSDKAvailable(): boolean {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const db = (require("../db") as { default: import("better-sqlite3").Database }).default;
-    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'anthropic_api_key'").get() as { value: string } | undefined;
-    const keyFromDB = row?.value ?? "";
-    const keyFromEnv = process.env.ANTHROPIC_API_KEY ?? "";
-    return !!(keyFromDB || keyFromEnv);
-  } catch {
-    return !!process.env.ANTHROPIC_API_KEY;
-  }
+  return !!(process.env.ANTHROPIC_API_KEY);
 }
 
 // SDK is the only provider. _type is accepted for future extensibility but currently unused.

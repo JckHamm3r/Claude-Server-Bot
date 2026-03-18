@@ -376,7 +376,7 @@ const migrations: Record<number, () => Promise<void>> = {
     }
 
     const ALL_SETTINGS = JSON.stringify([
-      "general","notifications","bot_identity","customization","templates",
+      "general","notifications","bot_identity","transformer","templates",
       "user_management","user_groups","security","rate_limits","budgets","api_key","secrets",
       "system","services","service_manager","packages","updates","project",
       "domains","smtp","backup","database","activity_log"

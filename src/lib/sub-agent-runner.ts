@@ -34,7 +34,7 @@ export async function runSubAgent(opts: SubAgentOptions): Promise<SubAgentResult
     };
   }
 
-  const agents = getActiveAgents();
+  const agents = await getActiveAgents();
   const agent = agents.find((a) => a.name.toLowerCase() === opts.agentName.toLowerCase());
   if (!agent) {
     const names = agents.map((a) => `"${a.name}"`).join(", ");
@@ -46,7 +46,7 @@ export async function runSubAgent(opts: SubAgentOptions): Promise<SubAgentResult
     };
   }
 
-  incrementAgentUseCount(agent.id);
+  await incrementAgentUseCount(agent.id);
 
   const provider = getClaudeProvider();
   const subAgentId = randomUUID();
@@ -63,7 +63,7 @@ export async function runSubAgent(opts: SubAgentOptions): Promise<SubAgentResult
     `If you need to delegate a sub-task to another specialized agent, use the delegation mechanism described in your tools.`,
   ];
 
-  const agentMemories = getMemoriesForTarget(agent.id);
+  const agentMemories = await getMemoriesForTarget(agent.id);
   if (agentMemories.length > 0) {
     const memoriesText = agentMemories
       .map((m) => `### ${m.title}\n${m.content}`)

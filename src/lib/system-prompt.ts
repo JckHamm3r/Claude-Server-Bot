@@ -5,6 +5,7 @@ import { getCustomizationSystemPrompt, getBotSelfIdentityPrompt } from "./custom
 import { getSecuritySystemPrompt } from "./security-guard";
 import { getMemoriesForTarget, MAIN_SESSION_TARGET, getSessionContext } from "./claude-db";
 import { buildAgentToolBlock } from "./agent-tool-injector";
+import { transformerRegistry } from "./transformer-registry";
 
 export type InterfaceType = "ui_chat" | "customization_interface" | "system_agent";
 
@@ -201,9 +202,9 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
     systemPrompt = undefined;
   } else {
     const parts: string[] = [];
-    const selfIdentity = getBotSelfIdentityPrompt();
+    const selfIdentity = await getBotSelfIdentityPrompt();
     if (selfIdentity) parts.push(selfIdentity);
-    const personalityPrefix = getPersonalityPrefix(personality ?? "professional", personalityCustom);
+    const personalityPrefix = await getPersonalityPrefix(personality ?? "professional", personalityCustom);
     if (personalityPrefix) parts.push(personalityPrefix);
     const levelInstruction = getExperienceLevelInstruction(communicationStyle, autoSummary);
     if (levelInstruction) parts.push(levelInstruction);
@@ -214,6 +215,31 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
     systemPrompt = systemPrompt
       ? templateSystemPrompt + "\n\n" + systemPrompt
       : templateSystemPrompt;
+  }
+
+  // Inject active prompt transformers for ui_chat sessions
+  if (interfaceType === "ui_chat") {
+    try {
+      const promptTransformers = transformerRegistry
+        .listTransformers()
+        .filter((t) => {
+          if (t.type !== "prompt" || !t.enabled || t.status === "error") return false;
+          const targets = t.promptTargets ?? ["all"];
+          return targets.includes("all") || targets.includes("ui_chat");
+        });
+
+      for (const transformer of promptTransformers) {
+        const entryFile = transformer.entry ?? "prompt.md";
+        const promptPath = path.join(transformer.dirPath, entryFile);
+        try {
+          const content = fs.readFileSync(promptPath, "utf-8").trim();
+          if (content) {
+            const block = `<transformer id="${transformer.id}" name="${transformer.name}">\n${content}\n</transformer>`;
+            systemPrompt = systemPrompt ? systemPrompt + "\n\n" + block : block;
+          }
+        } catch { /* skip unreadable */ }
+      }
+    } catch { /* registry unavailable — skip */ }
   }
 
   // Inject role awareness block (auto-generated from group permissions) + optional custom append
@@ -240,7 +266,7 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
 
   // Append saved memories from the database so Claude has access to
   // project-level knowledge items curated by admins.
-  const memories = getMemoriesForTarget(MAIN_SESSION_TARGET);
+  const memories = await getMemoriesForTarget(MAIN_SESSION_TARGET);
   if (memories.length > 0) {
     const memoriesText = memories
       .map((m) => `### ${m.title}\n${m.content}`)
@@ -261,7 +287,7 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
   // Inject per-session context journal (if the session has one from a previous interaction).
   // Also inject the instruction for the AI to maintain it via update_session_context tool.
   if (sessionId && interfaceType === "ui_chat") {
-    const journal = getSessionContext(sessionId);
+    const journal = await getSessionContext(sessionId);
     const journalParts: string[] = [];
     if (journal) {
       journalParts.push(`<session_context>\nThe following is your running context journal from previous interactions in this session. Use it to maintain continuity.\n\n${journal}\n</session_context>`);
@@ -286,7 +312,7 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
   // Append agent delegation tools block for ui_chat sessions so Claude can
   // autonomously invoke specialized agents mid-conversation.
   if (includeAgentTools && interfaceType === "ui_chat") {
-    const agentToolBlock = buildAgentToolBlock();
+    const agentToolBlock = await buildAgentToolBlock();
     if (agentToolBlock) {
       systemPrompt = systemPrompt
         ? systemPrompt + "\n\n" + agentToolBlock
@@ -294,7 +320,7 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
     }
   }
 
-  const guardEnabled = getAppSetting("guard_rails_enabled", "true") === "true";
+  const guardEnabled = await getAppSetting("guard_rails_enabled", "true") === "true";
   const securityPrefix = getSecuritySystemPrompt(guardEnabled);
   if (securityPrefix) {
     systemPrompt = systemPrompt

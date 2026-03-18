@@ -2,7 +2,8 @@ import { EventEmitter } from "events";
 import * as fs from "fs";
 import * as path from "path";
 import type { ClaudeCodeProvider, ParsedOutput, TokenUsage } from "./provider";
-import { updateClaudeSessionId, updateSessionContext } from "../claude-db";
+import { updateClaudeSessionId, updateSessionContext, getUserGroupPermissions, isUserAdmin, getSession as getDbSession } from "../claude-db";
+import { getAppSetting } from "../app-settings";
 import { 
   acquireLock, 
   queueOperation, 
@@ -173,12 +174,10 @@ function getOrCreate(sessionId: string, userEmail = ""): SDKSessionState {
   return state;
 }
 
-function getApiKey(): string {
+async function getApiKey(): Promise<string> {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const db = (require("../db") as { default: import("better-sqlite3").Database }).default;
-    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'anthropic_api_key'").get() as { value: string } | undefined;
-    if (row?.value) return row.value;
+    const key = await getAppSetting("anthropic_api_key");
+    if (key) return key;
   } catch { /* fallback to env */ }
   return process.env.ANTHROPIC_API_KEY ?? "";
 }
@@ -313,7 +312,7 @@ async function startStreamingSession(
 ): Promise<void> {
   if (state.streamActive) return;
 
-  const apiKey = getApiKey();
+  const apiKey = await getApiKey();
   if (!apiKey) {
     state.emitter.emit("output", {
       type: "error",
@@ -1033,92 +1032,90 @@ export const sdkProvider: ClaudeCodeProvider = {
 
     // Load group permissions for this user (skip for admins — they bypass group restrictions)
     if (opts.userEmail && !opts.skipPermissions) {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { getUserGroupPermissions, isUserAdmin } = require("../claude-db") as {
-          getUserGroupPermissions: (email: string) => import("../claude-db").GroupPermissions;
-          isUserAdmin: (email: string) => boolean;
-        };
-        if (!isUserAdmin(opts.userEmail)) {
-          state.groupPermissions = getUserGroupPermissions(opts.userEmail);
-        } else {
+      const email = opts.userEmail;
+      void (async () => {
+        try {
+          if (!(await isUserAdmin(email))) {
+            state.groupPermissions = await getUserGroupPermissions(email);
+          } else {
+            state.groupPermissions = null;
+          }
+        } catch {
           state.groupPermissions = null;
         }
-      } catch {
-        state.groupPermissions = null;
-      }
+      })();
     }
   },
 
   sendMessage(sessionId, message, opts) {
-    let state = sessions.get(sessionId);
-    if (!state) {
-      // Session was GC'd — attempt to rebuild from DB.
-      // System prompt rebuild (async) is handled by the message handler layer
-      // via ensureSessionAlive() before calling sendMessage. This path is a
-      // safety net that creates minimal state so the stream can start.
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { getSession: getDbSession } = require("../claude-db") as { getSession: (id: string) => { model: string; skip_permissions: boolean; claude_session_id: string | null; personality: string | null } | null };
-        const dbSession = getDbSession(sessionId);
-        if (!dbSession) {
-          console.error(`[sdk] sendMessage: session ${sessionId} not found in memory or DB`);
+    void (async () => {
+      let state = sessions.get(sessionId);
+      if (!state) {
+        // Session was GC'd — attempt to rebuild from DB.
+        // System prompt rebuild (async) is handled by the message handler layer
+        // via ensureSessionAlive() before calling sendMessage. This path is a
+        // safety net that creates minimal state so the stream can start.
+        try {
+          const dbSession = await getDbSession(sessionId);
+          if (!dbSession) {
+            console.error(`[sdk] sendMessage: session ${sessionId} not found in memory or DB`);
+            return;
+          }
+          state = getOrCreate(sessionId);
+          state.model = dbSession.model;
+          state.skipPermissions = dbSession.skip_permissions;
+          if (dbSession.claude_session_id) {
+            state.claudeSessionId = dbSession.claude_session_id;
+          }
+          console.log(`[sdk] Auto-rebuilt session ${sessionId} from DB after GC`);
+        } catch (err) {
+          console.error(`[sdk] Failed to rebuild session ${sessionId}:`, err);
           return;
         }
-        state = getOrCreate(sessionId);
-        state.model = dbSession.model;
-        state.skipPermissions = dbSession.skip_permissions;
-        if (dbSession.claude_session_id) {
-          state.claudeSessionId = dbSession.claude_session_id;
-        }
-        console.log(`[sdk] Auto-rebuilt session ${sessionId} from DB after GC`);
-      } catch (err) {
-        console.error(`[sdk] Failed to rebuild session ${sessionId}:`, err);
-        return;
       }
-    }
-    state.lastActivity = Date.now();
-    const skipPermissions = opts?.skipPermissions ?? state.skipPermissions;
-    if (opts?.model) state.model = opts.model;
-    if (skipPermissions !== state.skipPermissions) {
-      state.skipPermissions = skipPermissions;
-    }
+      state.lastActivity = Date.now();
+      const skipPermissions = opts?.skipPermissions ?? state.skipPermissions;
+      if (opts?.model) state.model = opts.model;
+      if (skipPermissions !== state.skipPermissions) {
+        state.skipPermissions = skipPermissions;
+      }
 
-    state.running = true;
+      state.running = true;
 
-    const fullPrompt = buildPromptWithFiles(message, opts?.inputFiles ?? []);
+      const fullPrompt = buildPromptWithFiles(message, opts?.inputFiles ?? []);
 
-    if (state.streamActive) {
-      // Stream is alive — push message into the generator
-      resetTimers(state);
-      pushMessage(state, fullPrompt).catch((err) => {
-        state.running = false;
-        if (err instanceof Error && (err.name === "AbortError" || err.message.includes("aborted"))) {
-          // Interrupted by user — don't surface as an error
-          state.emitter.emit("output", { type: "done" } as ParsedOutput);
-          return;
-        }
-        console.error("SDK push error:", err);
-        state.emitter.emit("output", { type: "error", message: String(err) } as ParsedOutput);
-        state.emitter.emit("output", { type: "done" } as ParsedOutput);
-      });
-    } else {
-      // Stream not yet started — start it, then push the first message
-      startStreamingSession(state, sessionId).then(() => {
+      if (state.streamActive) {
+        // Stream is alive — push message into the generator
         resetTimers(state);
-        return pushMessage(state, fullPrompt);
-      }).catch((err) => {
-        state.running = false;
-        if (err instanceof Error && (err.name === "AbortError" || err.message.includes("aborted"))) {
-          // Interrupted by user — don't surface as an error
+        pushMessage(state, fullPrompt).catch((err) => {
+          state.running = false;
+          if (err instanceof Error && (err.name === "AbortError" || err.message.includes("aborted"))) {
+            // Interrupted by user — don't surface as an error
+            state.emitter.emit("output", { type: "done" } as ParsedOutput);
+            return;
+          }
+          console.error("SDK push error:", err);
+          state.emitter.emit("output", { type: "error", message: String(err) } as ParsedOutput);
           state.emitter.emit("output", { type: "done" } as ParsedOutput);
-          return;
-        }
-        console.error("SDK stream start error:", err);
-        state.emitter.emit("output", { type: "error", message: String(err) } as ParsedOutput);
-        state.emitter.emit("output", { type: "done" } as ParsedOutput);
-      });
-    }
+        });
+      } else {
+        // Stream not yet started — start it, then push the first message
+        startStreamingSession(state, sessionId).then(() => {
+          resetTimers(state);
+          return pushMessage(state, fullPrompt);
+        }).catch((err) => {
+          state.running = false;
+          if (err instanceof Error && (err.name === "AbortError" || err.message.includes("aborted"))) {
+            // Interrupted by user — don't surface as an error
+            state.emitter.emit("output", { type: "done" } as ParsedOutput);
+            return;
+          }
+          console.error("SDK stream start error:", err);
+          state.emitter.emit("output", { type: "error", message: String(err) } as ParsedOutput);
+          state.emitter.emit("output", { type: "done" } as ParsedOutput);
+        });
+      }
+    })();
   },
 
   allowTool(sessionId, toolName, scope, toolCallId) {

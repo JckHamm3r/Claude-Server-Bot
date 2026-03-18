@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { dbGet, dbRun } from "@/lib/db";
+import type { InValue } from "@libsql/client";
 
 interface SmtpRow {
   host: string;
@@ -104,7 +105,7 @@ export async function POST(request: NextRequest) {
     useExistingPassword = true;
   }
 
-  const params: unknown[] = [
+  const params: InValue[] = [
     body.host ?? "",
     body.port ?? 587,
     body.secure ? 1 : 0,

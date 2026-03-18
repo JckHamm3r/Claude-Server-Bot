@@ -18,6 +18,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
+      <head>
+        {/* Transformer theme CSS — active theme transformers inject their CSS here.
+            eslint-disable-next-line @next/next/no-css-tags */}
+        {/* eslint-disable-next-line @next/next/no-css-tags */}
+        <link rel="stylesheet" href="/api/transformers/theme.css" />
+      </head>
       <body className="min-h-screen bg-bot-bg text-bot-text font-sans antialiased">
         <NextAuthProvider>
           <ToastProvider>

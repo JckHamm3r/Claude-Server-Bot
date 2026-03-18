@@ -21,7 +21,7 @@ export async function POST() {
     return NextResponse.json({ error: `Jail '${status.jailName}' does not exist in fail2ban` }, { status: 400 });
   }
 
-  const result = syncFail2BanBans();
+  const result = await syncFail2BanBans();
   return NextResponse.json({ ok: true, ...result });
 }
 

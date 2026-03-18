@@ -1,5 +1,5 @@
 import path from "path";
-import { getAppSetting } from "./app-settings";
+import { getAppSettingSync as getAppSetting } from "./app-settings";
 import type { GroupAiPermissions } from "./command-sandbox";
 
 // Protected paths — Claude should never access these

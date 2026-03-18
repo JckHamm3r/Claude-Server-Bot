@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Get the lock to find the tool call ID
-    const lock = getFileLock(filePath);
+    const lock = await getFileLock(filePath);
 
     if (!lock) {
       return NextResponse.json({ error: "Lock not found" }, { status: 404 });

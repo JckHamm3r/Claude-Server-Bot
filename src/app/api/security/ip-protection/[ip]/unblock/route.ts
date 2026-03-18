@@ -14,8 +14,8 @@ export async function POST(
   }
 
   const ip = decodeURIComponent(params.ip);
-  unblockIP(ip);
-  logActivity("security_ip_unblocked", session.user.email, { ip });
+  await unblockIP(ip);
+  await logActivity("security_ip_unblocked", session.user.email, { ip });
 
   return NextResponse.json({ ok: true });
 }

@@ -21,6 +21,76 @@ app.prepare().then(async () => {
   const { initDb } = await import("./src/lib/db");
   await initDb();
 
+  // Initialize transformer registry (load all transformers from data/transformers/)
+  const { transformerRegistry } = await import("./src/lib/transformer-registry");
+
+  // Mount API and static transformers as raw HTTP handlers before Next.js
+  const transformerApiHandlers = new Map<string, (req: import("http").IncomingMessage, res: import("http").ServerResponse) => void>();
+  const transformerStaticDirs = new Map<string, string>();
+
+  function loadTransformerRoutes() {
+    transformerApiHandlers.clear();
+    transformerStaticDirs.clear();
+    try {
+      const active = transformerRegistry.listTransformers().filter((t) => t.enabled && t.status !== "error");
+      for (const transformer of active) {
+        if (transformer.type === "api") {
+          const entryFile = transformer.entry ?? "handler.js";
+          const handlerPath = require("path").join(transformer.dirPath, entryFile);
+          if (require("fs").existsSync(handlerPath)) {
+            try {
+              // Clear require cache so we get fresh handler on reload
+              delete require.cache[handlerPath];
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              const mod = require(handlerPath) as { default?: unknown } | ((req: import("http").IncomingMessage, res: import("http").ServerResponse) => void);
+              const handler = typeof mod === "function" ? mod : (mod as { default?: unknown }).default;
+              if (typeof handler === "function") {
+                transformerApiHandlers.set(`/api/x/${transformer.id}/`, handler as (req: import("http").IncomingMessage, res: import("http").ServerResponse) => void);
+                console.log(`[transformers] Mounted API transformer: /api/x/${transformer.id}/`);
+              }
+            } catch (err) {
+              console.error(`[transformers] Failed to load API transformer ${transformer.id}:`, err);
+            }
+          }
+        } else if (transformer.type === "static") {
+          transformerStaticDirs.set(`/x/${transformer.id}/`, transformer.dirPath);
+          console.log(`[transformers] Mounted static transformer: /x/${transformer.id}/`);
+        }
+      }
+    } catch (err) {
+      console.error("[transformers] Error loading transformer routes:", err);
+    }
+  }
+
+  // Load API/static transformers at startup
+  loadTransformerRoutes();
+
+  // Load hook transformers
+  try {
+    const { transformerEvents } = await import("./src/lib/transformer-events");
+    const active = transformerRegistry.listTransformers().filter((t) => t.type === "hook" && t.enabled && t.status !== "error");
+    for (const transformer of active) {
+      const entryFile = transformer.entry ?? "hooks.js";
+      const hooksPath = require("path").join(transformer.dirPath, entryFile);
+      if (require("fs").existsSync(hooksPath)) {
+        try {
+          delete require.cache[hooksPath];
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const mod = require(hooksPath) as { register?: (events: typeof transformerEvents) => void } | ((events: typeof transformerEvents) => void);
+          const register = typeof mod === "function" ? mod : (mod as { register?: (events: typeof transformerEvents) => void }).register;
+          if (typeof register === "function") {
+            register(transformerEvents);
+            console.log(`[transformers] Registered hook transformer: ${transformer.id}`);
+          }
+        } catch (err) {
+          console.error(`[transformers] Failed to load hook transformer ${transformer.id}:`, err);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[transformers] Error loading hook transformers:", err);
+  }
+
   const slug = process.env.CLAUDE_BOT_SLUG ?? "";
   const prefix = process.env.CLAUDE_BOT_PATH_PREFIX ?? "c";
 
@@ -172,6 +242,55 @@ app.prepare().then(async () => {
           return;
         }
       } catch { /* ignore abuse check errors */ }
+    }
+
+    // Dispatch to API transformer handlers
+    const strippedUrl = widgetBasePath ? url.slice(widgetBasePath.length) : url;
+    for (const [mountPrefix, apiHandler] of transformerApiHandlers) {
+      if (strippedUrl.startsWith(mountPrefix) || strippedUrl === mountPrefix.slice(0, -1)) {
+        try {
+          apiHandler(req, res);
+        } catch (err) {
+          console.error(`[transformers] API handler error for ${mountPrefix}:`, err);
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Transformer error" }));
+        }
+        return;
+      }
+    }
+
+    // Serve static transformer assets
+    for (const [urlPrefix, dirPath] of transformerStaticDirs) {
+      const fullPrefix = widgetBasePath + urlPrefix;
+      if (url.startsWith(fullPrefix)) {
+        const relativePath = url.slice(fullPrefix.length).split("?")[0] || "index.html";
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const nodePath = require("path") as typeof import("path");
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const nodeFs = require("fs") as typeof import("fs");
+        const safePath = nodePath.join(dirPath, "assets", relativePath);
+        if (nodeFs.existsSync(safePath)) {
+          try {
+            const ext = nodePath.extname(safePath).slice(1).toLowerCase();
+            const mimeTypes: Record<string, string> = {
+              html: "text/html", css: "text/css", js: "application/javascript",
+              json: "application/json", png: "image/png", jpg: "image/jpeg",
+              svg: "image/svg+xml", ico: "image/x-icon", woff2: "font/woff2",
+            };
+            const contentType = mimeTypes[ext] ?? "application/octet-stream";
+            const content = nodeFs.readFileSync(safePath);
+            res.writeHead(200, { "Content-Type": contentType });
+            res.end(content);
+          } catch {
+            res.writeHead(404, { "Content-Type": "text/plain" });
+            res.end("Not Found");
+          }
+        } else {
+          res.writeHead(404, { "Content-Type": "text/plain" });
+          res.end("Not Found");
+        }
+        return;
+      }
     }
 
     handle(req, res, parse(url, true));

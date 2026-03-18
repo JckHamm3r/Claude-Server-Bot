@@ -35,6 +35,7 @@ import { dispatchNotification } from "../lib/notifications";
 import { buildSystemPrompt } from "../lib/system-prompt";
 import { dbAll } from "../lib/db";
 import { releaseAllSessionLocks, cancelAllSessionQueuedOps } from "../lib/file-lock-manager";
+import { transformerEvents } from "../lib/transformer-events";
 
 export function registerSessionHandlers(ctx: HandlerContext) {
   const { socket, io, email, isAdmin } = ctx;
@@ -118,6 +119,15 @@ export function registerSessionHandlers(ctx: HandlerContext) {
           await logActivity("customization_session_started", email, { sessionId });
           await logActivity("transformer_session_started", email, { sessionId });
         }
+
+        // Emit lifecycle event for hook transformers
+        try {
+          transformerEvents.emit("session:created", {
+            sessionId,
+            interfaceType: interface_type ?? "ui_chat",
+            userId: email,
+          });
+        } catch { /* hook errors must not affect session creation */ }
 
         sessionProvider.createSession(sessionId, {
           skipPermissions,

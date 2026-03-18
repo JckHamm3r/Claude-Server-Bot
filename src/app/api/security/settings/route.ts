@@ -10,9 +10,9 @@ export async function GET() {
   }
 
   return NextResponse.json({
-    guard_rails_enabled: getAppSetting("guard_rails_enabled", "true") === "true",
-    sandbox_enabled: getAppSetting("sandbox_enabled", "true") === "true",
-    ip_protection_enabled: getAppSetting("ip_protection_enabled", "true") === "true",
+    guard_rails_enabled: await getAppSetting("guard_rails_enabled", "true") === "true",
+    sandbox_enabled: await getAppSetting("sandbox_enabled", "true") === "true",
+    ip_protection_enabled: await getAppSetting("ip_protection_enabled", "true") === "true",
   });
 }
 
@@ -29,13 +29,13 @@ export async function POST(request: Request) {
   };
 
   if (typeof body.guard_rails_enabled === "boolean") {
-    setAppSetting("guard_rails_enabled", body.guard_rails_enabled ? "true" : "false");
+    await setAppSetting("guard_rails_enabled", body.guard_rails_enabled ? "true" : "false");
   }
   if (typeof body.sandbox_enabled === "boolean") {
-    setAppSetting("sandbox_enabled", body.sandbox_enabled ? "true" : "false");
+    await setAppSetting("sandbox_enabled", body.sandbox_enabled ? "true" : "false");
   }
   if (typeof body.ip_protection_enabled === "boolean") {
-    setAppSetting("ip_protection_enabled", body.ip_protection_enabled ? "true" : "false");
+    await setAppSetting("ip_protection_enabled", body.ip_protection_enabled ? "true" : "false");
   }
 
   return NextResponse.json({ ok: true });

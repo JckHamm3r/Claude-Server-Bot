@@ -125,7 +125,7 @@ export async function POST(request: Request) {
       // Enabling is safe — no rollback needed
       const result = setUfwEnabled(true);
       if (!result.success) return NextResponse.json({ error: result.error }, { status: 500 });
-      logActivity("security_ufw_enabled", email, {});
+      await logActivity("security_ufw_enabled", email, {});
       return NextResponse.json({ success: true, pendingConfirmation: false });
     } else {
       // Disabling is destructive — create rollback
@@ -133,7 +133,7 @@ export async function POST(request: Request) {
       const wasActive = currentStatus.active;
       const result = setUfwEnabled(false);
       if (!result.success) return NextResponse.json({ error: result.error }, { status: 500 });
-      logActivity("security_ufw_disabled", email, {});
+      await logActivity("security_ufw_disabled", email, {});
       const changeId = createPendingChange(snapshot, wasActive);
       return NextResponse.json({
         success: true,
@@ -155,7 +155,7 @@ export async function POST(request: Request) {
     const result = addRule(rule.action, rule.port, rule.protocol, rule.from, rule.comment);
     if (!result.success) return NextResponse.json({ error: result.error }, { status: 500 });
 
-    logActivity("security_ufw_rule_added", email, {
+    await logActivity("security_ufw_rule_added", email, {
       action: rule.action,
       port: rule.port,
       protocol: rule.protocol,
@@ -198,7 +198,7 @@ export async function POST(request: Request) {
     const result = deleteRule(ruleNumber);
     if (!result.success) return NextResponse.json({ error: result.error }, { status: 500 });
 
-    logActivity("security_ufw_rule_deleted", email, {
+    await logActivity("security_ufw_rule_deleted", email, {
       ruleNumber,
       rule: ruleToDelete ? `${ruleToDelete.action} ${ruleToDelete.to} from ${ruleToDelete.from}` : "unknown",
     });
@@ -222,7 +222,7 @@ export async function POST(request: Request) {
     if (!confirmed) {
       return NextResponse.json({ error: "Change not found or already expired" }, { status: 404 });
     }
-    logActivity("security_ufw_change_confirmed", email, { changeId });
+    await logActivity("security_ufw_change_confirmed", email, { changeId });
     return NextResponse.json({ success: true });
   }
 
@@ -240,7 +240,7 @@ export async function POST(request: Request) {
     const result = rollbackChange(changeId);
     if (!result.success) return NextResponse.json({ error: result.error }, { status: 500 });
 
-    logActivity("security_ufw_rollback", email, { changeId, manual: true });
+    await logActivity("security_ufw_rollback", email, { changeId, manual: true });
     return NextResponse.json({ success: true });
   }
 

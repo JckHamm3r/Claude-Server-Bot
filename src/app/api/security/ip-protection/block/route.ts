@@ -29,11 +29,11 @@ export async function POST(request: Request) {
   }
 
   const blockType = body.type ?? "temporary";
-  const duration = body.durationMinutes ?? parseInt(getAppSetting("ip_block_duration_minutes", "60"), 10);
+  const duration = body.durationMinutes ?? parseInt(await getAppSetting("ip_block_duration_minutes", "60"), 10);
   const reason = body.reason ?? "Manually blocked by admin";
 
-  blockIP(body.ip, reason, blockType, duration, session.user.email, "manual" as BlockedIP["source_type"]);
-  logActivity("security_manual_ip_block", session.user.email, { ip: body.ip, reason, type: blockType });
+  await blockIP(body.ip, reason, blockType, duration, session.user.email, "manual" as BlockedIP["source_type"]);
+  await logActivity("security_manual_ip_block", session.user.email, { ip: body.ip, reason, type: blockType });
 
   return NextResponse.json({ ok: true });
 }

@@ -14,7 +14,7 @@ export async function POST(req: Request) {
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!isUserAdmin(session.user.email)) {
+  if (!(await isUserAdmin(session.user.email))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -25,7 +25,7 @@ export async function POST(req: Request) {
       systemContext: string;
     };
 
-    const apiKey = getAppSetting("anthropic_api_key") || process.env.ANTHROPIC_API_KEY;
+    const apiKey = (await getAppSetting("anthropic_api_key")) || process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       return NextResponse.json({ error: "Anthropic API key not configured" }, { status: 500 });
     }
