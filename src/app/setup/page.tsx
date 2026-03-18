@@ -35,18 +35,18 @@ function getBasePath() {
   return slug ? `/${prefix}/${slug}` : "";
 }
 
-const stepVariants = {
-  enter: { opacity: 0, x: 20 },
-  center: { opacity: 1, x: 0 },
-  exit: { opacity: 0, x: -20 },
-};
-
-
 export default function SetupPage() {
   const bp = getBasePath();
   const { data: session, status } = useSession();
   const router = useRouter();
   const [step, setStep] = useState<Step>(1);
+  const [navDir, setNavDir] = useState<"forward" | "back">("forward");
+
+  const stepVariants = {
+    enter: { opacity: 0, x: navDir === "forward" ? 20 : -20 },
+    center: { opacity: 1, x: 0 },
+    exit: { opacity: 0, x: navDir === "forward" ? -20 : 20 },
+  };
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -133,7 +133,7 @@ export default function SetupPage() {
         setNameError(d.error ?? "Failed to save name. Try again.");
         return;
       }
-      setStep(2);
+      setNavDir("forward"); setStep(2);
     } catch { setNameError("Network error. Try again."); }
     finally { setSaving(false); }
   }
@@ -146,17 +146,13 @@ export default function SetupPage() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: botName.trim() }),
       });
-      setStep(3);
-    } catch { /* proceed anyway */ setStep(3); }
+      setNavDir("forward"); setStep(3);
+    } catch { /* proceed anyway */ setNavDir("forward"); setStep(3); }
     finally { setSaving(false); }
   }
 
   async function saveApiKey() {
     if (!apiKey.trim() || saving) return;
-    if (!apiKey.trim().startsWith("sk-ant-")) {
-      setApiKeyError("API keys start with 'sk-ant-' — check the key and try again.");
-      return;
-    }
     setSaving(true);
     setApiKeyError("");
     try {
@@ -165,7 +161,7 @@ export default function SetupPage() {
         body: JSON.stringify({ anthropic_api_key: apiKey.trim() }),
       });
       if (!res.ok) { setApiKeyError("Failed to save key. Try again."); return; }
-      setStep(4);
+      setNavDir("forward"); setStep(4);
     } catch { setApiKeyError("Network error. Try again."); }
     finally { setSaving(false); }
   }
@@ -276,10 +272,14 @@ export default function SetupPage() {
               const isActive = n === step;
               return (
                 <div key={n} className="flex flex-col items-center gap-1 min-w-0 shrink-0 px-1">
-                  <div className={cn(
-                    "flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold transition-all duration-300",
-                    isDone ? "gradient-accent text-white shadow-glow-sm" : isActive ? "border-2 border-bot-accent text-bot-accent bg-bot-accent/10" : "bg-bot-elevated text-bot-muted",
-                  )}>
+                  <div
+                    onClick={isDone && step !== 7 ? () => { setNavDir("back"); setStep(n as Step); } : undefined}
+                    className={cn(
+                      "flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold transition-all duration-300",
+                      isDone ? "gradient-accent text-white shadow-glow-sm" : isActive ? "border-2 border-bot-accent text-bot-accent bg-bot-accent/10" : "bg-bot-elevated text-bot-muted",
+                      isDone && step !== 7 ? "cursor-pointer hover:opacity-75" : "cursor-default",
+                    )}
+                  >
                     {isDone ? <CheckCircle2 className="h-3.5 w-3.5" /> : n}
                   </div>
                   <span className={cn("text-[10px] font-medium", isActive ? "text-bot-text" : "text-bot-muted/50")}>{label}</span>
@@ -413,7 +413,7 @@ export default function SetupPage() {
                     {saving ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : "Save & Continue →"}
                   </button>
                   <button
-                    onClick={() => setStep(4)}
+                    onClick={() => { setNavDir("forward"); setStep(4); }}
                     className="w-full text-caption text-bot-muted hover:text-bot-text transition-colors py-1"
                   >
                     Skip for now (add in Settings later)
@@ -467,14 +467,14 @@ export default function SetupPage() {
 
                 <div className="space-y-2">
                   <button
-                    onClick={() => setStep(5)}
+                    onClick={() => { setNavDir("forward"); setStep(5); }}
                     disabled={!testResult?.ok}
                     className="w-full rounded-xl gradient-accent px-4 py-3 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] disabled:opacity-50 transition-all duration-200"
                   >
                     Continue →
                   </button>
                   {!testResult?.ok && (
-                    <button onClick={() => setStep(5)} className="w-full text-caption text-bot-muted hover:text-bot-text transition-colors py-1">
+                    <button onClick={() => { setNavDir("forward"); setStep(5); }} className="w-full text-caption text-bot-muted hover:text-bot-text transition-colors py-1">
                       Skip (set up API key in Settings)
                     </button>
                   )}
@@ -514,7 +514,7 @@ export default function SetupPage() {
                   {projectError && <p className="text-caption text-bot-red">{projectError}</p>}
                 </form>
 
-                <button onClick={() => setStep(6)} disabled={!projectRoot}
+                <button onClick={() => { setNavDir("forward"); setStep(6); }} disabled={!projectRoot}
                   className="w-full rounded-xl gradient-accent px-4 py-3 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] disabled:opacity-50 transition-all duration-200">
                   Continue →
                 </button>
@@ -566,7 +566,7 @@ export default function SetupPage() {
                   </div>
                 </div>
 
-                <button onClick={() => setStep(7)}
+                <button onClick={() => { setNavDir("forward"); setStep(7); }}
                   className="w-full rounded-xl gradient-accent px-4 py-3 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] transition-all duration-200">
                   Continue →
                 </button>
