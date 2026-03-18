@@ -1,19 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import db from "@/lib/db";
+import { dbGet } from "@/lib/db";
+import { getAppSetting } from "@/lib/app-settings";
 
-function getApiKey(): string {
+async function getApiKey(): Promise<string> {
   try {
-    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'anthropic_api_key'").get() as { value: string } | undefined;
-    if (row?.value) return row.value;
+    const value = await getAppSetting("anthropic_api_key", "");
+    if (value) return value;
   } catch { /* fallback to env */ }
   return process.env.ANTHROPIC_API_KEY ?? "";
 }
 
-function getBotName(): string {
+async function getBotName(): Promise<string> {
   try {
-    const row = db.prepare("SELECT name FROM bot_settings WHERE id = 1").get() as { name: string } | undefined;
+    const row = await dbGet<{ name: string }>("SELECT name FROM bot_settings WHERE id = 1");
     return row?.name ?? "Claude";
   } catch {
     return "Claude";
@@ -96,12 +97,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const user = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(session.user.email) as { is_admin: number } | undefined;
+  const user = await dbGet<{ is_admin: number }>("SELECT is_admin FROM users WHERE email = ?", [session.user.email]);
   if (!user?.is_admin) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const apiKey = getApiKey();
+  const apiKey = await getApiKey();
   if (!apiKey) {
     return NextResponse.json(
       { error: "No Anthropic API key configured. Set it in Admin > Settings." },
@@ -132,5 +133,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  return NextResponse.json({ ...result, botName: getBotName() });
+  const botName = await getBotName();
+  return NextResponse.json({ ...result, botName });
 }

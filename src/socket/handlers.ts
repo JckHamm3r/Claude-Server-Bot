@@ -16,7 +16,7 @@ import { setBroadcaster } from "../lib/broadcast";
 import { checkProtectedPath } from "../lib/security-guard";
 import { classifyCommand, isSandboxEnabled } from "../lib/command-sandbox";
 import { cleanupExpiredBlocks, syncFail2BanBans } from "../lib/ip-protection";
-import db from "../lib/db";
+import { dbGet, dbRun, dbPragma } from "../lib/db";
 import type { HandlerContext, PlanAction } from "./types";
 import { registerSessionHandlers } from "./session-handlers";
 import { registerMessageHandlers } from "./message-handlers";
@@ -87,7 +87,7 @@ async function verifySocket(socket: Socket): Promise<boolean> {
     if (!token) return false;
     const email = (token.email as string) ?? "";
     if (!email) return false;
-    const user = db.prepare("SELECT email FROM users WHERE email = ?").get(email);
+    const user = await dbGet("SELECT email FROM users WHERE email = ?", [email]);
     return !!user;
   } catch {
     return false;
@@ -140,7 +140,7 @@ const MAX_LATENCIES = 10000;
 let metricsBuffer = { session_count: 0, command_count: 0, agent_count: 0, latencies: [] as number[] };
 let lastMetricsFlush = Date.now();
 
-function flushMetrics() {
+async function flushMetrics() {
   if (
     metricsBuffer.session_count === 0 &&
     metricsBuffer.command_count === 0 &&
@@ -152,41 +152,41 @@ function flushMetrics() {
     ? Math.round(metricsBuffer.latencies.reduce((a, b) => a + b, 0) / metricsBuffer.latencies.length)
     : 0;
   try {
-    db.prepare(
-      "INSERT INTO metrics (session_count, command_count, agent_count, avg_response_ms) VALUES (?, ?, ?, ?)"
-    ).run(
-      metricsBuffer.session_count,
-      metricsBuffer.command_count,
-      metricsBuffer.agent_count,
-      avg
+    await dbRun(
+      "INSERT INTO metrics (session_count, command_count, agent_count, avg_response_ms) VALUES (?, ?, ?, ?)",
+      [metricsBuffer.session_count, metricsBuffer.command_count, metricsBuffer.agent_count, avg]
     );
     // Purge metrics older than 30 days
-    db.prepare("DELETE FROM metrics WHERE recorded_at < datetime('now', '-30 days')").run();
+    await dbRun("DELETE FROM metrics WHERE recorded_at < datetime('now', '-30 days')");
   } catch {
     // ignore
   }
   metricsBuffer = { session_count: 0, command_count: 0, agent_count: 0, latencies: [] };
 }
 
-function runRetentionCleanup() {
+async function runRetentionCleanup() {
   try {
-    db.prepare("DELETE FROM activity_log WHERE timestamp < datetime('now', '-30 days')").run();
-    db.prepare("DELETE FROM login_attempts WHERE created_at < datetime('now', '-30 days')").run();
+    await dbRun("DELETE FROM activity_log WHERE timestamp < datetime('now', '-30 days')");
+    await dbRun("DELETE FROM login_attempts WHERE created_at < datetime('now', '-30 days')");
   } catch {
     // ignore
   }
 
   try {
-    const retentionDays = parseInt(
-      (db.prepare("SELECT value FROM app_settings WHERE key = 'message_retention_days'").get() as { value: string } | undefined)?.value ?? "0",
-      10,
+    const retentionRow = await dbGet<{ value: string }>(
+      "SELECT value FROM app_settings WHERE key = 'message_retention_days'"
     );
+    const retentionDays = parseInt(retentionRow?.value ?? "0", 10);
     if (retentionDays > 0) {
       const modifier = `-${retentionDays} days`;
-      db.prepare(
+      await dbRun(
         "DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE updated_at < datetime('now', ?))",
-      ).run(modifier);
-      db.prepare("DELETE FROM sessions WHERE updated_at < datetime('now', ?) AND id NOT IN (SELECT DISTINCT session_id FROM messages)").run(modifier);
+        [modifier]
+      );
+      await dbRun(
+        "DELETE FROM sessions WHERE updated_at < datetime('now', ?) AND id NOT IN (SELECT DISTINCT session_id FROM messages)",
+        [modifier]
+      );
     }
   } catch {
     // ignore
@@ -221,10 +221,10 @@ function getSessionProvider(sessionId: string, providerType?: string): ClaudeCod
   return sessionProviders.get(sessionId)!;
 }
 
-function checkRateLimit(email: string, sessionId: string): { ok: boolean; reason?: string } {
-  const maxCommands = parseInt(getAppSetting("rate_limit_commands", "100"), 10);
-  const maxRuntimeMin = parseInt(getAppSetting("rate_limit_runtime_min", "30"), 10);
-  const maxConcurrent = parseInt(getAppSetting("rate_limit_concurrent", "0"), 10);
+async function checkRateLimit(email: string, sessionId: string): Promise<{ ok: boolean; reason?: string }> {
+  const maxCommands = parseInt(await getAppSetting("rate_limit_commands", "100"), 10);
+  const maxRuntimeMin = parseInt(await getAppSetting("rate_limit_runtime_min", "30"), 10);
+  const maxConcurrent = parseInt(await getAppSetting("rate_limit_concurrent", "0"), 10);
 
   // Count actually-running sessions for this user (0 = unlimited)
   if (maxConcurrent > 0) {
@@ -271,7 +271,7 @@ function incrementSessionCommands(email: string, sessionId: string) {
 
 export function shutdownAllSessions() {
   // Flush pending metrics before shutdown
-  flushMetrics();
+  void flushMetrics();
 
   // Close all active Claude sessions
   for (const [sessionId, provider] of sessionProviders.entries()) {
@@ -312,23 +312,23 @@ export function registerHandlers(io: Server) {
 
   // Start service watcher for live status push
   registerServiceWatcherHandlers(io);
-  metricsInterval = setInterval(() => {
+  metricsInterval = setInterval(async () => {
     if (Date.now() - lastMetricsFlush > 60_000) {
-      flushMetrics();
+      await flushMetrics();
       lastMetricsFlush = Date.now();
     }
   }, 60_000);
-  cleanupInterval = setInterval(() => {
-    cleanupExpiredBlocks();
-    runRetentionCleanup();
-    try { db.pragma("incremental_vacuum"); } catch { /* ignore */ }
+  cleanupInterval = setInterval(async () => {
+    void cleanupExpiredBlocks();
+    await runRetentionCleanup();
+    try { await dbPragma("incremental_vacuum"); } catch { /* ignore */ }
     // Sync fail2ban bans into the app DB (no-op if fail2ban disabled/unavailable)
-    try { syncFail2BanBans(); } catch { /* ignore */ }
+    void syncFail2BanBans();
   }, 5 * 60_000);
 
   // Initial fail2ban sync shortly after startup
   setTimeout(() => {
-    try { syncFail2BanBans(); } catch { /* ignore */ }
+    void syncFail2BanBans();
   }, 10_000);
 
   // Initialize file lock manager
@@ -352,11 +352,11 @@ export function registerHandlers(io: Server) {
   const provider = getClaudeProvider();
 
   // Wire notification emitter so dispatchNotification can push real-time events
-  setNotificationEmitter((email: string, notification: InAppNotification) => {
+  setNotificationEmitter(async (email: string, notification: InAppNotification) => {
     for (const [socketId, info] of Array.from(connectedUsers.entries())) {
       if (info.email === email) {
         io.to(socketId).emit("notification:new", { notification });
-        io.to(socketId).emit("notification:count", { unread: getUnreadCount(email) });
+        io.to(socketId).emit("notification:count", { unread: await getUnreadCount(email) });
       }
     }
   });
@@ -367,7 +367,7 @@ export function registerHandlers(io: Server) {
   });
 
   // Set up file lock event listeners
-  lockEventEmitter.on("operation_queued", (event: {
+  lockEventEmitter.on("operation_queued", async (event: {
     queueId: string;
     sessionId: string;
     userEmail: string;
@@ -376,7 +376,7 @@ export function registerHandlers(io: Server) {
     toolCallId: string;
     position: number;
   }) => {
-    const user = getUser(event.userEmail);
+    const user = await getUser(event.userEmail);
     const userName = user ? `${user.first_name || ""} ${user.last_name || ""}`.trim() || user.email : event.userEmail;
     
     io.to(`session:${event.sessionId}`).emit("file:operation_queued", {
@@ -433,9 +433,9 @@ export function registerHandlers(io: Server) {
   });
 
   // Session status helper: updates DB and broadcasts to all sockets
-  function setSessionStatus(sessionId: string, status: SessionStatus) {
+  async function setSessionStatus(sessionId: string, status: SessionStatus) {
     try {
-      updateSessionStatus(sessionId, status);
+      await updateSessionStatus(sessionId, status);
       io.emit("claude:session_status", { sessionId, status });
     } catch (err) {
       console.error("[status] Failed to update session status:", err);
@@ -454,7 +454,7 @@ export function registerHandlers(io: Server) {
     const delays = [100, 200, 300];
     for (let attempt = 0; attempt < delays.length; attempt++) {
       try {
-        saveMessage(sessionId, senderType, content, senderId, messageType, metadata);
+        await saveMessage(sessionId, senderType, content, senderId, messageType, metadata);
         return true;
       } catch (err) {
         console.error(`[db] saveMessage attempt ${attempt + 1} failed:`, err);
@@ -491,7 +491,7 @@ export function registerHandlers(io: Server) {
 
       // Persist session ID to DB for resume across server restarts
       if (parsed.type === "session_id" && parsed.claudeSessionId) {
-        try { updateClaudeSessionId(sessionId, parsed.claudeSessionId); } catch { /* ignore for ephemeral sessions */ }
+        try { await updateClaudeSessionId(sessionId, parsed.claudeSessionId); } catch { /* ignore for ephemeral sessions */ }
         return;
       }
 
@@ -552,12 +552,12 @@ export function registerHandlers(io: Server) {
 
       // Guard rails: intercept permission_request for protected paths
       if (parsed.type === "permission_request") {
-        const guardEnabled = getAppSetting("guard_rails_enabled", "true") === "true";
+        const guardEnabled = await getAppSetting("guard_rails_enabled", "true") === "true";
         if (guardEnabled && parsed.toolName) {
           const check = checkProtectedPath(parsed.toolName, parsed.toolInput);
           if (check.blocked) {
             sessionProvider.denyPermission(sessionId);
-            logActivity("security_mod_blocked", submittedBy ?? null, {
+            await logActivity("security_mod_blocked", submittedBy ?? null, {
               tool: parsed.toolName,
               input: parsed.toolInput,
               reason: check.reason,
@@ -579,7 +579,7 @@ export function registerHandlers(io: Server) {
             const classification = classifyCommand(command);
             if (classification.category === "blocked" || classification.category === "custom_blocked") {
               sessionProvider.denyPermission(sessionId);
-              logActivity("security_command_blocked", submittedBy ?? null, {
+              await logActivity("security_command_blocked", submittedBy ?? null, {
                 command: command.slice(0, 200),
                 category: classification.category,
                 reason: classification.reason,
@@ -609,10 +609,10 @@ export function registerHandlers(io: Server) {
 
       // Status transitions for interactive events
       if (parsed.type === "permission_request" || parsed.type === "user_question") {
-        setSessionStatus(sessionId, "needs_attention");
+        await setSessionStatus(sessionId, "needs_attention");
       }
       if (parsed.type === "error" && parsed.retryable) {
-        setSessionStatus(sessionId, "needs_attention");
+        await setSessionStatus(sessionId, "needs_attention");
       }
 
       // Throttle streaming events to prevent flooding; send all others immediately
@@ -651,7 +651,7 @@ export function registerHandlers(io: Server) {
         // Check if session is waiting for permission before setting idle
         const sp = getSessionProvider(sessionId);
         if (!sp?.isRunning(sessionId)) {
-          setSessionStatus(sessionId, "idle");
+          await setSessionStatus(sessionId, "idle");
         }
 
         // S9-03 + S9-04: Clean up listener set and providers for ephemeral sessions
@@ -700,7 +700,7 @@ export function registerHandlers(io: Server) {
         // Clear tool calls for next interaction
         toolCalls.length = 0;
 
-        logActivity("command_executed", submitterEmail ?? null, { sessionId, latency_ms: latency });
+        await logActivity("command_executed", submitterEmail ?? null, { sessionId, latency_ms: latency });
         io.to(`session:${sessionId}`).emit("claude:command_done", { sessionId });
 
         // AI-powered auto-naming on first completed exchange
@@ -708,20 +708,20 @@ export function registerHandlers(io: Server) {
           const ephemeralPrefixes = ["agent-gen-", "plan-gen-", "plan-step-", "plan-refine-", "sub-agent-"];
           const isEphemeral = ephemeralPrefixes.some((p) => sessionId.startsWith(p));
           if (!isEphemeral) {
-            const session = getSession(sessionId);
+            const session = await getSession(sessionId);
             if (session && !session.name) {
-              const settings = getUserSettings(submitterEmail);
+              const settings = await getUserSettings(submitterEmail);
               if (settings.auto_naming_enabled) {
-                const msgs = getMessages(sessionId);
+                const msgs = await getMessages(sessionId);
                 const firstUserMsg = msgs.find((m) => m.sender_type === "admin");
                 if (firstUserMsg) {
                   const claudeMsgCount = msgs.filter((m) => m.sender_type === "claude").length;
                   if (claudeMsgCount <= 1) {
-                    generateSessionName(firstUserMsg.content, contentToSave).then((name) => {
-                      renameSession(sessionId, name);
+                    generateSessionName(firstUserMsg.content, contentToSave).then(async (name) => {
+                      await renameSession(sessionId, name);
                       io.to(`session:${sessionId}`).emit("claude:session_renamed", { sessionId, name });
                       // Broadcast updated session list to all sockets of the submitter
-                      const sessions = listSessions(submitterEmail);
+                      const sessions = await listSessions(submitterEmail);
                       io.to(`session:${sessionId}`).emit("claude:sessions", { sessions });
                     }).catch(() => {});
                   }

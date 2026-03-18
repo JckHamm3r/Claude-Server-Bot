@@ -1,4 +1,4 @@
-import db from "./db";
+import { dbGet, dbAll, dbRun } from "./db";
 import { sendMail } from "./smtp";
 
 export type NotificationEventType =
@@ -86,42 +86,39 @@ export async function dispatchNotification(
   title: string,
   body: string,
 ): Promise<void> {
-  // Check preferences
-  const pref = db.prepare(
-    "SELECT email_enabled, inapp_enabled FROM notification_preferences WHERE user_email = ? AND event_type = ?"
-  ).get(recipientEmail, event_type) as { email_enabled: number; inapp_enabled: number } | undefined;
+  const pref = await dbGet<{ email_enabled: number; inapp_enabled: number }>(
+    "SELECT email_enabled, inapp_enabled FROM notification_preferences WHERE user_email = ? AND event_type = ?",
+    [recipientEmail, event_type]
+  );
 
   const emailEnabled = Boolean(pref?.email_enabled ?? 0);
   const inappEnabled = Boolean(pref?.inapp_enabled ?? 0);
 
-  // In-app notification
   if (inappEnabled) {
-    const row = db.prepare(
-      "INSERT INTO inapp_notifications (user_email, event_type, title, body) VALUES (?, ?, ?, ?) RETURNING *"
-    ).get(recipientEmail, event_type, title, body) as {
+    const row = await dbGet<{
       id: number; user_email: string; event_type: string; title: string; body: string; read: number; created_at: string;
-    };
+    }>(
+      "INSERT INTO inapp_notifications (user_email, event_type, title, body) VALUES (?, ?, ?, ?) RETURNING *",
+      [recipientEmail, event_type, title, body]
+    );
 
-    const notification: InAppNotification = { ...row, read: Boolean(row.read) };
-
-    // Purge to keep only 15 most recent
-    purgeOldInAppNotifications(recipientEmail);
-
-    // Real-time push
-    if (notificationEmitter) {
-      notificationEmitter(recipientEmail, notification);
+    if (row) {
+      const notification: InAppNotification = { ...row, read: Boolean(row.read) };
+      await purgeOldInAppNotifications(recipientEmail);
+      if (notificationEmitter) {
+        notificationEmitter(recipientEmail, notification);
+      }
     }
   }
 
-  // Email notification
   if (emailEnabled) {
     const html = `<h2>${title}</h2><p>${body}</p><hr><p style="color:#888;font-size:12px">Octoby AI Notification</p>`;
     await sendMail(recipientEmail, `[Octoby AI] ${title}`, html).catch(() => {});
   }
 }
 
-export function purgeOldInAppNotifications(userEmail: string): void {
-  db.prepare(`
+export async function purgeOldInAppNotifications(userEmail: string): Promise<void> {
+  await dbRun(`
     DELETE FROM inapp_notifications
     WHERE user_email = ?
     AND id NOT IN (
@@ -130,43 +127,43 @@ export function purgeOldInAppNotifications(userEmail: string): void {
       ORDER BY id DESC
       LIMIT 15
     )
-  `).run(userEmail, userEmail);
+  `, [userEmail, userEmail]);
 }
 
-// ── Query helpers ─────────────────────────────────────────────────────────
-
-export function getInAppNotifications(userEmail: string): InAppNotification[] {
-  const rows = db.prepare(
-    "SELECT * FROM inapp_notifications WHERE user_email = ? ORDER BY id DESC"
-  ).all(userEmail) as { id: number; user_email: string; event_type: string; title: string; body: string; read: number; created_at: string }[];
+export async function getInAppNotifications(userEmail: string): Promise<InAppNotification[]> {
+  const rows = await dbAll<{ id: number; user_email: string; event_type: string; title: string; body: string; read: number; created_at: string }>(
+    "SELECT * FROM inapp_notifications WHERE user_email = ? ORDER BY id DESC",
+    [userEmail]
+  );
   return rows.map((r) => ({ ...r, read: Boolean(r.read) }));
 }
 
-export function getUnreadCount(userEmail: string): number {
-  const row = db.prepare(
-    "SELECT COUNT(*) as count FROM inapp_notifications WHERE user_email = ? AND read = 0"
-  ).get(userEmail) as { count: number };
-  return row.count;
+export async function getUnreadCount(userEmail: string): Promise<number> {
+  const row = await dbGet<{ count: number }>(
+    "SELECT COUNT(*) as count FROM inapp_notifications WHERE user_email = ? AND read = 0",
+    [userEmail]
+  );
+  return row?.count ?? 0;
 }
 
-export function markNotificationsRead(userEmail: string, ids: number[]): void {
+export async function markNotificationsRead(userEmail: string, ids: number[]): Promise<void> {
   if (ids.length === 0) return;
   const placeholders = ids.map(() => "?").join(",");
-  db.prepare(
-    `UPDATE inapp_notifications SET read = 1 WHERE user_email = ? AND id IN (${placeholders})`
-  ).run(userEmail, ...ids);
+  await dbRun(
+    `UPDATE inapp_notifications SET read = 1 WHERE user_email = ? AND id IN (${placeholders})`,
+    [userEmail, ...ids]
+  );
 }
 
-export function markAllNotificationsRead(userEmail: string): void {
-  db.prepare("UPDATE inapp_notifications SET read = 1 WHERE user_email = ?").run(userEmail);
+export async function markAllNotificationsRead(userEmail: string): Promise<void> {
+  await dbRun("UPDATE inapp_notifications SET read = 1 WHERE user_email = ?", [userEmail]);
 }
 
-// ── Preferences ──────────────────────────────────────────────────────────
-
-export function getNotificationPreferences(userEmail: string): NotificationPreference[] {
-  const rows = db.prepare(
-    "SELECT event_type, email_enabled, inapp_enabled FROM notification_preferences WHERE user_email = ?"
-  ).all(userEmail) as { event_type: string; email_enabled: number; inapp_enabled: number }[];
+export async function getNotificationPreferences(userEmail: string): Promise<NotificationPreference[]> {
+  const rows = await dbAll<{ event_type: string; email_enabled: number; inapp_enabled: number }>(
+    "SELECT event_type, email_enabled, inapp_enabled FROM notification_preferences WHERE user_email = ?",
+    [userEmail]
+  );
 
   const existing = new Map(rows.map((r) => [r.event_type, r]));
 
@@ -181,18 +178,18 @@ export function getNotificationPreferences(userEmail: string): NotificationPrefe
   });
 }
 
-export function setNotificationPreference(
+export async function setNotificationPreference(
   userEmail: string,
   event_type: string,
   email_enabled: boolean,
   inapp_enabled: boolean,
-): void {
-  db.prepare(`
+): Promise<void> {
+  await dbRun(`
     INSERT INTO notification_preferences (user_email, event_type, email_enabled, inapp_enabled, updated_at)
     VALUES (?, ?, ?, ?, datetime('now'))
     ON CONFLICT(user_email, event_type) DO UPDATE SET
       email_enabled = excluded.email_enabled,
       inapp_enabled = excluded.inapp_enabled,
       updated_at    = excluded.updated_at
-  `).run(userEmail, event_type, email_enabled ? 1 : 0, inapp_enabled ? 1 : 0);
+  `, [userEmail, event_type, email_enabled ? 1 : 0, inapp_enabled ? 1 : 0]);
 }

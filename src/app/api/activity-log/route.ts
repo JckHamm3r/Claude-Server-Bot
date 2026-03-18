@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import db from "@/lib/db";
+import { dbGet, dbAll } from "@/lib/db";
 
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -9,9 +9,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const user = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(session.user.email) as
-    | { is_admin: number }
-    | undefined;
+  const user = await dbGet<{ is_admin: number }>(
+    "SELECT is_admin FROM users WHERE email = ?",
+    [session.user.email]
+  );
   if (!user?.is_admin) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -20,13 +21,13 @@ export async function GET(request: NextRequest) {
   const limit = Math.min(500, Math.max(1, parseInt(searchParams.get("limit") ?? "50", 10) || 50));
   const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0", 10) || 0);
 
-  const entries = db
-    .prepare(
-      "SELECT id, timestamp, event_type, user_email, details FROM activity_log ORDER BY timestamp DESC LIMIT ? OFFSET ?"
-    )
-    .all(limit, offset) as { id: number; timestamp: string; event_type: string; user_email: string | null; details: string | null }[];
+  const entries = await dbAll<{ id: number; timestamp: string; event_type: string; user_email: string | null; details: string | null }>(
+    "SELECT id, timestamp, event_type, user_email, details FROM activity_log ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+    [limit, offset]
+  );
 
-  const { total } = db.prepare("SELECT COUNT(*) as total FROM activity_log").get() as { total: number };
+  const totalRow = await dbGet<{ total: number }>("SELECT COUNT(*) as total FROM activity_log");
+  const total = totalRow?.total ?? 0;
 
   return NextResponse.json({ entries, total, offset, limit });
 }

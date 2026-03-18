@@ -33,7 +33,7 @@ import { logActivity } from "../lib/activity-log";
 import { getAppSetting } from "../lib/app-settings";
 import { dispatchNotification } from "../lib/notifications";
 import { buildSystemPrompt } from "../lib/system-prompt";
-import db from "../lib/db";
+import { dbAll } from "../lib/db";
 import { releaseAllSessionLocks, cancelAllSessionQueuedOps } from "../lib/file-lock-manager";
 
 export function registerSessionHandlers(ctx: HandlerContext) {
@@ -68,7 +68,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
 
         // Block observe-only users (e.g. Guest) from creating sessions
         if (!isAdmin) {
-          const observeCheckPerms = getUserGroupPermissions(email);
+          const observeCheckPerms = await getUserGroupPermissions(email);
           if (observeCheckPerms.platform.observe_only) {
             socket.emit("claude:error", { sessionId, message: "Your account is in observe-only mode. Session creation is not permitted." });
             return;
@@ -82,7 +82,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         // Apply template if provided
         let templateSystemPrompt: string | undefined;
         if (templateId) {
-          const template = getTemplate(templateId);
+          const template = await getTemplate(templateId);
           if (template) {
             model = model ?? template.model;
             skipPermissions = skipPermissions ?? template.skip_permissions;
@@ -94,14 +94,14 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         const sessionModel = model ?? DEFAULT_MODEL;
         const sessionProviderType = provider_type ?? "sdk";
         const sessionPersonality = personality ?? "professional";
-        createSession(sessionId, email, skipPermissions ?? false, sessionModel, sessionProviderType, sessionPersonality);
+        await createSession(sessionId, email, skipPermissions ?? false, sessionModel, sessionProviderType, sessionPersonality);
 
         // Resolve per-session provider
         const sessionProvider = ctx.getSessionProvider(sessionId, sessionProviderType);
 
-        const userSettings = getUserSettings(email);
-        const groupPerms = isAdmin ? null : getUserGroupPermissions(email);
-        const userGroup = isAdmin ? null : getUserGroup(email);
+        const userSettings = await getUserSettings(email);
+        const groupPerms = isAdmin ? null : await getUserGroupPermissions(email);
+        const userGroup = isAdmin ? null : await getUserGroup(email);
         const systemPrompt = await buildSystemPrompt({
           interfaceType: interface_type,
           personality: sessionPersonality,
@@ -115,7 +115,8 @@ export function registerSessionHandlers(ctx: HandlerContext) {
           groupPromptAppend: groupPerms?.prompt?.system_prompt_append || undefined,
         });
         if (interface_type === "customization_interface") {
-          logActivity("customization_session_started", email, { sessionId });
+          await logActivity("customization_session_started", email, { sessionId });
+          await logActivity("transformer_session_started", email, { sessionId });
         }
 
         sessionProvider.createSession(sessionId, {
@@ -145,8 +146,8 @@ export function registerSessionHandlers(ctx: HandlerContext) {
 
   socket.on(
     "claude:set_active_session",
-    ({ sessionId }: { sessionId: string | null }) => {
-      if (sessionId && !canAccessSession(sessionId, email)) {
+    async ({ sessionId }: { sessionId: string | null }) => {
+      if (sessionId && !(await canAccessSession(sessionId, email))) {
         socket.emit("claude:error", { sessionId, message: "Access denied" });
         return;
       }
@@ -156,22 +157,22 @@ export function registerSessionHandlers(ctx: HandlerContext) {
     },
   );
 
-  socket.on("claude:list_sessions", () => {
+  socket.on("claude:list_sessions", async () => {
     try {
-      const sessions = listSessions(email);
+      const sessions = await listSessions(email);
       socket.emit("claude:sessions", { sessions });
     } catch {
       socket.emit("claude:sessions", { sessions: [] });
     }
   });
 
-  socket.on("claude:get_messages", ({ sessionId }: { sessionId: string }) => {
+  socket.on("claude:get_messages", async ({ sessionId }: { sessionId: string }) => {
     try {
-      if (!canAccessSession(sessionId, email)) {
+      if (!(await canAccessSession(sessionId, email))) {
         socket.emit("claude:error", { sessionId, message: "Access denied" });
         return;
       }
-      const messages = getMessages(sessionId);
+      const messages = await getMessages(sessionId);
       socket.emit("claude:messages", { sessionId, messages });
 
       const sp = ctx.getSessionProvider(sessionId);
@@ -201,22 +202,22 @@ export function registerSessionHandlers(ctx: HandlerContext) {
 
   socket.on(
     "claude:rename_session",
-    ({ sessionId, name }: { sessionId: string; name: string }) => {
+    async ({ sessionId, name }: { sessionId: string; name: string }) => {
       try {
-        if (!canModifySession(sessionId, email)) {
+        if (!(await canModifySession(sessionId, email))) {
           socket.emit("claude:error", { sessionId, message: "Access denied" });
           return;
         }
-        renameSession(sessionId, name);
+        await renameSession(sessionId, name);
         // Broadcast rename to all collaborators in the session room
         io.to(`session:${sessionId}`).emit("claude:session_renamed", { sessionId, name });
         // Also push updated session list to all participants' sockets
         // (covers participants who have the session in sidebar but not actively open)
-        const participants = listSessionParticipants(sessionId);
+        const participants = await listSessionParticipants(sessionId);
         for (const p of participants) {
           for (const [socketId, info] of ctx.connectedUsers.entries()) {
             if (info.email === p.user_email) {
-              const pSessions = listSessions(p.user_email);
+              const pSessions = await listSessions(p.user_email);
               io.to(socketId).emit("claude:sessions", { sessions: pSessions });
             }
           }
@@ -226,7 +227,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         socket.emit("claude:error", { message: "Failed to rename session." });
       }
       try {
-        const sessions = listSessions(email);
+        const sessions = await listSessions(email);
         socket.emit("claude:sessions", { sessions });
       } catch {
         socket.emit("claude:sessions", { sessions: [] });
@@ -236,7 +237,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
 
   socket.on("claude:delete_session", async ({ sessionId }: { sessionId: string }) => {
     try {
-      if (!canModifySession(sessionId, email)) return;
+      if (!(await canModifySession(sessionId, email))) return;
       const sp = ctx.getSessionProvider(sessionId);
       sp.offOutput(sessionId);
       sp.closeSession(sessionId);
@@ -265,12 +266,12 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         }
       } catch { /* ignore cleanup errors */ }
 
-      deleteSession(sessionId);
+      await deleteSession(sessionId);
     } catch (err: unknown) {
       console.error("[db] Failed to delete session:", err);
     }
     try {
-      const sessions = listSessions(email);
+      const sessions = await listSessions(email);
       socket.emit("claude:sessions", { sessions });
     } catch {
       socket.emit("claude:sessions", { sessions: [] });
@@ -279,17 +280,17 @@ export function registerSessionHandlers(ctx: HandlerContext) {
 
   socket.on(
     "claude:update_session_tags",
-    ({ sessionId, tags }: { sessionId: string; tags: string[] }) => {
+    async ({ sessionId, tags }: { sessionId: string; tags: string[] }) => {
       try {
-        const session = getSession(sessionId);
+        const session = await getSession(sessionId);
         if (!session || session.created_by !== email) return;
-        updateSessionTags(sessionId, tags);
+        await updateSessionTags(sessionId, tags);
       } catch (err: unknown) {
         console.error("[db] update_session_tags failed:", err);
         socket.emit("claude:error", { message: "Failed to update session tags." });
       }
       try {
-        const sessions = listSessions(email);
+        const sessions = await listSessions(email);
         socket.emit("claude:sessions", { sessions });
       } catch {
         socket.emit("claude:sessions", { sessions: [] });
@@ -297,15 +298,15 @@ export function registerSessionHandlers(ctx: HandlerContext) {
     },
   );
 
-  socket.on("claude:close_session", ({ sessionId }: { sessionId: string }) => {
-    if (!canModifySession(sessionId, email)) {
+  socket.on("claude:close_session", async ({ sessionId }: { sessionId: string }) => {
+    if (!(await canModifySession(sessionId, email))) {
       socket.emit("claude:error", { sessionId, message: "Access denied" });
       return;
     }
     const sp = ctx.getSessionProvider(sessionId);
     // Suspend instead of close — preserves claudeSessionId for --resume
     sp.suspendSession(sessionId);
-    ctx.setSessionStatus(sessionId, "idle");
+    await ctx.setSessionStatus(sessionId, "idle");
     ctx.sessionListeners.delete(sessionId);
     ctx.sessionStreamingContent.delete(sessionId);
     ctx.sessionPendingUsage.delete(sessionId);
@@ -316,9 +317,9 @@ export function registerSessionHandlers(ctx: HandlerContext) {
 
   socket.on(
     "claude:set_model",
-    ({ sessionId, model }: { sessionId: string; model: string }) => {
+    async ({ sessionId, model }: { sessionId: string; model: string }) => {
       try {
-        if (!canModifySession(sessionId, email)) {
+        if (!(await canModifySession(sessionId, email))) {
           socket.emit("claude:error", { sessionId, message: "Access denied" });
           return;
         }
@@ -326,7 +327,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
           socket.emit("claude:error", { sessionId, message: "Invalid model" });
           return;
         }
-        updateSessionModel(sessionId, model);
+        await updateSessionModel(sessionId, model);
         io.to(`session:${sessionId}`).emit("claude:model_changed", { sessionId, model });
       } catch (err) {
         socket.emit("claude:error", { message: String(err) });
@@ -344,12 +345,12 @@ export function registerSessionHandlers(ctx: HandlerContext) {
   socket.on(
     "claude:rejoin_session",
     async ({ sessionId }: { sessionId: string }) => {
-      if (!canAccessSession(sessionId, email)) {
+      if (!(await canAccessSession(sessionId, email))) {
         socket.emit("claude:error", { sessionId, message: "Access denied" });
         return;
       }
 
-      const dbSession = getSession(sessionId);
+      const dbSession = await getSession(sessionId);
       if (!dbSession) {
         socket.emit("claude:error", { sessionId, message: "Session not found" });
         return;
@@ -366,9 +367,9 @@ export function registerSessionHandlers(ctx: HandlerContext) {
       // is still alive in memory, just re-attach the listener.
       const hasResumeId = sessionProvider.getClaudeSessionId?.(sessionId) != null;
       if (!hasResumeId) {
-        const rejoinSettings = getUserSettings(email);
-        const rejoinGroupPerms = isAdmin ? null : getUserGroupPermissions(email);
-        const rejoinUserGroup = isAdmin ? null : getUserGroup(email);
+        const rejoinSettings = await getUserSettings(email);
+        const rejoinGroupPerms = isAdmin ? null : await getUserGroupPermissions(email);
+        const rejoinUserGroup = isAdmin ? null : await getUserGroup(email);
         const systemPrompt = await buildSystemPrompt({
           personality: dbSession.personality ?? undefined,
           communicationStyle: rejoinGroupPerms?.prompt?.communication_style || "expert",
@@ -402,8 +403,8 @@ export function registerSessionHandlers(ctx: HandlerContext) {
   // ── Runtime timer reset ────────────────────────────────────────────
   // Resets the session's runtime start time so users can continue after
   // hitting the rate_limit_runtime_min limit.
-  socket.on("claude:reset_runtime", ({ sessionId }: { sessionId: string }) => {
-    if (!canAccessSession(sessionId, email)) {
+  socket.on("claude:reset_runtime", async ({ sessionId }: { sessionId: string }) => {
+    if (!(await canAccessSession(sessionId, email))) {
       socket.emit("claude:error", { sessionId, message: "Access denied" });
       return;
     }
@@ -414,8 +415,8 @@ export function registerSessionHandlers(ctx: HandlerContext) {
   // ── Session state sync (reconnection) ─────────────────────────────
   socket.on(
     "claude:get_session_state",
-    ({ sessionId }: { sessionId: string }) => {
-      if (!canAccessSession(sessionId, email)) {
+    async ({ sessionId }: { sessionId: string }) => {
+      if (!(await canAccessSession(sessionId, email))) {
         socket.emit("claude:error", { sessionId, message: "Access denied" });
         return;
       }
@@ -430,8 +431,8 @@ export function registerSessionHandlers(ctx: HandlerContext) {
   // ── Session health check ────────────────────────────────────────────
   socket.on(
     "claude:check_session_health",
-    ({ sessionId }: { sessionId: string }) => {
-      if (!canAccessSession(sessionId, email)) {
+    async ({ sessionId }: { sessionId: string }) => {
+      if (!(await canAccessSession(sessionId, email))) {
         socket.emit("claude:error", { sessionId, message: "Access denied" });
         return;
       }
@@ -451,17 +452,17 @@ export function registerSessionHandlers(ctx: HandlerContext) {
 
   socket.on(
     "claude:get_usage",
-    ({ sessionId }: { sessionId: string }) => {
+    async ({ sessionId }: { sessionId: string }) => {
       try {
-        if (!canAccessSession(sessionId, email)) {
+        if (!(await canAccessSession(sessionId, email))) {
           socket.emit("claude:error", { sessionId, message: "Access denied" });
           return;
         }
-        const usage = getSessionTokenUsage(sessionId);
+        const usage = await getSessionTokenUsage(sessionId);
         const budgetLimits = {
-          session_usd: parseFloat(getAppSetting("budget_limit_session_usd", "0")),
-          daily_usd: parseFloat(getAppSetting("budget_limit_daily_usd", "0")),
-          monthly_usd: parseFloat(getAppSetting("budget_limit_monthly_usd", "0")),
+          session_usd: parseFloat(await getAppSetting("budget_limit_session_usd", "0")),
+          daily_usd: parseFloat(await getAppSetting("budget_limit_daily_usd", "0")),
+          monthly_usd: parseFloat(await getAppSetting("budget_limit_monthly_usd", "0")),
         };
         socket.emit("claude:session_usage", { sessionId, usage, budgetLimits });
       } catch (err) {
@@ -470,10 +471,10 @@ export function registerSessionHandlers(ctx: HandlerContext) {
     },
   );
 
-  socket.on("claude:get_global_usage", ({ since, userId }: { since?: string; userId?: string }) => {
+  socket.on("claude:get_global_usage", async ({ since, userId }: { since?: string; userId?: string }) => {
     try {
       const effectiveUserId = isAdmin ? userId : email;
-      const usage = getGlobalTokenUsage({ since, userId: effectiveUserId });
+      const usage = await getGlobalTokenUsage({ since, userId: effectiveUserId });
       socket.emit("claude:global_usage", { usage });
     } catch (err) {
       socket.emit("claude:error", { message: String(err) });
@@ -514,12 +515,12 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         ctx.sessionStartTimes.delete(sid);
         ctx.sessionEventBuffers.delete(sid);
       }
-      logActivity("kill_all", email);
+      await logActivity("kill_all", email);
       socket.emit("claude:kill_all_done", { killed: allSessionIds.size });
       io.emit("claude:sessions_aborted");
 
       // Notify all admins
-      const admins = db.prepare("SELECT email FROM users WHERE is_admin = 1").all() as { email: string }[];
+      const admins = await dbAll<{ email: string }>("SELECT email FROM users WHERE is_admin = 1");
       for (const admin of admins) {
         dispatchNotification("kill_all_triggered", admin.email, "Kill-all triggered", `All active sessions were terminated by ${email}.`).catch(() => {});
       }
@@ -530,18 +531,18 @@ export function registerSessionHandlers(ctx: HandlerContext) {
 
   // ── Settings handlers ─────────────────────────────────────────────────
 
-  socket.on("claude:get_settings", () => {
+  socket.on("claude:get_settings", async () => {
     try {
-      const s = getUserSettings(email);
+      const s = await getUserSettings(email);
       socket.emit("claude:settings", { settings: s });
     } catch { /* ignore */ }
   });
 
   socket.on(
     "claude:update_settings",
-    (data: Partial<{ full_trust_mode: boolean; custom_default_context: string | null; auto_naming_enabled: boolean }>) => {
+    async (data: Partial<{ full_trust_mode: boolean; custom_default_context: string | null; auto_naming_enabled: boolean }>) => {
       try {
-        const updated = updateUserSettings(email, data);
+        const updated = await updateUserSettings(email, data);
         socket.emit("claude:settings", { settings: updated });
       } catch (err) {
         socket.emit("claude:error", { message: String(err) });
@@ -551,9 +552,9 @@ export function registerSessionHandlers(ctx: HandlerContext) {
 
   // ── Template handlers ──────────────────────────────────────────────────
 
-  socket.on("claude:list_templates", () => {
+  socket.on("claude:list_templates", async () => {
     try {
-      const templates = listTemplates();
+      const templates = await listTemplates();
       socket.emit("claude:templates", { templates });
     } catch (err) {
       socket.emit("claude:error", { message: String(err) });
@@ -562,14 +563,14 @@ export function registerSessionHandlers(ctx: HandlerContext) {
 
   socket.on(
     "claude:create_template",
-    (data: { name: string; description?: string; system_prompt?: string; model?: string; skip_permissions?: boolean; provider_type?: string; icon?: string; is_default?: boolean }) => {
+    async (data: { name: string; description?: string; system_prompt?: string; model?: string; skip_permissions?: boolean; provider_type?: string; icon?: string; is_default?: boolean }) => {
       if (!isAdmin) {
         socket.emit("claude:error", { message: "Admin access required" });
         return;
       }
       try {
-        createTemplate(data, email);
-        const templates = listTemplates();
+        await createTemplate(data, email);
+        const templates = await listTemplates();
         socket.emit("claude:templates", { templates });
       } catch (err) {
         socket.emit("claude:error", { message: String(err) });
@@ -579,14 +580,14 @@ export function registerSessionHandlers(ctx: HandlerContext) {
 
   socket.on(
     "claude:update_template",
-    ({ templateId, data }: { templateId: string; data: Partial<{ name: string; description: string; system_prompt: string; model: string; skip_permissions: boolean; provider_type: string; icon: string; is_default: boolean }> }) => {
+    async ({ templateId, data }: { templateId: string; data: Partial<{ name: string; description: string; system_prompt: string; model: string; skip_permissions: boolean; provider_type: string; icon: string; is_default: boolean }> }) => {
       if (!isAdmin) {
         socket.emit("claude:error", { message: "Admin access required" });
         return;
       }
       try {
-        updateTemplate(templateId, data);
-        const templates = listTemplates();
+        await updateTemplate(templateId, data);
+        const templates = await listTemplates();
         socket.emit("claude:templates", { templates });
       } catch (err) {
         socket.emit("claude:error", { message: String(err) });
@@ -594,14 +595,14 @@ export function registerSessionHandlers(ctx: HandlerContext) {
     },
   );
 
-  socket.on("claude:delete_template", ({ templateId }: { templateId: string }) => {
+  socket.on("claude:delete_template", async ({ templateId }: { templateId: string }) => {
     if (!isAdmin) {
       socket.emit("claude:error", { message: "Admin access required" });
       return;
     }
     try {
-      deleteTemplate(templateId);
-      const templates = listTemplates();
+      await deleteTemplate(templateId);
+      const templates = await listTemplates();
       socket.emit("claude:templates", { templates });
     } catch (err) {
       socket.emit("claude:error", { message: String(err) });
@@ -611,9 +612,9 @@ export function registerSessionHandlers(ctx: HandlerContext) {
   // ── Session sharing ────────────────────────────────────────────────────
 
   /** Emit updated session list to all currently-connected sockets for a given user email. */
-  function pushSessionsToUser(targetEmail: string) {
+  async function pushSessionsToUser(targetEmail: string) {
     try {
-      const updatedSessions = listSessions(targetEmail);
+      const updatedSessions = await listSessions(targetEmail);
       for (const [socketId, info] of ctx.connectedUsers.entries()) {
         if (info.email === targetEmail) {
           io.to(socketId).emit("claude:sessions", { sessions: updatedSessions });
@@ -622,19 +623,19 @@ export function registerSessionHandlers(ctx: HandlerContext) {
     } catch { /* best-effort */ }
   }
 
-  socket.on("claude:invite_to_session", ({ sessionId, inviteEmail }: { sessionId: string; inviteEmail: string }) => {
+  socket.on("claude:invite_to_session", async ({ sessionId, inviteEmail }: { sessionId: string; inviteEmail: string }) => {
     try {
-      if (!canModifySession(sessionId, email)) {
+      if (!(await canModifySession(sessionId, email))) {
         socket.emit("claude:error", { sessionId, message: "Only session owner or admin can invite" });
         return;
       }
-      addSessionParticipant(sessionId, inviteEmail);
-      const participants = listSessionParticipants(sessionId);
+      await addSessionParticipant(sessionId, inviteEmail);
+      const participants = await listSessionParticipants(sessionId);
       socket.emit("claude:session_participants", { sessionId, participants });
       // Push real-time update to the invited user's connected sockets
-      pushSessionsToUser(inviteEmail);
+      await pushSessionsToUser(inviteEmail);
       // Notify the invited user with a dedicated event and in-app notification
-      const invitedSession = getSession(sessionId);
+      const invitedSession = await getSession(sessionId);
       const sessionLabel = invitedSession?.name ?? "a session";
       for (const [socketId, info] of ctx.connectedUsers.entries()) {
         if (info.email === inviteEmail) {
@@ -656,17 +657,17 @@ export function registerSessionHandlers(ctx: HandlerContext) {
     }
   });
 
-  socket.on("claude:remove_from_session", ({ sessionId, removeEmail }: { sessionId: string; removeEmail: string }) => {
+  socket.on("claude:remove_from_session", async ({ sessionId, removeEmail }: { sessionId: string; removeEmail: string }) => {
     try {
-      if (!canModifySession(sessionId, email) && removeEmail !== email) {
+      if (!(await canModifySession(sessionId, email)) && removeEmail !== email) {
         socket.emit("claude:error", { sessionId, message: "Only session owner or admin can remove" });
         return;
       }
-      removeSessionParticipant(sessionId, removeEmail);
-      const participants = listSessionParticipants(sessionId);
+      await removeSessionParticipant(sessionId, removeEmail);
+      const participants = await listSessionParticipants(sessionId);
       socket.emit("claude:session_participants", { sessionId, participants });
       // Push real-time removal to the removed user's connected sockets
-      pushSessionsToUser(removeEmail);
+      await pushSessionsToUser(removeEmail);
       // Also tell the removed user to deactivate the session if they have it open
       for (const [socketId, info] of ctx.connectedUsers.entries()) {
         if (info.email === removeEmail && info.activeSession === sessionId) {
@@ -678,13 +679,13 @@ export function registerSessionHandlers(ctx: HandlerContext) {
     }
   });
 
-  socket.on("claude:list_session_participants", ({ sessionId }: { sessionId: string }) => {
+  socket.on("claude:list_session_participants", async ({ sessionId }: { sessionId: string }) => {
     try {
-      if (!canAccessSession(sessionId, email)) {
+      if (!(await canAccessSession(sessionId, email))) {
         socket.emit("claude:error", { sessionId, message: "Access denied" });
         return;
       }
-      socket.emit("claude:session_participants", { sessionId, participants: listSessionParticipants(sessionId) });
+      socket.emit("claude:session_participants", { sessionId, participants: await listSessionParticipants(sessionId) });
     } catch {
       socket.emit("claude:error", { sessionId, message: "Failed to list participants" });
     }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
-import db from "@/lib/db";
+import { dbGet, dbAll, dbRun } from "@/lib/db";
 
 interface NotificationRow {
   id: number;
@@ -19,22 +19,22 @@ export async function GET(req: NextRequest) {
 
   const limit = parseInt(req.nextUrl.searchParams.get("limit") ?? "20", 10);
 
-  const notifications = db
-    .prepare(
-      "SELECT id, event_type, title, body, read, created_at FROM inapp_notifications WHERE user_email = ? ORDER BY id DESC LIMIT ?"
-    )
-    .all(token.email as string, limit) as NotificationRow[];
+  const notifications = await dbAll<NotificationRow>(
+    "SELECT id, event_type, title, body, read, created_at FROM inapp_notifications WHERE user_email = ? ORDER BY id DESC LIMIT ?",
+    [token.email as string, limit]
+  );
 
-  const unread = db
-    .prepare("SELECT COUNT(*) as count FROM inapp_notifications WHERE user_email = ? AND read = 0")
-    .get(token.email as string) as { count: number };
+  const unread = await dbGet<{ count: number }>(
+    "SELECT COUNT(*) as count FROM inapp_notifications WHERE user_email = ? AND read = 0",
+    [token.email as string]
+  );
 
   return NextResponse.json({
     notifications: notifications.map((n) => ({
       ...n,
       read: Boolean(n.read),
     })),
-    unread: unread.count,
+    unread: unread?.count ?? 0,
   });
 }
 
@@ -52,12 +52,16 @@ export async function POST(req: NextRequest) {
   }
 
   if (body.all) {
-    db.prepare("UPDATE inapp_notifications SET read = 1 WHERE user_email = ?").run(token.email as string);
+    await dbRun(
+      "UPDATE inapp_notifications SET read = 1 WHERE user_email = ?",
+      [token.email as string]
+    );
   } else if (Array.isArray(body.ids) && body.ids.length > 0) {
     const placeholders = body.ids.map(() => "?").join(",");
-    db.prepare(
-      `UPDATE inapp_notifications SET read = 1 WHERE user_email = ? AND id IN (${placeholders})`
-    ).run(token.email as string, ...body.ids);
+    await dbRun(
+      `UPDATE inapp_notifications SET read = 1 WHERE user_email = ? AND id IN (${placeholders})`,
+      [token.email as string, ...body.ids]
+    );
   }
 
   return NextResponse.json({ ok: true });

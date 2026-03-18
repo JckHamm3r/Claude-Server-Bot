@@ -26,10 +26,10 @@ export interface HandlerContext {
   ptyProcesses: Map<string, any>;
   // Helper functions
   getSessionProvider: (sessionId: string, providerType?: string) => ClaudeCodeProvider;
-  setSessionStatus: (sessionId: string, status: SessionStatus) => void;
+  setSessionStatus: (sessionId: string, status: SessionStatus) => Promise<void>;
   ensureSessionListener: (sessionId: string) => void;
   broadcastPresence: () => void;
-  checkRateLimit: (email: string, sessionId: string) => { ok: boolean; reason?: string };
+  checkRateLimit: (email: string, sessionId: string) => Promise<{ ok: boolean; reason?: string }>;
   incrementSessionCommands: (email: string, sessionId: string) => void;
   retrySaveMessage: (
     sessionId: string,

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import db from "@/lib/db";
+import { dbGet, dbRun } from "@/lib/db";
 import fs from "fs";
 import path from "path";
 
@@ -66,9 +66,10 @@ async function getExpertAdminEmail(): Promise<string | null> {
   if (!session?.user?.email) return null;
   const email = session.user.email;
 
-  const user = db
-    .prepare("SELECT is_admin FROM users WHERE email = ?")
-    .get(email) as { is_admin: number } | undefined;
+  const user = await dbGet<{ is_admin: number }>(
+    "SELECT is_admin FROM users WHERE email = ?",
+    [email]
+  );
   if (!user?.is_admin) return null;
 
   return email;
@@ -116,17 +117,19 @@ function deleteEnvLine(lines: string[], key: string): string[] {
   return lines.filter((l) => !l.trim().startsWith(`${key}=`));
 }
 
-function getMetadata(key: string): SecretMetaRow {
-  const row = db
-    .prepare("SELECT key, type, description FROM secret_metadata WHERE key = ?")
-    .get(key) as SecretMetaRow | undefined;
+async function getMetadata(key: string): Promise<SecretMetaRow> {
+  const row = await dbGet<SecretMetaRow>(
+    "SELECT key, type, description FROM secret_metadata WHERE key = ?",
+    [key]
+  );
   if (row) return row;
 
   // Auto-classify and persist
   const inferred = inferType(key);
-  db.prepare(
-    "INSERT OR IGNORE INTO secret_metadata (key, type, description) VALUES (?, ?, ?)"
-  ).run(key, inferred.type, inferred.description);
+  await dbRun(
+    "INSERT OR IGNORE INTO secret_metadata (key, type, description) VALUES (?, ?, ?)",
+    [key, inferred.type, inferred.description]
+  );
   return { key, type: inferred.type, description: inferred.description };
 }
 
@@ -147,7 +150,7 @@ export async function GET(request: NextRequest) {
     if (isDenied(upperRevealKey)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    const meta = getMetadata(upperRevealKey);
+    const meta = await getMetadata(upperRevealKey);
     if (meta.type !== "api_key") {
       return NextResponse.json({ error: "Only API keys can be revealed" }, { status: 403 });
     }
@@ -155,10 +158,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ key: upperRevealKey, value });
   }
 
-  const vars = Array.from(parsed.entries())
-    .filter(([key]) => !isDenied(key))
-    .map(([key, rawValue]) => {
-      const meta = getMetadata(key);
+  const entries = Array.from(parsed.entries()).filter(([key]) => !isDenied(key));
+  const vars = await Promise.all(
+    entries.map(async ([key, rawValue]) => {
+      const meta = await getMetadata(key);
       const isSet = rawValue.trim().length > 0;
 
       const base = {
@@ -177,7 +180,9 @@ export async function GET(request: NextRequest) {
       // secret — no value exposed
       return base;
     })
-    .sort((a, b) => a.key.localeCompare(b.key));
+  );
+
+  vars.sort((a, b) => a.key.localeCompare(b.key));
 
   return NextResponse.json({ vars });
 }
@@ -211,9 +216,10 @@ export async function PUT(request: NextRequest) {
   }
 
   const validTypes: SecretType[] = ["secret", "api_key", "variable"];
+  const existingMeta = await getMetadata(upperKey);
   const resolvedType: SecretType = (type && validTypes.includes(type as SecretType))
     ? (type as SecretType)
-    : (getMetadata(upperKey).type ?? "secret");
+    : (existingMeta.type ?? "secret");
 
   const resolvedDescription = typeof description === "string" ? description : "";
 
@@ -229,9 +235,10 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "Failed to write configuration" }, { status: 500 });
   }
 
-  db.prepare(
-    "INSERT INTO secret_metadata (key, type, description) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET type = excluded.type, description = excluded.description"
-  ).run(upperKey, resolvedType, resolvedDescription);
+  await dbRun(
+    "INSERT INTO secret_metadata (key, type, description) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET type = excluded.type, description = excluded.description",
+    [upperKey, resolvedType, resolvedDescription]
+  );
 
   return NextResponse.json({ ok: true, requiresRestart: true });
 }
@@ -268,7 +275,7 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "Failed to update configuration" }, { status: 500 });
   }
 
-  db.prepare("DELETE FROM secret_metadata WHERE key = ?").run(upperKey);
+  await dbRun("DELETE FROM secret_metadata WHERE key = ?", [upperKey]);
 
   return NextResponse.json({ ok: true, requiresRestart: true });
 }

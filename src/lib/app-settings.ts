@@ -1,4 +1,4 @@
-import db from "./db";
+import { dbGet, dbRun } from "./db";
 
 const KNOWN_SETTING_KEYS = [
   "anthropic_api_key",
@@ -34,18 +34,19 @@ const KNOWN_SETTING_KEYS = [
  * secure default (typically "true" / enabled) so that failures don't
  * silently disable protections.
  */
-export function getAppSetting(key: string, defaultValue = ""): string {
+export async function getAppSetting(key: string, defaultValue = ""): Promise<string> {
   try {
-    const row = db
-      .prepare("SELECT value FROM app_settings WHERE key = ?")
-      .get(key) as { value: string } | undefined;
+    const row = await dbGet<{ value: string }>(
+      "SELECT value FROM app_settings WHERE key = ?",
+      [key]
+    );
     return row?.value ?? defaultValue;
   } catch {
     return defaultValue;
   }
 }
 
-export function setAppSetting(key: string, value: string): void {
+export async function setAppSetting(key: string, value: string): Promise<void> {
   if (!KNOWN_SETTING_KEYS.includes(key)) {
     console.warn(
       `[app-settings] setAppSetting called with unknown key "${key}". ` +
@@ -54,9 +55,10 @@ export function setAppSetting(key: string, value: string): void {
     );
   }
 
-  db.prepare(
-    "INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = datetime('now')"
-  ).run(key, value, value);
+  await dbRun(
+    "INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = datetime('now')",
+    [key, value, value]
+  );
 }
 
 const PERSONALITY_PROMPTS: Record<string, string> = {
@@ -76,10 +78,10 @@ const PERSONALITY_PROMPTS: Record<string, string> = {
     "Personality: strict software engineer. Prioritize correctness, type safety, and best practices. Challenge assumptions. Point out edge cases and potential bugs.",
 };
 
-export function getPersonalityPrefix(override?: string, customPrompt?: string): string {
-  const personality = override ?? getAppSetting("personality", "professional");
+export async function getPersonalityPrefix(override?: string, customPrompt?: string): Promise<string> {
+  const personality = override ?? await getAppSetting("personality", "professional");
   if (personality === "custom") {
-    return customPrompt ?? getAppSetting("personality_custom", "");
+    return customPrompt ?? await getAppSetting("personality_custom", "");
   }
   return PERSONALITY_PROMPTS[personality] ?? PERSONALITY_PROMPTS.professional;
 }

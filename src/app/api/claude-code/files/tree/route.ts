@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import db from "@/lib/db";
+import { dbGet } from "@/lib/db";
 import fs from "fs";
 import path from "path";
 
@@ -36,9 +36,7 @@ export async function GET(req: NextRequest) {
   }
 
   // Admin only for the file browser
-  const user = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(session.user.email) as
-    | { is_admin: number }
-    | undefined;
+  const user = await dbGet<{ is_admin: number }>("SELECT is_admin FROM users WHERE email = ?", [session.user.email]);
   if (!user?.is_admin) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }

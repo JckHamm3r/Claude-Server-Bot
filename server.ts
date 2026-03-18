@@ -9,13 +9,17 @@ const dev = process.env.NODE_ENV !== "production";
 const app = next({ dev });
 const handle = app.getRequestHandler();
 
-app.prepare().then(() => {
+app.prepare().then(async () => {
   // Import handlers AFTER app.prepare() so .env vars are loaded
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { registerHandlers, shutdownAllSessions } = require("./src/socket/handlers") as {
     registerHandlers: (io: Server) => void;
     shutdownAllSessions: () => void;
   };
+
+  // Initialize database and run migrations
+  const { initDb } = await import("./src/lib/db");
+  await initDb();
 
   const slug = process.env.CLAUDE_BOT_SLUG ?? "";
   const prefix = process.env.CLAUDE_BOT_PATH_PREFIX ?? "c";
@@ -52,7 +56,7 @@ app.prepare().then(() => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { extractIP, checkAndRecordApiRequest, isIPBlocked, getIPProtectionSettings } = require("./src/lib/ip-protection") as typeof import("./src/lib/ip-protection");
 
-  const handler = (req: import("http").IncomingMessage, res: import("http").ServerResponse) => {
+  const handler = async (req: import("http").IncomingMessage, res: import("http").ServerResponse) => {
     if (useHttps && !req.headers["x-forwarded-proto"]) {
       req.headers["x-forwarded-proto"] = "https";
     }
@@ -107,7 +111,7 @@ app.prepare().then(() => {
       const mockReq = { headers: { cookie: cookieHeader }, cookies } as Parameters<typeof getToken>[0]["req"];
 
       getToken({ req: mockReq, secret: widgetSecret, cookieName: widgetCookieName, secureCookie: widgetCookieName.startsWith("__Secure-") })
-        .then((token: unknown) => {
+        .then(async (token: unknown) => {
           if (!token || !(token as Record<string, unknown>).email) {
             res.writeHead(401, corsHeaders);
             res.end(JSON.stringify({ authenticated: false }));
@@ -115,9 +119,8 @@ app.prepare().then(() => {
           }
           let botName = "Octoby";
           try {
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            const db = require("./src/lib/db").default;
-            const row = db.prepare("SELECT name FROM bot_settings WHERE id = 1").get() as { name: string } | undefined;
+            const { dbGet } = await import("./src/lib/db");
+            const row = await dbGet<{ name: string }>("SELECT name FROM bot_settings WHERE id = 1");
             if (row?.name) botName = row.name;
           } catch { /* fallback to default */ }
           res.writeHead(200, corsHeaders);
@@ -139,7 +142,7 @@ app.prepare().then(() => {
       if (!url.startsWith("/_next") && !url.includes(".")) {
         try {
           const ip = extractIP(req.headers as Record<string, string | string[] | undefined>, (req.socket as { remoteAddress?: string }).remoteAddress);
-          checkAndRecordApiRequest(ip);
+          await checkAndRecordApiRequest(ip);
         } catch { /* ignore */ }
       }
       res.writeHead(404, { "Content-Type": "text/plain" });
@@ -154,7 +157,7 @@ app.prepare().then(() => {
         // Check if already blocked
         const ipSettings = getIPProtectionSettings();
         if (ipSettings.enabled) {
-          const block = isIPBlocked(ip);
+          const block = await isIPBlocked(ip);
           if (block.blocked) {
             res.writeHead(429, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: `IP blocked: ${block.reason ?? "Too many requests"}` }));
@@ -162,7 +165,7 @@ app.prepare().then(() => {
           }
         }
         // Check API abuse threshold
-        const abuseResult = checkAndRecordApiRequest(ip);
+        const abuseResult = await checkAndRecordApiRequest(ip);
         if (abuseResult.blocked) {
           res.writeHead(429, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "Too many requests — IP temporarily blocked" }));
@@ -211,7 +214,7 @@ app.prepare().then(() => {
 
   // Graceful shutdown: close sessions, flush data, checkpoint WAL, close DB
   let shuttingDown = false;
-  const gracefulShutdown = (signal: string) => {
+  const gracefulShutdown = async (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`\n[shutdown] Received ${signal}, shutting down gracefully...`);
@@ -228,10 +231,9 @@ app.prepare().then(() => {
     }
 
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const db = require("./src/lib/db").default;
-      db.pragma("wal_checkpoint(TRUNCATE)");
-      db.close();
+      const { dbPragma, dbClose } = await import("./src/lib/db");
+      await dbPragma("wal_checkpoint(TRUNCATE)");
+      await dbClose();
       console.log("[shutdown] Database checkpointed and closed");
     } catch (err) {
       console.error("[shutdown] Error closing database:", err);

@@ -37,9 +37,9 @@ export function registerPlanHandlers(ctx: HandlerContext) {
 
   // ── Agent handlers ────────────────────────────────────────────────────
 
-  socket.on("claude:list_agents", () => {
+  socket.on("claude:list_agents", async () => {
     try {
-      const agents = listAgents(email);
+      const agents = await listAgents(email);
       socket.emit("claude:agents", { agents });
     } catch {
       socket.emit("claude:agents", { agents: [] });
@@ -48,14 +48,14 @@ export function registerPlanHandlers(ctx: HandlerContext) {
 
   socket.on(
     "claude:create_agent",
-    ({ name, description, icon, model, allowed_tools }: {
+    async ({ name, description, icon, model, allowed_tools }: {
       name: string; description: string; icon?: string; model: string; allowed_tools: string[];
     }) => {
       try {
-        createAgent({ name, description, icon, model, allowed_tools }, email);
+        await createAgent({ name, description, icon, model, allowed_tools }, email);
         ctx.metricsBuffer.agent_count++;
-        logActivity("agent_created", email, { name });
-        const agents = listAgents(email);
+        await logActivity("agent_created", email, { name });
+        const agents = await listAgents(email);
         socket.emit("claude:agents", { agents });
       } catch (err) {
         socket.emit("claude:error", { message: String(err) });
@@ -65,19 +65,19 @@ export function registerPlanHandlers(ctx: HandlerContext) {
 
   socket.on(
     "claude:update_agent",
-    ({ agentId, data, changeDescription }: {
+    async ({ agentId, data, changeDescription }: {
       agentId: string;
       data: Partial<{ name: string; description: string; icon: string; model: string; allowed_tools: string[]; status: string }>;
       changeDescription?: string;
     }) => {
       try {
-        const agent = getAgent(agentId);
-        if (!agent || (agent.created_by !== email && !isUserAdmin(email))) {
+        const agent = await getAgent(agentId);
+        if (!agent || (agent.created_by !== email && !await isUserAdmin(email))) {
           socket.emit("claude:error", { message: "Access denied" });
           return;
         }
-        updateAgent(agentId, data, email, changeDescription);
-        const agents = listAgents(email);
+        await updateAgent(agentId, data, email, changeDescription);
+        const agents = await listAgents(email);
         socket.emit("claude:agents", { agents });
       } catch (err) {
         socket.emit("claude:error", { message: String(err) });
@@ -85,33 +85,33 @@ export function registerPlanHandlers(ctx: HandlerContext) {
     },
   );
 
-  socket.on("claude:delete_agent", ({ agentId }: { agentId: string }) => {
+  socket.on("claude:delete_agent", async ({ agentId }: { agentId: string }) => {
     try {
-      const agent = getAgent(agentId);
-      if (!agent || (agent.created_by !== email && !isUserAdmin(email))) {
+      const agent = await getAgent(agentId);
+      if (!agent || (agent.created_by !== email && !await isUserAdmin(email))) {
         socket.emit("claude:error", { message: "Access denied" });
         return;
       }
-      deleteAgent(agentId);
-      const agents = listAgents(email);
+      await deleteAgent(agentId);
+      const agents = await listAgents(email);
       socket.emit("claude:agents", { agents });
     } catch (err) {
       socket.emit("claude:error", { message: String(err) });
     }
   });
 
-  socket.on("claude:get_agent_versions", ({ agentId }: { agentId: string }) => {
+  socket.on("claude:get_agent_versions", async ({ agentId }: { agentId: string }) => {
     try {
-      const versions = getAgentVersions(agentId);
+      const versions = await getAgentVersions(agentId);
       socket.emit("claude:agent_versions", { agentId, versions });
     } catch (err) {
       socket.emit("claude:error", { message: String(err) });
     }
   });
 
-  socket.on("claude:get_agent_memories", ({ agentId }: { agentId: string }) => {
+  socket.on("claude:get_agent_memories", async ({ agentId }: { agentId: string }) => {
     try {
-      const memories = getAgentMemories(agentId);
+      const memories = await getAgentMemories(agentId);
       socket.emit("claude:agent_memories", { agentId, memories });
     } catch (err) {
       socket.emit("claude:error", { message: String(err) });
@@ -120,14 +120,14 @@ export function registerPlanHandlers(ctx: HandlerContext) {
 
   socket.on(
     "claude:set_memory_assignments",
-    ({ memoryId, isGlobal, agentIds }: { memoryId: string; isGlobal: boolean; agentIds: string[] }) => {
+    async ({ memoryId, isGlobal, agentIds }: { memoryId: string; isGlobal: boolean; agentIds: string[] }) => {
       try {
-        if (!isUserAdmin(email)) {
+        if (!await isUserAdmin(email)) {
           socket.emit("claude:error", { message: "Access denied" });
           return;
         }
-        setMemoryAssignments(memoryId, isGlobal, agentIds);
-        const memories = getMemories();
+        await setMemoryAssignments(memoryId, isGlobal, agentIds);
+        const memories = await getMemories();
         socket.emit("claude:memories_updated", { memories });
       } catch (err) {
         socket.emit("claude:error", { message: String(err) });
@@ -203,8 +203,8 @@ Return only the JSON object, no markdown, no explanation.`;
         }
         // Plans are user-owned; no session access check needed.
         // sessionId is a stable per-user grouping key, not a real chat session.
-        const plan = createPlan(sessionId, goal, email);
-        logActivity("plan_created", email, { planId: plan.id, goal });
+        const plan = await createPlan(sessionId, goal, email);
+        await logActivity("plan_created", email, { planId: plan.id, goal });
         const planSessionId = "plan-gen-" + plan.id;
         provider.createSession(planSessionId, { skipPermissions: true });
 
@@ -222,7 +222,7 @@ Be specific. Each step should be atomic and independently executable. Return onl
 
         let lastOutput = "";
 
-        provider.onOutput(planSessionId, (parsed) => {
+        provider.onOutput(planSessionId, async (parsed) => {
           if (parsed.type === "text" && parsed.content) {
             lastOutput = parsed.content;
             socket.emit("claude:plan_progress", { planId: plan.id, content: lastOutput });
@@ -240,25 +240,25 @@ Be specific. Each step should be atomic and independently executable. Return onl
                 .trim();
               const steps: { summary: string; details?: string }[] = JSON.parse(cleaned);
               const cappedSteps = steps.slice(0, 50);
-              updatePlanStatus(plan.id, "reviewing");
+              await updatePlanStatus(plan.id, "reviewing");
               for (let i = 0; i < cappedSteps.length; i++) {
-                addPlanStep(plan.id, {
+                await addPlanStep(plan.id, {
                   step_order: i + 1,
                   summary: cappedSteps[i].summary,
                   details: cappedSteps[i].details,
                 });
               }
-              const fullPlan = getPlan(plan.id);
+              const fullPlan = await getPlan(plan.id);
               socket.emit("claude:plan_generated", { plan: fullPlan });
             } catch {
-              updatePlanStatus(plan.id, "failed");
+              await updatePlanStatus(plan.id, "failed");
               socket.emit("claude:error", { message: "Failed to parse plan steps from Claude response" });
             }
           }
           if (parsed.type === "error") {
             provider.offOutput(planSessionId);
             provider.closeSession(planSessionId);
-            updatePlanStatus(plan.id, "failed");
+            await updatePlanStatus(plan.id, "failed");
             socket.emit("claude:error", { message: parsed.message ?? "Claude error during plan generation" });
           }
         });
@@ -270,14 +270,16 @@ Be specific. Each step should be atomic and independently executable. Return onl
     },
   );
 
-  socket.on("claude:list_plans", ({ sessionId }: { sessionId?: string }) => {
+  socket.on("claude:list_plans", async ({ sessionId }: { sessionId?: string }) => {
     try {
       // List ALL plans for this user so they persist across page refreshes.
-      const plans = listPlansForUser(email);
-      const plansWithSteps = plans.map((p) => {
-        const steps = getPlanSteps(p.id);
-        return { ...p, steps };
-      });
+      const plans = await listPlansForUser(email);
+      const plansWithSteps = await Promise.all(
+        plans.map(async (p) => {
+          const steps = await getPlanSteps(p.id);
+          return { ...p, steps };
+        }),
+      );
       socket.emit("claude:plans", { sessionId: sessionId ?? "", plans: plansWithSteps });
     } catch (err) {
       socket.emit("claude:error", { message: String(err) });
@@ -286,15 +288,15 @@ Be specific. Each step should be atomic and independently executable. Return onl
 
   socket.on(
     "claude:approve_step",
-    ({ stepId, planId }: { stepId: string; planId: string }) => {
+    async ({ stepId, planId }: { stepId: string; planId: string }) => {
       try {
-        const existingPlan = getPlan(planId);
-        if (!existingPlan || (existingPlan.created_by !== email && !isUserAdmin(email))) {
+        const existingPlan = await getPlan(planId);
+        if (!existingPlan || (existingPlan.created_by !== email && !await isUserAdmin(email))) {
           socket.emit("claude:error", { message: "Access denied" });
           return;
         }
-        updatePlanStep(stepId, { status: "approved", approved_by: email });
-        const plan = getPlan(planId);
+        await updatePlanStep(stepId, { status: "approved", approved_by: email });
+        const plan = await getPlan(planId);
         socket.emit("claude:plan_updated", { plan });
       } catch (err) {
         socket.emit("claude:error", { message: String(err) });
@@ -304,15 +306,15 @@ Be specific. Each step should be atomic and independently executable. Return onl
 
   socket.on(
     "claude:reject_step",
-    ({ stepId, planId }: { stepId: string; planId: string }) => {
+    async ({ stepId, planId }: { stepId: string; planId: string }) => {
       try {
-        const existingPlan = getPlan(planId);
-        if (!existingPlan || (existingPlan.created_by !== email && !isUserAdmin(email))) {
+        const existingPlan = await getPlan(planId);
+        if (!existingPlan || (existingPlan.created_by !== email && !await isUserAdmin(email))) {
           socket.emit("claude:error", { message: "Access denied" });
           return;
         }
-        updatePlanStep(stepId, { status: "rejected" });
-        const plan = getPlan(planId);
+        await updatePlanStep(stepId, { status: "rejected" });
+        const plan = await getPlan(planId);
         socket.emit("claude:plan_updated", { plan });
       } catch (err) {
         socket.emit("claude:error", { message: String(err) });
@@ -320,30 +322,30 @@ Be specific. Each step should be atomic and independently executable. Return onl
     },
   );
 
-  socket.on("claude:approve_all_steps", ({ planId }: { planId: string }) => {
+  socket.on("claude:approve_all_steps", async ({ planId }: { planId: string }) => {
     try {
-      const steps = getPlanSteps(planId);
+      const steps = await getPlanSteps(planId);
       for (const step of steps) {
         if (step.status === "pending") {
-          updatePlanStep(step.id, { status: "approved", approved_by: email });
+          await updatePlanStep(step.id, { status: "approved", approved_by: email });
         }
       }
-      const plan = getPlan(planId);
+      const plan = await getPlan(planId);
       socket.emit("claude:plan_updated", { plan });
     } catch (err) {
       socket.emit("claude:error", { message: String(err) });
     }
   });
 
-  socket.on("claude:reject_all_steps", ({ planId }: { planId: string }) => {
+  socket.on("claude:reject_all_steps", async ({ planId }: { planId: string }) => {
     try {
-      const steps = getPlanSteps(planId);
+      const steps = await getPlanSteps(planId);
       for (const step of steps) {
         if (step.status === "pending") {
-          updatePlanStep(step.id, { status: "rejected" });
+          await updatePlanStep(step.id, { status: "rejected" });
         }
       }
-      const plan = getPlan(planId);
+      const plan = await getPlan(planId);
       socket.emit("claude:plan_updated", { plan });
     } catch (err) {
       socket.emit("claude:error", { message: String(err) });
@@ -352,10 +354,10 @@ Be specific. Each step should be atomic and independently executable. Return onl
 
   socket.on(
     "claude:reorder_step",
-    ({ stepId, planId, newOrder }: { stepId: string; planId: string; newOrder: number }) => {
+    async ({ stepId, planId, newOrder }: { stepId: string; planId: string; newOrder: number }) => {
       try {
-        updatePlanStep(stepId, { step_order: newOrder });
-        const plan = getPlan(planId);
+        await updatePlanStep(stepId, { step_order: newOrder });
+        const plan = await getPlan(planId);
         socket.emit("claude:plan_updated", { plan });
       } catch (err) {
         socket.emit("claude:error", { message: String(err) });
@@ -365,10 +367,10 @@ Be specific. Each step should be atomic and independently executable. Return onl
 
   socket.on(
     "claude:edit_step",
-    ({ stepId, planId, summary, details }: { stepId: string; planId: string; summary: string; details: string }) => {
+    async ({ stepId, planId, summary, details }: { stepId: string; planId: string; summary: string; details: string }) => {
       try {
-        updatePlanStep(stepId, { summary, details });
-        const plan = getPlan(planId);
+        await updatePlanStep(stepId, { summary, details });
+        const plan = await getPlan(planId);
         socket.emit("claude:plan_updated", { plan });
       } catch (err) {
         socket.emit("claude:error", { message: String(err) });
@@ -378,12 +380,12 @@ Be specific. Each step should be atomic and independently executable. Return onl
 
   socket.on("claude:execute_plan", async ({ planId }: { planId: string }) => {
     try {
-      const plan = getPlan(planId);
+      const plan = await getPlan(planId);
       if (!plan) {
         socket.emit("claude:error", { message: "Plan not found" });
         return;
       }
-      if (plan.created_by !== email && !isUserAdmin(email)) {
+      if (plan.created_by !== email && !await isUserAdmin(email)) {
         socket.emit("claude:error", { message: "Access denied" });
         return;
       }
@@ -396,9 +398,9 @@ Be specific. Each step should be atomic and independently executable. Return onl
       planExecutionCounts.set(email, currentCount + 1);
       planOwners.set(planId, email);
 
-      logActivity("plan_executed", email, { planId });
+      await logActivity("plan_executed", email, { planId });
       const approvedSteps = (plan.steps ?? []).filter((s) => s.status === "approved");
-      updatePlanStatus(planId, "executing");
+      await updatePlanStatus(planId, "executing");
       socket.emit("claude:plan_executing", { planId });
 
       // Plan steps are user-approved, so always run with skipPermissions to
@@ -432,7 +434,7 @@ Be specific. Each step should be atomic and independently executable. Return onl
       let stepIdx = 0;
       while (stepIdx < approvedSteps.length) {
         const step = approvedSteps[stepIdx];
-        updatePlanStep(step.id, { status: "executing", executed_at: new Date().toISOString() });
+        await updatePlanStep(step.id, { status: "executing", executed_at: new Date().toISOString() });
         socket.emit("claude:step_executing", { planId, stepId: step.id });
 
         const stepPrompt = `Execute step ${stepIdx + 1}: ${sanitizePromptInput(step.summary)}${step.details ? `\nDetails: ${sanitizePromptInput(step.details)}` : ""}`;
@@ -460,7 +462,7 @@ Be specific. Each step should be atomic and independently executable. Return onl
         });
 
         if (stepError) {
-          updatePlanStep(step.id, { status: "failed", error: stepError });
+          await updatePlanStep(step.id, { status: "failed", error: stepError });
           socket.emit("claude:step_failed", { planId, stepId: step.id, error: stepError });
           socket.emit("claude:plan_paused", {
             planId,
@@ -477,8 +479,8 @@ Be specific. Each step should be atomic and independently executable. Return onl
             cleanupPlanSession();
             planExecutionCounts.set(email, (planExecutionCounts.get(email) ?? 1) - 1);
             planOwners.delete(planId);
-            updatePlanStatus(planId, "failed");
-            const updatedPlan = getPlan(planId);
+            await updatePlanStatus(planId, "failed");
+            const updatedPlan = await getPlan(planId);
             socket.emit("claude:plan_updated", { plan: updatedPlan });
             dispatchNotification("plan_failed", email, "Plan failed", `Plan execution failed and was stopped.`).catch(() => {});
             return;
@@ -492,7 +494,7 @@ Be specific. Each step should be atomic and independently executable. Return onl
           continue;
         }
 
-        updatePlanStep(step.id, { status: "completed", result: stepOutput });
+        await updatePlanStep(step.id, { status: "completed", result: stepOutput });
         socket.emit("claude:step_completed", { planId, stepId: step.id, result: stepOutput });
         stepIdx++;
       }
@@ -500,8 +502,8 @@ Be specific. Each step should be atomic and independently executable. Return onl
       cleanupPlanSession();
       planExecutionCounts.set(email, (planExecutionCounts.get(email) ?? 1) - 1);
       planOwners.delete(planId);
-      updatePlanStatus(planId, "completed");
-      const completedPlan = getPlan(planId);
+      await updatePlanStatus(planId, "completed");
+      const completedPlan = await getPlan(planId);
       socket.emit("claude:plan_completed", { plan: completedPlan });
       dispatchNotification("plan_completed", email, "Plan completed", `Your plan has been executed successfully.`).catch(() => {});
     } catch (err) {
@@ -532,15 +534,15 @@ Be specific. Each step should be atomic and independently executable. Return onl
     if (cb) cb("skip");
   });
 
-  socket.on("claude:cancel_plan", ({ planId }: { planId: string }) => {
+  socket.on("claude:cancel_plan", async ({ planId }: { planId: string }) => {
     try {
       const cb = ctx.planResumeCallbacks.get(planId);
       if (cb) {
         cb("cancel");
         return;
       }
-      updatePlanStatus(planId, "cancelled");
-      const plan = getPlan(planId);
+      await updatePlanStatus(planId, "cancelled");
+      const plan = await getPlan(planId);
       socket.emit("claude:plan_updated", { plan });
     } catch (err) {
       socket.emit("claude:error", { message: String(err) });
@@ -551,7 +553,7 @@ Be specific. Each step should be atomic and independently executable. Return onl
     "claude:refine_plan",
     async ({ planId, instruction }: { planId: string; instruction: string }) => {
       try {
-        const existingPlan = getPlan(planId);
+        const existingPlan = await getPlan(planId);
         if (!existingPlan) {
           socket.emit("claude:error", { message: "Plan not found" });
           return;
@@ -562,7 +564,7 @@ Be specific. Each step should be atomic and independently executable. Return onl
           .map((s, i) => `${i + 1}. ${s.summary}${s.details ? ` — ${s.details}` : ""}`)
           .join("\n");
 
-        updatePlanStatus(planId, "drafting");
+        await updatePlanStatus(planId, "drafting");
 
         const refineSessionId = `plan-refine-${planId}-${Date.now()}`;
         provider.createSession(refineSessionId, { skipPermissions: true });
@@ -586,7 +588,7 @@ Be specific. Each step should be atomic and independently executable. Return onl
 
         let lastOutput = "";
 
-        provider.onOutput(refineSessionId, (parsed) => {
+        provider.onOutput(refineSessionId, async (parsed) => {
           if (parsed.type === "text" && parsed.content) {
             lastOutput = parsed.content;
             socket.emit("claude:plan_progress", { planId, content: lastOutput });
@@ -604,26 +606,26 @@ Be specific. Each step should be atomic and independently executable. Return onl
                 .trim();
               const steps: { summary: string; details?: string }[] = JSON.parse(cleaned);
               const cappedSteps = steps.slice(0, 50);
-              deletePlanSteps(planId);
+              await deletePlanSteps(planId);
               for (let i = 0; i < cappedSteps.length; i++) {
-                addPlanStep(planId, {
+                await addPlanStep(planId, {
                   step_order: i + 1,
                   summary: cappedSteps[i].summary,
                   details: cappedSteps[i].details,
                 });
               }
-              updatePlanStatus(planId, "reviewing");
-              const fullPlan = getPlan(planId);
+              await updatePlanStatus(planId, "reviewing");
+              const fullPlan = await getPlan(planId);
               socket.emit("claude:plan_generated", { plan: fullPlan });
             } catch {
-              updatePlanStatus(planId, "failed");
+              await updatePlanStatus(planId, "failed");
               socket.emit("claude:error", { message: "Failed to parse refined plan from Claude response" });
             }
           }
           if (parsed.type === "error") {
             provider.offOutput(refineSessionId);
             provider.closeSession(refineSessionId);
-            updatePlanStatus(planId, "failed");
+            await updatePlanStatus(planId, "failed");
             socket.emit("claude:error", { message: parsed.message ?? "Claude error during plan refinement" });
           }
         });
@@ -635,14 +637,14 @@ Be specific. Each step should be atomic and independently executable. Return onl
     },
   );
 
-  socket.on("claude:delete_plan", ({ planId }: { planId: string }) => {
+  socket.on("claude:delete_plan", async ({ planId }: { planId: string }) => {
     try {
-      const existingPlan = getPlan(planId);
-      if (!existingPlan || (existingPlan.created_by !== email && !isUserAdmin(email))) {
+      const existingPlan = await getPlan(planId);
+      if (!existingPlan || (existingPlan.created_by !== email && !await isUserAdmin(email))) {
         socket.emit("claude:error", { message: "Access denied" });
         return;
       }
-      deletePlan(planId);
+      await deletePlan(planId);
       socket.emit("claude:plan_deleted", { planId });
     } catch (err) {
       socket.emit("claude:error", { message: String(err) });

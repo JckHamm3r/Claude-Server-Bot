@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import db from "@/lib/db";
+import { dbGet, dbRun } from "@/lib/db";
 import bcrypt from "bcryptjs";
 import { logActivity } from "@/lib/activity-log";
 
@@ -39,9 +39,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "New password is required" }, { status: 400 });
     }
 
-    const user = db.prepare("SELECT must_change_password FROM users WHERE email = ?").get(email) as
-      | { must_change_password: number }
-      | undefined;
+    const user = await dbGet<{ must_change_password: number }>(
+      "SELECT must_change_password FROM users WHERE email = ?",
+      [email]
+    );
 
     if (!user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -58,12 +59,12 @@ export async function POST(req: NextRequest) {
 
     const newHash = await bcrypt.hash(newPassword, 12);
 
-    db.prepare("UPDATE users SET hash = ?, must_change_password = 0 WHERE email = ?").run(
-      newHash,
-      email
+    await dbRun(
+      "UPDATE users SET hash = ?, must_change_password = 0 WHERE email = ?",
+      [newHash, email]
     );
 
-    logActivity("user_password_changed", email, { reason: "forced" });
+    await logActivity("user_password_changed", email, { reason: "forced" });
 
     return NextResponse.json({ success: true });
   } catch (error) {

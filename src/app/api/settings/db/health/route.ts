@@ -1,28 +1,19 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { dbGet, dbAll } from "@/lib/db";
 import path from "path";
 import fs from "fs";
-import type Database from "better-sqlite3";
 
 export const dynamic = "force-dynamic";
-
-let dbInstance: Database.Database | null = null;
-
-async function getDb(): Promise<Database.Database> {
-  if (!dbInstance) {
-    const mod = (await import("@/lib/db")) as { default: Database.Database };
-    dbInstance = mod.default;
-  }
-  return dbInstance;
-}
 
 const DATA_DIR = process.env.DATA_DIR ?? "./data";
 const DB_PATH = path.join(DATA_DIR, "claude-bot.db");
 
-function safeCount(db: Database.Database, table: string): number {
+async function safeCount(table: string): Promise<number> {
   try {
-    return (db.prepare(`SELECT COUNT(*) as c FROM ${table}`).get() as { c: number }).c;
+    const row = await dbGet<{ c: number }>(`SELECT COUNT(*) as c FROM ${table}`);
+    return row?.c ?? -1;
   } catch {
     return -1;
   }
@@ -51,10 +42,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const db = await getDb();
-  const user = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(session.user.email) as
-    | { is_admin: number }
-    | undefined;
+  const user = await dbGet<{ is_admin: number }>("SELECT is_admin FROM users WHERE email = ?", [session.user.email]);
   if (!user?.is_admin) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -62,30 +50,39 @@ export async function GET() {
   const dbSize = fileSize(DB_PATH);
   const walSize = fileSize(DB_PATH + "-wal");
 
+  const [sessionsCount, messagesCount, activityCount, loginCount, usersCount, agentsCount] = await Promise.all([
+    safeCount("sessions"),
+    safeCount("messages"),
+    safeCount("activity_log"),
+    safeCount("login_attempts"),
+    safeCount("users"),
+    safeCount("agents"),
+  ]);
+
   const rowCounts: Record<string, number> = {
-    sessions: safeCount(db, "sessions"),
-    messages: safeCount(db, "messages"),
-    activity_log: safeCount(db, "activity_log"),
-    login_attempts: safeCount(db, "login_attempts"),
-    users: safeCount(db, "users"),
-    agents: safeCount(db, "agents"),
+    sessions: sessionsCount,
+    messages: messagesCount,
+    activity_log: activityCount,
+    login_attempts: loginCount,
+    users: usersCount,
+    agents: agentsCount,
   };
 
   let schemaVersion = 0;
   try {
-    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'schema_version'").get() as { value: string } | undefined;
+    const row = await dbGet<{ value: string }>("SELECT value FROM app_settings WHERE key = 'schema_version'");
     schemaVersion = row ? parseInt(row.value, 10) : 0;
   } catch { /* ignore */ }
 
   let lastVacuumAt: string | null = null;
   try {
-    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'last_vacuum_at'").get() as { value: string } | undefined;
+    const row = await dbGet<{ value: string }>("SELECT value FROM app_settings WHERE key = 'last_vacuum_at'");
     lastVacuumAt = row?.value ?? null;
   } catch { /* ignore */ }
 
   let messageRetentionDays = 0;
   try {
-    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'message_retention_days'").get() as { value: string } | undefined;
+    const row = await dbGet<{ value: string }>("SELECT value FROM app_settings WHERE key = 'message_retention_days'");
     messageRetentionDays = row ? parseInt(row.value, 10) : 0;
   } catch { /* ignore */ }
 
@@ -94,8 +91,11 @@ export async function GET() {
 
   let autoVacuumMode = "unknown";
   try {
-    const row = (db.pragma("auto_vacuum") as { auto_vacuum: number }[])[0];
-    autoVacuumMode = row.auto_vacuum === 2 ? "incremental" : row.auto_vacuum === 1 ? "full" : "none";
+    const rows = await dbAll<{ auto_vacuum: number }>("PRAGMA auto_vacuum");
+    const row = rows[0];
+    if (row) {
+      autoVacuumMode = row.auto_vacuum === 2 ? "incremental" : row.auto_vacuum === 1 ? "full" : "none";
+    }
   } catch { /* ignore */ }
 
   return NextResponse.json({

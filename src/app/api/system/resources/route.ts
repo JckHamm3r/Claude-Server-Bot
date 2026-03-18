@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { execFileSync } from "child_process";
 import os from "os";
-import db from "@/lib/db";
+import { dbGet } from "@/lib/db";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -11,9 +11,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const user = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(session.user.email) as
-    | { is_admin: number }
-    | undefined;
+  const user = await dbGet<{ is_admin: number }>("SELECT is_admin FROM users WHERE email = ?", [session.user.email]);
   if (!user?.is_admin) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }

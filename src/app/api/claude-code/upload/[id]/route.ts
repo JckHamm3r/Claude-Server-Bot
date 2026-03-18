@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
-import db from "@/lib/db";
+import { dbGet } from "@/lib/db";
 import { getUpload } from "@/lib/claude-db";
 import path from "path";
 import fs from "fs";
@@ -17,12 +17,12 @@ export async function GET(
   }
 
   const { id } = await params;
-  const upload = getUpload(id);
+  const upload = await getUpload(id);
   if (!upload) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const sessionCheck = db.prepare("SELECT created_by FROM sessions WHERE id = ?").get(upload.session_id) as { created_by: string } | undefined;
+  const sessionCheck = await dbGet<{ created_by: string }>("SELECT created_by FROM sessions WHERE id = ?", [upload.session_id]);
   if (!sessionCheck || sessionCheck.created_by !== token.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }

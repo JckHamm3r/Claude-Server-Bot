@@ -22,7 +22,7 @@ export function registerSecurityHandlers(ctx: HandlerContext) {
 
   // ── App settings (budget limits, retention) ──────────────────────────────
 
-  socket.on("claude:get_app_settings", () => {
+  socket.on("claude:get_app_settings", async () => {
     if (!isAdmin) {
       socket.emit("claude:error", { message: "Admin only" });
       return;
@@ -39,7 +39,7 @@ export function registerSecurityHandlers(ctx: HandlerContext) {
       ];
       const settings: Record<string, string> = {};
       for (const key of keys) {
-        settings[key] = getAppSetting(key, "0");
+        settings[key] = await getAppSetting(key, "0");
       }
       socket.emit("claude:app_settings", { settings });
     } catch (err) {
@@ -49,7 +49,7 @@ export function registerSecurityHandlers(ctx: HandlerContext) {
 
   socket.on(
     "claude:set_app_setting",
-    ({ key, value }: { key: string; value: string }) => {
+    async ({ key, value }: { key: string; value: string }) => {
       if (!isAdmin) {
         socket.emit("claude:error", { message: "Admin only" });
         return;
@@ -68,8 +68,8 @@ export function registerSecurityHandlers(ctx: HandlerContext) {
         return;
       }
       try {
-        setAppSetting(key, String(value));
-        logActivity("app_setting_changed", email, { key, value });
+        await setAppSetting(key, String(value));
+        await logActivity("app_setting_changed", email, { key, value });
         socket.emit("claude:app_setting_saved", { key });
       } catch (err) {
         socket.emit("claude:error", { message: String(err) });
@@ -79,7 +79,7 @@ export function registerSecurityHandlers(ctx: HandlerContext) {
 
   socket.on(
     "claude:always_allow_command",
-    ({ pattern }: { pattern: string }) => {
+    async ({ pattern }: { pattern: string }) => {
       if (!isAdmin) {
         socket.emit("claude:error", { message: "Admin only" });
         return;
@@ -91,11 +91,11 @@ export function registerSecurityHandlers(ctx: HandlerContext) {
       }
 
       try {
-        const current: string[] = JSON.parse(getAppSetting("sandbox_always_allowed", "[]"));
+        const current: string[] = JSON.parse(await getAppSetting("sandbox_always_allowed", "[]"));
         if (!current.includes(pattern)) {
           current.push(pattern);
-          setAppSetting("sandbox_always_allowed", JSON.stringify(current));
-          logActivity("security_command_policy_changed", email, { action: "always_allow_added", pattern });
+          await setAppSetting("sandbox_always_allowed", JSON.stringify(current));
+          await logActivity("security_command_policy_changed", email, { action: "always_allow_added", pattern });
         }
 
         const isDangerous = matchesDangerousPattern(pattern);

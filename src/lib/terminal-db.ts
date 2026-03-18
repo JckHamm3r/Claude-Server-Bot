@@ -1,4 +1,5 @@
-import db from "./db";
+import { randomUUID } from "crypto";
+import { dbGet, dbAll, dbRun, dbTransaction } from "./db";
 
 export interface TerminalSession {
   id: string;
@@ -33,137 +34,112 @@ export interface TerminalShare {
 export const MAX_TABS_PER_USER = 4;
 export const MAX_SCROLLBACK_LINES = 500;
 
-// ── Terminal Sessions ──────────────────────────────────────────────────────
-
-export function getTerminalSessions(userEmail: string): TerminalSession[] {
-  return db
-    .prepare("SELECT * FROM terminal_sessions WHERE user_email = ? ORDER BY order_index ASC, created_at ASC")
-    .all(userEmail) as TerminalSession[];
+export async function getTerminalSessions(userEmail: string): Promise<TerminalSession[]> {
+  return dbAll<TerminalSession>("SELECT * FROM terminal_sessions WHERE user_email = ? ORDER BY order_index ASC, created_at ASC", [userEmail]);
 }
 
-export function getTerminalSession(id: string): TerminalSession | undefined {
-  return db.prepare("SELECT * FROM terminal_sessions WHERE id = ?").get(id) as TerminalSession | undefined;
+export async function getTerminalSession(id: string): Promise<TerminalSession | undefined> {
+  return dbGet<TerminalSession>("SELECT * FROM terminal_sessions WHERE id = ?", [id]);
 }
 
-export function getTerminalSessionByTmuxName(tmuxName: string): TerminalSession | undefined {
-  return db.prepare("SELECT * FROM terminal_sessions WHERE tmux_session_name = ?").get(tmuxName) as TerminalSession | undefined;
+export async function getTerminalSessionByTmuxName(tmuxName: string): Promise<TerminalSession | undefined> {
+  return dbGet<TerminalSession>("SELECT * FROM terminal_sessions WHERE tmux_session_name = ?", [tmuxName]);
 }
 
-export function createTerminalSession(userEmail: string, name: string, isDefault = false): TerminalSession {
-  const id = db.prepare("SELECT lower(hex(randomblob(16))) as v").get() as { v: string };
-  const sessionId = id.v;
+export async function createTerminalSession(userEmail: string, name: string, isDefault = false): Promise<TerminalSession> {
+  const sessionId = randomUUID().replace(/-/g, "");
   const tmuxName = `octoby_${userEmail.replace(/[^a-zA-Z0-9]/g, "_")}_${sessionId.slice(0, 8)}`;
-
-  const existing = getTerminalSessions(userEmail);
+  const existing = await getTerminalSessions(userEmail);
   const orderIndex = existing.length;
-
-  db.prepare(`
-    INSERT INTO terminal_sessions (id, user_email, name, tmux_session_name, order_index, is_default)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(sessionId, userEmail, name, tmuxName, orderIndex, isDefault ? 1 : 0);
-
-  return getTerminalSession(sessionId)!;
+  await dbRun(
+    `INSERT INTO terminal_sessions (id, user_email, name, tmux_session_name, order_index, is_default) VALUES (?, ?, ?, ?, ?, ?)`,
+    [sessionId, userEmail, name, tmuxName, orderIndex, isDefault ? 1 : 0]
+  );
+  return (await getTerminalSession(sessionId))!;
 }
 
-export function updateTerminalSessionName(id: string, name: string) {
-  db.prepare("UPDATE terminal_sessions SET name = ?, last_active_at = datetime('now') WHERE id = ?").run(name, id);
+export async function updateTerminalSessionName(id: string, name: string): Promise<void> {
+  await dbRun("UPDATE terminal_sessions SET name = ?, last_active_at = datetime('now') WHERE id = ?", [name, id]);
 }
 
-export function updateTerminalSessionCwd(id: string, cwd: string) {
-  db.prepare("UPDATE terminal_sessions SET cwd = ?, last_active_at = datetime('now') WHERE id = ?").run(cwd, id);
+export async function updateTerminalSessionCwd(id: string, cwd: string): Promise<void> {
+  await dbRun("UPDATE terminal_sessions SET cwd = ?, last_active_at = datetime('now') WHERE id = ?", [cwd, id]);
 }
 
-export function updateTerminalScrollback(id: string, lines: string[]) {
+export async function updateTerminalScrollback(id: string, lines: string[]): Promise<void> {
   const truncated = lines.slice(-MAX_SCROLLBACK_LINES);
-  db.prepare("UPDATE terminal_sessions SET scrollback_json = ?, last_active_at = datetime('now') WHERE id = ?")
-    .run(JSON.stringify(truncated), id);
+  await dbRun("UPDATE terminal_sessions SET scrollback_json = ?, last_active_at = datetime('now') WHERE id = ?", [JSON.stringify(truncated), id]);
 }
 
-export function touchTerminalSession(id: string) {
-  db.prepare("UPDATE terminal_sessions SET last_active_at = datetime('now') WHERE id = ?").run(id);
+export async function touchTerminalSession(id: string): Promise<void> {
+  await dbRun("UPDATE terminal_sessions SET last_active_at = datetime('now') WHERE id = ?", [id]);
 }
 
-export function deleteTerminalSession(id: string) {
-  db.prepare("DELETE FROM terminal_sessions WHERE id = ?").run(id);
+export async function deleteTerminalSession(id: string): Promise<void> {
+  await dbRun("DELETE FROM terminal_sessions WHERE id = ?", [id]);
 }
 
-export function reorderTerminalSessions(userEmail: string, orderedIds: string[]) {
-  const update = db.prepare("UPDATE terminal_sessions SET order_index = ? WHERE id = ? AND user_email = ?");
-  const tx = db.transaction(() => {
-    orderedIds.forEach((id, idx) => update.run(idx, id, userEmail));
+export async function reorderTerminalSessions(userEmail: string, orderedIds: string[]): Promise<void> {
+  await dbTransaction(async ({ run }) => {
+    for (let idx = 0; idx < orderedIds.length; idx++) {
+      await run("UPDATE terminal_sessions SET order_index = ? WHERE id = ? AND user_email = ?", [idx, orderedIds[idx], userEmail]);
+    }
   });
-  tx();
 }
 
-export function countTerminalSessions(userEmail: string): number {
-  const row = db.prepare("SELECT COUNT(*) as c FROM terminal_sessions WHERE user_email = ?").get(userEmail) as { c: number };
-  return row.c;
+export async function countTerminalSessions(userEmail: string): Promise<number> {
+  const row = await dbGet<{ c: number }>("SELECT COUNT(*) as c FROM terminal_sessions WHERE user_email = ?", [userEmail]);
+  return row?.c ?? 0;
 }
 
-// ── Terminal Bookmarks ─────────────────────────────────────────────────────
-
-export function getBookmarks(terminalSessionId: string): TerminalBookmark[] {
-  return db
-    .prepare("SELECT * FROM terminal_bookmarks WHERE terminal_session_id = ? ORDER BY line_index ASC")
-    .all(terminalSessionId) as TerminalBookmark[];
+export async function getBookmarks(terminalSessionId: string): Promise<TerminalBookmark[]> {
+  return dbAll<TerminalBookmark>("SELECT * FROM terminal_bookmarks WHERE terminal_session_id = ? ORDER BY line_index ASC", [terminalSessionId]);
 }
 
-export function addBookmark(terminalSessionId: string, lineIndex: number, label: string, color = "#58a6ff"): TerminalBookmark {
-  const id = db.prepare("SELECT lower(hex(randomblob(16))) as v").get() as { v: string };
-  db.prepare(`
-    INSERT INTO terminal_bookmarks (id, terminal_session_id, line_index, label, color)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(id.v, terminalSessionId, lineIndex, label, color);
-  return db.prepare("SELECT * FROM terminal_bookmarks WHERE id = ?").get(id.v) as TerminalBookmark;
+export async function addBookmark(terminalSessionId: string, lineIndex: number, label: string, color = "#58a6ff"): Promise<TerminalBookmark> {
+  const id = randomUUID().replace(/-/g, "");
+  await dbRun(
+    `INSERT INTO terminal_bookmarks (id, terminal_session_id, line_index, label, color) VALUES (?, ?, ?, ?, ?)`,
+    [id, terminalSessionId, lineIndex, label, color]
+  );
+  return (await dbGet<TerminalBookmark>("SELECT * FROM terminal_bookmarks WHERE id = ?", [id]))!;
 }
 
-export function removeBookmark(bookmarkId: string, userEmail: string) {
-  // Verify ownership via join
-  db.prepare(`
-    DELETE FROM terminal_bookmarks WHERE id = ? AND terminal_session_id IN (
-      SELECT id FROM terminal_sessions WHERE user_email = ?
-    )
-  `).run(bookmarkId, userEmail);
+export async function removeBookmark(bookmarkId: string, userEmail: string): Promise<void> {
+  await dbRun(
+    `DELETE FROM terminal_bookmarks WHERE id = ? AND terminal_session_id IN (SELECT id FROM terminal_sessions WHERE user_email = ?)`,
+    [bookmarkId, userEmail]
+  );
 }
 
-// ── Terminal Shares ────────────────────────────────────────────────────────
-
-export function getShares(terminalSessionId: string): TerminalShare[] {
-  return db
-    .prepare("SELECT * FROM terminal_shares WHERE terminal_session_id = ?")
-    .all(terminalSessionId) as TerminalShare[];
+export async function getShares(terminalSessionId: string): Promise<TerminalShare[]> {
+  return dbAll<TerminalShare>("SELECT * FROM terminal_shares WHERE terminal_session_id = ?", [terminalSessionId]);
 }
 
-export function addShare(terminalSessionId: string, ownerEmail: string, invitedEmail: string): TerminalShare {
-  const id = db.prepare("SELECT lower(hex(randomblob(16))) as v").get() as { v: string };
-  db.prepare(`
-    INSERT OR IGNORE INTO terminal_shares (id, terminal_session_id, owner_email, invited_email)
-    VALUES (?, ?, ?, ?)
-  `).run(id.v, terminalSessionId, ownerEmail, invitedEmail);
-  return db.prepare("SELECT * FROM terminal_shares WHERE terminal_session_id = ? AND invited_email = ?")
-    .get(terminalSessionId, invitedEmail) as TerminalShare;
+export async function addShare(terminalSessionId: string, ownerEmail: string, invitedEmail: string): Promise<TerminalShare> {
+  const id = randomUUID().replace(/-/g, "");
+  await dbRun(
+    `INSERT OR IGNORE INTO terminal_shares (id, terminal_session_id, owner_email, invited_email) VALUES (?, ?, ?, ?)`,
+    [id, terminalSessionId, ownerEmail, invitedEmail]
+  );
+  return (await dbGet<TerminalShare>("SELECT * FROM terminal_shares WHERE terminal_session_id = ? AND invited_email = ?", [terminalSessionId, invitedEmail]))!;
 }
 
-export function removeShare(terminalSessionId: string, ownerEmail: string, invitedEmail: string) {
-  db.prepare("DELETE FROM terminal_shares WHERE terminal_session_id = ? AND owner_email = ? AND invited_email = ?")
-    .run(terminalSessionId, ownerEmail, invitedEmail);
+export async function removeShare(terminalSessionId: string, ownerEmail: string, invitedEmail: string): Promise<void> {
+  await dbRun("DELETE FROM terminal_shares WHERE terminal_session_id = ? AND owner_email = ? AND invited_email = ?", [terminalSessionId, ownerEmail, invitedEmail]);
 }
 
-export function getSharedSessionsForUser(invitedEmail: string): TerminalSession[] {
-  return db.prepare(`
-    SELECT ts.* FROM terminal_sessions ts
-    JOIN terminal_shares sh ON sh.terminal_session_id = ts.id
-    WHERE sh.invited_email = ?
-    ORDER BY ts.order_index ASC
-  `).all(invitedEmail) as TerminalSession[];
+export async function getSharedSessionsForUser(invitedEmail: string): Promise<TerminalSession[]> {
+  return dbAll<TerminalSession>(
+    `SELECT ts.* FROM terminal_sessions ts JOIN terminal_shares sh ON sh.terminal_session_id = ts.id WHERE sh.invited_email = ? ORDER BY ts.order_index ASC`,
+    [invitedEmail]
+  );
 }
 
-export function canAccessTerminalSession(sessionId: string, userEmail: string): boolean {
-  const session = getTerminalSession(sessionId);
+export async function canAccessTerminalSession(sessionId: string, userEmail: string): Promise<boolean> {
+  const session = await getTerminalSession(sessionId);
   if (!session) return false;
   if (session.user_email === userEmail) return true;
-  // Check if shared
-  const share = db.prepare("SELECT id FROM terminal_shares WHERE terminal_session_id = ? AND invited_email = ?")
-    .get(sessionId, userEmail);
+  const share = await dbGet("SELECT id FROM terminal_shares WHERE terminal_session_id = ? AND invited_email = ?", [sessionId, userEmail]);
   return !!share;
 }

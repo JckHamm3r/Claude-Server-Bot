@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import db from "@/lib/db";
+import { dbGet, dbRun } from "@/lib/db";
 import { broadcastToAll } from "@/lib/broadcast";
 
 interface BotSettingsRow {
@@ -11,9 +11,9 @@ interface BotSettingsRow {
 }
 
 export async function GET(_request: NextRequest) {
-  const row = db
-    .prepare("SELECT name, tagline, avatar FROM bot_settings WHERE id = 1")
-    .get() as BotSettingsRow | undefined;
+  const row = await dbGet<BotSettingsRow>(
+    "SELECT name, tagline, avatar FROM bot_settings WHERE id = 1"
+  );
 
   const response: Record<string, unknown> = {
     name: row?.name ?? "Octoby AI",
@@ -36,9 +36,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const user = db
-    .prepare("SELECT is_admin FROM users WHERE email = ?")
-    .get(session.user.email) as { is_admin: number } | undefined;
+  const user = await dbGet<{ is_admin: number }>(
+    "SELECT is_admin FROM users WHERE email = ?",
+    [session.user.email]
+  );
   if (!user?.is_admin) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -76,16 +77,21 @@ export async function POST(request: NextRequest) {
     params.push(avatar);
   }
 
-  db.prepare(`UPDATE bot_settings SET ${updates.join(", ")} WHERE id = 1`).run(
-    ...params
+  await dbRun(
+    `UPDATE bot_settings SET ${updates.join(", ")} WHERE id = 1`,
+    params
   );
 
-  const updated = db
-    .prepare("SELECT name, tagline, avatar FROM bot_settings WHERE id = 1")
-    .get() as BotSettingsRow;
+  const updated = await dbGet<BotSettingsRow>(
+    "SELECT name, tagline, avatar FROM bot_settings WHERE id = 1"
+  );
 
   // Broadcast to all connected clients so they update without page refresh
-  broadcastToAll("bot:identity_updated", { name: updated.name, tagline: updated.tagline, avatar: updated.avatar });
+  broadcastToAll("bot:identity_updated", {
+    name: updated?.name,
+    tagline: updated?.tagline,
+    avatar: updated?.avatar,
+  });
 
   return NextResponse.json({ ok: true, ...updated });
 }

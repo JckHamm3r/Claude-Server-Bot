@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import db from "@/lib/db";
+import { dbAll, dbRun } from "@/lib/db";
 
 // Canonical set of notification event types — must match NotificationEventType
 // in src/lib/notifications.ts.
@@ -42,11 +42,10 @@ export async function GET() {
 
   const userEmail = session.user.email;
 
-  const rows = db
-    .prepare(
-      "SELECT event_type, email_enabled, inapp_enabled FROM notification_preferences WHERE user_email = ?"
-    )
-    .all(userEmail) as PrefRow[];
+  const rows = await dbAll<PrefRow>(
+    "SELECT event_type, email_enabled, inapp_enabled FROM notification_preferences WHERE user_email = ?",
+    [userEmail]
+  );
 
   const prefMap: Record<string, PrefRow> = {};
   for (const row of rows) {
@@ -91,31 +90,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Missing preferences array" }, { status: 400 });
   }
 
-  const upsert = db.prepare(
-    `INSERT INTO notification_preferences (user_email, event_type, email_enabled, inapp_enabled, updated_at)
-     VALUES (?, ?, ?, ?, datetime('now'))
-     ON CONFLICT(user_email, event_type) DO UPDATE SET
-       email_enabled = excluded.email_enabled,
-       inapp_enabled = excluded.inapp_enabled,
-       updated_at = excluded.updated_at`
-  );
-
-  const upsertAll = db.transaction(
-    (
-      prefs: { event_type: string; email_enabled: boolean; inapp_enabled: boolean }[]
-    ) => {
-      for (const pref of prefs) {
-        upsert.run(
-          userEmail,
-          pref.event_type,
-          pref.email_enabled ? 1 : 0,
-          pref.inapp_enabled ? 1 : 0
-        );
-      }
-    }
-  );
-
-  upsertAll(body.preferences);
+  for (const pref of body.preferences) {
+    await dbRun(
+      `INSERT INTO notification_preferences (user_email, event_type, email_enabled, inapp_enabled, updated_at)
+       VALUES (?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(user_email, event_type) DO UPDATE SET
+         email_enabled = excluded.email_enabled,
+         inapp_enabled = excluded.inapp_enabled,
+         updated_at = excluded.updated_at`,
+      [userEmail, pref.event_type, pref.email_enabled ? 1 : 0, pref.inapp_enabled ? 1 : 0]
+    );
+  }
 
   return NextResponse.json({ ok: true });
 }

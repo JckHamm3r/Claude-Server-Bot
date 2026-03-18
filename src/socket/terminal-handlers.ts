@@ -24,7 +24,7 @@ import {
   MAX_SCROLLBACK_LINES,
   type TerminalSession,
 } from "../lib/terminal-db";
-import db from "../lib/db";
+import { dbAll, dbGet } from "../lib/db";
 
 const execAsync = promisify(exec);
 const PROJECT_ROOT = process.env.CLAUDE_PROJECT_ROOT ?? process.cwd();
@@ -96,28 +96,28 @@ function scheduleScrollbackFlush(tabId: string) {
   const existing = scrollbackFlushTimers.get(tabId);
   if (existing) clearTimeout(existing);
   const timer = setTimeout(() => {
-    flushScrollback(tabId);
+    void flushScrollback(tabId);
     scrollbackFlushTimers.delete(tabId);
   }, SCROLLBACK_FLUSH_MS);
   scrollbackFlushTimers.set(tabId, timer);
 }
 
-function flushScrollback(tabId: string) {
+async function flushScrollback(tabId: string) {
   const buf = scrollbackBuffers.get(tabId);
   if (!buf) return;
   try {
-    updateTerminalScrollback(tabId, buf);
+    await updateTerminalScrollback(tabId, buf);
   } catch { /* ignore */ }
 }
 
-function flushAllScrollbacks() {
+async function flushAllScrollbacks() {
   for (const [tabId] of scrollbackBuffers) {
-    flushScrollback(tabId);
+    await flushScrollback(tabId);
   }
 }
 
 // Flush scrollbacks every 30s regardless of activity
-setInterval(flushAllScrollbacks, SCROLLBACK_FLUSH_MS);
+setInterval(() => { void flushAllScrollbacks(); }, SCROLLBACK_FLUSH_MS);
 
 function getOrCreateTabSocketSet(tabId: string): Set<string> {
   if (!tabSocketMap.has(tabId)) tabSocketMap.set(tabId, new Set());
@@ -126,8 +126,8 @@ function getOrCreateTabSocketSet(tabId: string): Set<string> {
 
 // ── Ensure default session exists ──────────────────────────────────────────
 
-export function ensureDefaultTerminalSession(userEmail: string): TerminalSession {
-  const sessions = getTerminalSessions(userEmail);
+export async function ensureDefaultTerminalSession(userEmail: string): Promise<TerminalSession> {
+  const sessions = await getTerminalSessions(userEmail);
   if (sessions.length === 0) {
     return createTerminalSession(userEmail, "Terminal", true);
   }
@@ -138,7 +138,7 @@ export function ensureDefaultTerminalSession(userEmail: string): TerminalSession
 
 export async function reconcileTmuxSessions() {
   try {
-    const rows = db.prepare("SELECT * FROM terminal_sessions").all() as TerminalSession[];
+    const rows = await dbAll<TerminalSession>("SELECT * FROM terminal_sessions");
     for (const session of rows) {
       if (!tmuxSessionExists(session.tmux_session_name)) {
         // Recreate tmux session; it was lost (server restart etc.)
@@ -157,12 +157,13 @@ export async function reconcileTmuxSessions() {
 
 // ── Kill idle sessions (30-min idle) ──────────────────────────────────────
 
-export function cleanupIdleTerminalSessions() {
+export async function cleanupIdleTerminalSessions() {
   try {
     const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
-    const idleSessions = db.prepare(`
-      SELECT * FROM terminal_sessions WHERE last_active_at < ?
-    `).all(cutoff) as TerminalSession[];
+    const idleSessions = await dbAll<TerminalSession>(
+      "SELECT * FROM terminal_sessions WHERE last_active_at < ?",
+      [cutoff]
+    );
 
     for (const session of idleSessions) {
       // Kill tmux session if alive
@@ -172,19 +173,19 @@ export function cleanupIdleTerminalSessions() {
         } catch { /* ignore */ }
       }
       // Flush scrollback then clear PTY ref
-      flushScrollback(session.id);
+      await flushScrollback(session.id);
       terminalPtyProcesses.delete(session.id);
     }
   } catch { /* ignore */ }
 }
 
 // Run cleanup every 5 minutes
-setInterval(cleanupIdleTerminalSessions, 5 * 60 * 1000);
+setInterval(() => { void cleanupIdleTerminalSessions(); }, 5 * 60 * 1000);
 
 // ── Shutdown ──────────────────────────────────────────────────────────────
 
 export function shutdownTerminals() {
-  flushAllScrollbacks();
+  void flushAllScrollbacks();
   for (const [, pty] of terminalPtyProcesses) {
     try { pty.kill?.(); } catch { /* best-effort */ }
   }
@@ -201,11 +202,11 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
   }
 
   // ── terminal:list ──────────────────────────────────────────────────────
-  socket.on("terminal:list", () => {
+  socket.on("terminal:list", async () => {
     try {
-      ensureDefaultTerminalSession(email);
-      const owned = getTerminalSessions(email);
-      const shared = getSharedSessionsForUser(email);
+      await ensureDefaultTerminalSession(email);
+      const owned = await getTerminalSessions(email);
+      const shared = await getSharedSessionsForUser(email);
       socket.emit("terminal:sessions", { owned, shared });
     } catch (err) {
       socket.emit("claude:error", { message: "Failed to list terminal sessions: " + String(err) });
@@ -219,13 +220,13 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
       return;
     }
     try {
-      const count = countTerminalSessions(email);
+      const count = await countTerminalSessions(email);
       if (count >= MAX_TABS_PER_USER) {
         socket.emit("terminal:error", { message: `Maximum ${MAX_TABS_PER_USER} terminal tabs allowed` });
         return;
       }
       const tabName = name || `Terminal ${count + 1}`;
-      const session = createTerminalSession(email, tabName);
+      const session = await createTerminalSession(email, tabName);
       await ensureTmuxSession(session);
       socket.emit("terminal:created", { session });
     } catch (err) {
@@ -238,12 +239,12 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
     "terminal:attach",
     async ({ tabId, cols, rows }: { tabId: string; cols: number; rows: number }) => {
       try {
-        const session = getTerminalSession(tabId);
+        const session = await getTerminalSession(tabId);
         if (!session) {
           socket.emit("terminal:error", { message: "Terminal session not found" });
           return;
         }
-        if (!canAccessTerminalSession(tabId, email)) {
+        if (!(await canAccessTerminalSession(tabId, email))) {
           socket.emit("terminal:error", { message: "Access denied" });
           return;
         }
@@ -292,7 +293,7 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
           const oscMatch = data.match(/\x1b\]7;(?:file:\/\/[^\/]*)?([^\x07\x1b]+)[\x07\x1b]/);
           if (oscMatch) {
             const newCwd = oscMatch[1];
-            updateTerminalSessionCwd(tabId, newCwd);
+            void updateTerminalSessionCwd(tabId, newCwd);
             // Broadcast CWD update to all sockets watching this tab
             const watching = tabSocketMap.get(tabId);
             if (watching) {
@@ -312,7 +313,7 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
         });
 
         ptyProcess.onExit(() => {
-          flushScrollback(tabId);
+          void flushScrollback(tabId);
           terminalPtyProcesses.delete(tabId);
           // Read watchers BEFORE deleting so we can notify them
           const watching = tabSocketMap.get(tabId);
@@ -340,7 +341,7 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
         setTimeout(() => {
           socket.emit("terminal:attached", { tabId });
         }, 100);
-        touchTerminalSession(tabId);
+        await touchTerminalSession(tabId);
       } catch (err) {
         socket.emit("terminal:error", { message: "Failed to attach to terminal: " + String(err) });
       }
@@ -353,20 +354,20 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
     if (sockets) sockets.delete(socket.id);
     // PTY stays alive — we just remove this socket from the watcher set.
     // The process continues running on the server.
-    flushScrollback(tabId);
+    void flushScrollback(tabId);
   });
 
   // ── terminal:input ─────────────────────────────────────────────────────
-  socket.on("terminal:input", ({ tabId, data }: { tabId: string; data: string }) => {
-    if (!canAccessTerminalSession(tabId, email)) return;
+  socket.on("terminal:input", async ({ tabId, data }: { tabId: string; data: string }) => {
+    if (!(await canAccessTerminalSession(tabId, email))) return;
     const pty = terminalPtyProcesses.get(tabId);
     if (pty) pty.write(data);
-    touchTerminalSession(tabId);
+    void touchTerminalSession(tabId);
   });
 
   // ── terminal:resize ────────────────────────────────────────────────────
-  socket.on("terminal:resize", ({ tabId, cols, rows }: { tabId: string; cols: number; rows: number }) => {
-    if (!canAccessTerminalSession(tabId, email)) return;
+  socket.on("terminal:resize", async ({ tabId, cols, rows }: { tabId: string; cols: number; rows: number }) => {
+    if (!(await canAccessTerminalSession(tabId, email))) return;
     const pty = terminalPtyProcesses.get(tabId);
     if (pty) {
       const safeCols = Math.max(1, Math.min(500, Number(cols) || 80));
@@ -378,7 +379,7 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
   // ── terminal:destroy ───────────────────────────────────────────────────
   socket.on("terminal:destroy", async ({ tabId }: { tabId: string }) => {
     if (!isAdmin) return;
-    const session = getTerminalSession(tabId);
+    const session = await getTerminalSession(tabId);
     if (!session || session.user_email !== email) {
       socket.emit("terminal:error", { message: "Cannot destroy: not owner" });
       return;
@@ -403,17 +404,17 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
     tabSocketMap.delete(tabId);
     scrollbackBuffers.delete(tabId);
     lineCounters.delete(tabId);
-    deleteTerminalSession(tabId);
+    await deleteTerminalSession(tabId);
 
     socket.emit("terminal:destroyed", { tabId });
   });
 
   // ── terminal:rename ────────────────────────────────────────────────────
-  socket.on("terminal:rename", ({ tabId, name }: { tabId: string; name: string }) => {
+  socket.on("terminal:rename", async ({ tabId, name }: { tabId: string; name: string }) => {
     if (!isAdmin) return;
-    if (!canAccessTerminalSession(tabId, email)) return;
+    if (!(await canAccessTerminalSession(tabId, email))) return;
     const trimmed = name.trim().slice(0, 64) || "Terminal";
-    updateTerminalSessionName(tabId, trimmed);
+    await updateTerminalSessionName(tabId, trimmed);
     // Notify all watchers
     const watching = tabSocketMap.get(tabId);
     if (watching) {
@@ -425,24 +426,24 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
   });
 
   // ── terminal:reorder ──────────────────────────────────────────────────
-  socket.on("terminal:reorder", ({ orderedIds }: { orderedIds: string[] }) => {
+  socket.on("terminal:reorder", async ({ orderedIds }: { orderedIds: string[] }) => {
     if (!isAdmin) return;
-    reorderTerminalSessions(email, orderedIds);
+    await reorderTerminalSessions(email, orderedIds);
     socket.emit("terminal:reordered", { orderedIds });
   });
 
   // ── terminal:auto_name ─────────────────────────────────────────────────
   // Called by frontend after first command to set a meaningful name
-  socket.on("terminal:auto_name", ({ tabId, name }: { tabId: string; name: string }) => {
+  socket.on("terminal:auto_name", async ({ tabId, name }: { tabId: string; name: string }) => {
     if (!isAdmin) return;
-    if (!canAccessTerminalSession(tabId, email)) return;
-    const session = getTerminalSession(tabId);
+    if (!(await canAccessTerminalSession(tabId, email))) return;
+    const session = await getTerminalSession(tabId);
     if (!session) return;
     // Only auto-name if name is still the default
     if (session.name === "Terminal" || session.name.match(/^Terminal \d+$/)) {
       const trimmed = name.trim().slice(0, 64);
       if (trimmed) {
-        updateTerminalSessionName(tabId, trimmed);
+        await updateTerminalSessionName(tabId, trimmed);
         socket.emit("terminal:renamed", { tabId, name: trimmed });
       }
     }
@@ -451,43 +452,43 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
   // ── terminal:bookmark:add ─────────────────────────────────────────────
   socket.on(
     "terminal:bookmark:add",
-    ({ tabId, lineIndex, label, color }: { tabId: string; lineIndex: number; label: string; color?: string }) => {
-      if (!canAccessTerminalSession(tabId, email)) return;
-      const bookmark = addBookmark(tabId, lineIndex, label, color);
+    async ({ tabId, lineIndex, label, color }: { tabId: string; lineIndex: number; label: string; color?: string }) => {
+      if (!(await canAccessTerminalSession(tabId, email))) return;
+      const bookmark = await addBookmark(tabId, lineIndex, label, color);
       socket.emit("terminal:bookmark:added", { tabId, bookmark });
     }
   );
 
   // ── terminal:bookmark:remove ──────────────────────────────────────────
-  socket.on("terminal:bookmark:remove", ({ bookmarkId }: { bookmarkId: string }) => {
-    removeBookmark(bookmarkId, email);
+  socket.on("terminal:bookmark:remove", async ({ bookmarkId }: { bookmarkId: string }) => {
+    await removeBookmark(bookmarkId, email);
     socket.emit("terminal:bookmark:removed", { bookmarkId });
   });
 
   // ── terminal:bookmark:list ────────────────────────────────────────────
-  socket.on("terminal:bookmark:list", ({ tabId }: { tabId: string }) => {
-    if (!canAccessTerminalSession(tabId, email)) return;
-    const bookmarks = getBookmarks(tabId);
+  socket.on("terminal:bookmark:list", async ({ tabId }: { tabId: string }) => {
+    if (!(await canAccessTerminalSession(tabId, email))) return;
+    const bookmarks = await getBookmarks(tabId);
     socket.emit("terminal:bookmark:list", { tabId, bookmarks });
   });
 
   // ── terminal:share:invite ─────────────────────────────────────────────
   socket.on(
     "terminal:share:invite",
-    ({ tabId, invitedEmail }: { tabId: string; invitedEmail: string }) => {
+    async ({ tabId, invitedEmail }: { tabId: string; invitedEmail: string }) => {
       if (!isAdmin) return;
-      const session = getTerminalSession(tabId);
+      const session = await getTerminalSession(tabId);
       if (!session || session.user_email !== email) {
         socket.emit("terminal:error", { message: "Only the owner can share a terminal" });
         return;
       }
       // Verify invited user is an admin
-      const invitedUser = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(invitedEmail) as { is_admin: number } | undefined;
+      const invitedUser = await dbGet<{ is_admin: number }>("SELECT is_admin FROM users WHERE email = ?", [invitedEmail]);
       if (!invitedUser?.is_admin) {
         socket.emit("terminal:error", { message: "Can only share with admin users" });
         return;
       }
-      const share = addShare(tabId, email, invitedEmail);
+      const share = await addShare(tabId, email, invitedEmail);
       socket.emit("terminal:share:added", { tabId, share });
       // Notify the invited user if they're online
       for (const [sid, info] of (ctx.connectedUsers as Map<string, { email: string }>).entries()) {
@@ -501,11 +502,11 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
   // ── terminal:share:revoke ─────────────────────────────────────────────
   socket.on(
     "terminal:share:revoke",
-    ({ tabId, invitedEmail }: { tabId: string; invitedEmail: string }) => {
+    async ({ tabId, invitedEmail }: { tabId: string; invitedEmail: string }) => {
       if (!isAdmin) return;
-      const session = getTerminalSession(tabId);
+      const session = await getTerminalSession(tabId);
       if (!session || session.user_email !== email) return;
-      removeShare(tabId, email, invitedEmail);
+      await removeShare(tabId, email, invitedEmail);
       socket.emit("terminal:share:revoked", { tabId, invitedEmail });
       // Remove invited user from active tab watchers
       const watching = tabSocketMap.get(tabId);
@@ -521,18 +522,18 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
   );
 
   // ── terminal:share:list ───────────────────────────────────────────────
-  socket.on("terminal:share:list", ({ tabId }: { tabId: string }) => {
-    if (!canAccessTerminalSession(tabId, email)) return;
-    const shares = getShares(tabId);
+  socket.on("terminal:share:list", async ({ tabId }: { tabId: string }) => {
+    if (!(await canAccessTerminalSession(tabId, email))) return;
+    const shares = await getShares(tabId);
     socket.emit("terminal:share:list", { tabId, shares });
   });
 
   // ── terminal:history ──────────────────────────────────────────────────
   // Fetch native shell history + in-memory scrollback for search
   socket.on("terminal:history:get", async ({ tabId }: { tabId: string }) => {
-    if (!canAccessTerminalSession(tabId, email)) return;
+    if (!(await canAccessTerminalSession(tabId, email))) return;
     try {
-      const session = getTerminalSession(tabId);
+      const session = await getTerminalSession(tabId);
       const tmuxName = session?.tmux_session_name;
       let shellHistory: string[] = [];
 
@@ -586,10 +587,10 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
         return;
       }
       // Create or get default session
-      const session = ensureDefaultTerminalSession(email);
+      const session = await ensureDefaultTerminalSession(email);
       socket.emit("terminal:sessions", {
-        owned: getTerminalSessions(email),
-        shared: getSharedSessionsForUser(email),
+        owned: await getTerminalSessions(email),
+        shared: await getSharedSessionsForUser(email),
       });
       // Auto-attach to default tab
       socket.emit("terminal:auto_attach", { tabId: session.id, cols, rows });
@@ -601,7 +602,7 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
     for (const [tabId, sockets] of tabSocketMap.entries()) {
       if (sockets.has(socket.id)) {
         sockets.delete(socket.id);
-        flushScrollback(tabId);
+        void flushScrollback(tabId);
       }
     }
   });

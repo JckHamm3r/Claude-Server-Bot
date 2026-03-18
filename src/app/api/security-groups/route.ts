@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import db from "@/lib/db";
+import { dbGet } from "@/lib/db";
 import { randomUUID } from "crypto";
 import {
   listSecurityGroups,
@@ -10,24 +10,24 @@ import {
 import { validateIPOrCIDR } from "@/lib/ip-allowlist";
 import { logActivity } from "@/lib/activity-log";
 
-function isAdmin(email: string): boolean {
-  const row = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(email) as { is_admin: number } | undefined;
+async function isAdmin(email: string): Promise<boolean> {
+  const row = await dbGet<{ is_admin: number }>("SELECT is_admin FROM users WHERE email = ?", [email]);
   return Boolean(row?.is_admin);
 }
 
 export async function GET() {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!isAdmin(session.user.email)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!await isAdmin(session.user.email)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const groups = listSecurityGroups();
+  const groups = await listSecurityGroups();
   return NextResponse.json({ groups });
 }
 
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!isAdmin(session.user.email)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!await isAdmin(session.user.email)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   let body: { name: string; description?: string; allowed_ips?: string[] };
   try {
@@ -48,12 +48,12 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const existing = db.prepare("SELECT id FROM security_groups WHERE name = ?").get(name.trim());
+  const existing = await dbGet("SELECT id FROM security_groups WHERE name = ?", [name.trim()]);
   if (existing) return NextResponse.json({ error: "A security group with that name already exists" }, { status: 409 });
 
   const id = randomUUID();
-  const group = createSecurityGroup(id, name.trim(), description, allowed_ips.map((e) => String(e).trim()).filter(Boolean));
-  logActivity("security_group_created", session.user.email, { group_id: id, group_name: name.trim() });
+  const group = await createSecurityGroup(id, name.trim(), description, allowed_ips.map((e) => String(e).trim()).filter(Boolean));
+  await logActivity("security_group_created", session.user.email, { group_id: id, group_name: name.trim() });
 
   return NextResponse.json({ group }, { status: 201 });
 }

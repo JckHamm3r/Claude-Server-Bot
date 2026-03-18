@@ -1,4 +1,4 @@
-import db from "./db";
+import { dbGet } from "./db";
 
 interface SmtpSettings {
   host: string;
@@ -12,11 +12,9 @@ interface SmtpSettings {
   enabled: boolean;
 }
 
-function getSmtpSettings(): SmtpSettings | null {
+async function getSmtpSettings(): Promise<SmtpSettings | null> {
   try {
-    const row = db
-      .prepare("SELECT * FROM smtp_settings WHERE id = 1")
-      .get() as Record<string, unknown> | undefined;
+    const row = await dbGet<Record<string, unknown>>("SELECT * FROM smtp_settings WHERE id = 1");
     if (!row || !row.enabled || !row.host) return null;
     return {
       host: row.host as string,
@@ -39,7 +37,7 @@ export async function sendMail(
   subject: string,
   html: string
 ): Promise<void> {
-  const smtp = getSmtpSettings();
+  const smtp = await getSmtpSettings();
   if (!smtp || !smtp.enabled || !smtp.host) return;
 
   try {

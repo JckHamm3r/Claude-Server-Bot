@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import db from "@/lib/db";
+import { dbGet, dbRun } from "@/lib/db";
 import bcrypt from "bcryptjs";
 import { logActivity } from "@/lib/activity-log";
 
@@ -42,9 +42,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const user = db.prepare("SELECT hash FROM users WHERE email = ?").get(email) as
-      | { hash: string }
-      | undefined;
+    const user = await dbGet<{ hash: string }>(
+      "SELECT hash FROM users WHERE email = ?",
+      [email]
+    );
 
     if (!user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -62,12 +63,12 @@ export async function POST(req: NextRequest) {
 
     const newHash = await bcrypt.hash(newPassword, 12);
 
-    db.prepare("UPDATE users SET hash = ?, must_change_password = 0 WHERE email = ?").run(
-      newHash,
-      email
+    await dbRun(
+      "UPDATE users SET hash = ?, must_change_password = 0 WHERE email = ?",
+      [newHash, email]
     );
 
-    logActivity("user_password_changed", email);
+    await logActivity("user_password_changed", email);
 
     return NextResponse.json({ success: true });
   } catch (error) {

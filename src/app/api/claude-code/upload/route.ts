@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
-import db from "@/lib/db";
+import { dbGet } from "@/lib/db";
 import { createUpload, getSessionUploads } from "@/lib/claude-db";
 import { getAppSetting } from "@/lib/app-settings";
 import path from "path";
@@ -24,19 +24,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing file or sessionId" }, { status: 400 });
     }
 
-    const session = db.prepare("SELECT created_by FROM sessions WHERE id = ?").get(sessionId) as { created_by: string } | undefined;
+    const session = await dbGet<{ created_by: string }>("SELECT created_by FROM sessions WHERE id = ?", [sessionId]);
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
-    const uploaderIsAdmin = (db.prepare("SELECT is_admin FROM users WHERE email = ?").get(token.email) as { is_admin: number } | undefined)?.is_admin;
+    const uploaderUser = await dbGet<{ is_admin: number }>("SELECT is_admin FROM users WHERE email = ?", [token.email]);
+    const uploaderIsAdmin = uploaderUser?.is_admin;
     if (session.created_by !== token.email && !uploaderIsAdmin) {
-      const participant = db.prepare("SELECT 1 FROM session_participants WHERE session_id = ? AND user_email = ?").get(sessionId, token.email);
+      const participant = await dbGet("SELECT 1 FROM session_participants WHERE session_id = ? AND user_email = ?", [sessionId, token.email]);
       if (!participant) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
       }
     }
 
-    const maxSize = parseInt(getAppSetting("upload_max_size_bytes", "10485760"), 10);
+    const maxSize = parseInt(await getAppSetting("upload_max_size_bytes", "10485760"), 10);
 
     // Explicit image MIME type support
     const allowedImageTypes = ["image/png", "image/jpeg", "image/gif", "image/webp"];
@@ -65,7 +66,7 @@ export async function POST(req: NextRequest) {
 
     fs.writeFileSync(filePath, buffer);
 
-    const upload = createUpload({
+    const upload = await createUpload({
       id,
       sessionId,
       originalName: file.name,
@@ -100,18 +101,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
   }
 
-  const session = db.prepare("SELECT created_by FROM sessions WHERE id = ?").get(sessionId) as { created_by: string } | undefined;
+  const session = await dbGet<{ created_by: string }>("SELECT created_by FROM sessions WHERE id = ?", [sessionId]);
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
-  const viewerIsAdmin = (db.prepare("SELECT is_admin FROM users WHERE email = ?").get(token.email) as { is_admin: number } | undefined)?.is_admin;
+  const viewerUser = await dbGet<{ is_admin: number }>("SELECT is_admin FROM users WHERE email = ?", [token.email]);
+  const viewerIsAdmin = viewerUser?.is_admin;
   if (session.created_by !== token.email && !viewerIsAdmin) {
-    const participant = db.prepare("SELECT 1 FROM session_participants WHERE session_id = ? AND user_email = ?").get(sessionId, token.email);
+    const participant = await dbGet("SELECT 1 FROM session_participants WHERE session_id = ? AND user_email = ?", [sessionId, token.email]);
     if (!participant) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
   }
 
-  const uploads = getSessionUploads(sessionId);
+  const uploads = await getSessionUploads(sessionId);
   return NextResponse.json({ uploads });
 }

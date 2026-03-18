@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import db from "@/lib/db";
+import { dbGet } from "@/lib/db";
 import { getGroup, getGroupPermissions } from "@/lib/claude-db";
 import { getAppSetting } from "@/lib/app-settings";
 
@@ -79,7 +79,7 @@ Be concise, practical, and security-conscious. Always explain the security impli
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const user = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(session.user.email) as { is_admin: number } | undefined;
+  const user = await dbGet<{ is_admin: number }>("SELECT is_admin FROM users WHERE email = ?", [session.user.email]);
   if (!user?.is_admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   let body: { groupId?: string; message: string; currentPermissions?: unknown; conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }> };
@@ -88,22 +88,20 @@ export async function POST(request: NextRequest) {
   const { groupId, message, currentPermissions, conversationHistory = [] } = body;
   if (!message?.trim()) return NextResponse.json({ error: "Message required" }, { status: 400 });
 
-  const apiKey = getAppSetting("anthropic_api_key") || process.env.ANTHROPIC_API_KEY;
+  const apiKey = await getAppSetting("anthropic_api_key") || process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "No API key configured" }, { status: 503 });
 
-  // Build context about the current group
   let groupContext = "";
   if (groupId) {
-    const group = getGroup(groupId);
+    const group = await getGroup(groupId);
     if (group) {
-      const perms = getGroupPermissions(groupId);
+      const perms = await getGroupPermissions(groupId);
       groupContext = `\n\n## Current Group Being Edited\nName: ${group.name}\nDescription: ${group.description}\n\nCurrent Permissions:\n\`\`\`json\n${JSON.stringify(perms, null, 2)}\n\`\`\``;
     }
   } else if (currentPermissions) {
     groupContext = `\n\n## Current Group Permissions\n\`\`\`json\n${JSON.stringify(currentPermissions, null, 2)}\n\`\`\``;
   }
 
-  // Build messages for the API
   const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [
     ...conversationHistory,
     { role: 'user', content: message },

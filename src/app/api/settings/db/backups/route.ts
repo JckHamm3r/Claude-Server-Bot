@@ -1,21 +1,11 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { dbGet } from "@/lib/db";
 import path from "path";
 import fs from "fs";
-import type Database from "better-sqlite3";
 
 export const dynamic = "force-dynamic";
-
-let dbInstance: Database.Database | null = null;
-
-async function getDb(): Promise<Database.Database> {
-  if (!dbInstance) {
-    const mod = (await import("@/lib/db")) as { default: Database.Database };
-    dbInstance = mod.default;
-  }
-  return dbInstance;
-}
 
 const DATA_DIR = process.env.DATA_DIR ?? "./data";
 
@@ -44,10 +34,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const db = await getDb();
-  const user = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(session.user.email) as
-    | { is_admin: number }
-    | undefined;
+  const user = await dbGet<{ is_admin: number }>("SELECT is_admin FROM users WHERE email = ?", [session.user.email]);
   if (!user?.is_admin) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }

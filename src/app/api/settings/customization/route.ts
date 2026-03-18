@@ -1,19 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import db from "@/lib/db";
+import { dbGet, dbRun } from "@/lib/db";
 
-function requireAdmin(email: string): boolean {
-  const user = db
-    .prepare("SELECT is_admin FROM users WHERE email = ?")
-    .get(email) as { is_admin: number } | undefined;
+async function requireAdmin(email: string): Promise<boolean> {
+  const user = await dbGet<{ is_admin: number }>(
+    "SELECT is_admin FROM users WHERE email = ?",
+    [email]
+  );
   return Boolean(user?.is_admin);
 }
 
-function getSetting(key: string): string {
-  const row = db
-    .prepare("SELECT value FROM app_settings WHERE key = ?")
-    .get(key) as { value: string } | undefined;
+async function getSetting(key: string): Promise<string> {
+  const row = await dbGet<{ value: string }>(
+    "SELECT value FROM app_settings WHERE key = ?",
+    [key]
+  );
   return row?.value ?? "";
 }
 
@@ -22,13 +24,13 @@ export async function GET() {
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!requireAdmin(session.user.email)) {
+  if (!(await requireAdmin(session.user.email))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   return NextResponse.json({
-    personality: getSetting("personality") || "professional",
-    personality_custom: getSetting("personality_custom"),
+    personality: (await getSetting("personality")) || "professional",
+    personality_custom: await getSetting("personality_custom"),
   });
 }
 
@@ -37,7 +39,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!requireAdmin(session.user.email)) {
+  if (!(await requireAdmin(session.user.email))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -48,15 +50,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const upsert = db.prepare(
-    "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
-  );
+  const upsertSql =
+    "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at";
 
   if (body.personality !== undefined) {
-    upsert.run("personality", String(body.personality));
+    await dbRun(upsertSql, ["personality", String(body.personality)]);
   }
   if (body.personality_custom !== undefined) {
-    upsert.run("personality_custom", String(body.personality_custom));
+    await dbRun(upsertSql, ["personality_custom", String(body.personality_custom)]);
   }
 
   return NextResponse.json({ ok: true });

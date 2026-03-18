@@ -18,7 +18,7 @@ import {
   getUserGroupPermissions,
   getUserGroup,
 } from "../lib/claude-db";
-import db from "../lib/db";
+import { dbGet } from "../lib/db";
 import { logActivity } from "../lib/activity-log";
 import { getAppSetting } from "../lib/app-settings";
 import { checkBotConfigRequest } from "../lib/security-guard";
@@ -45,10 +45,10 @@ interface BudgetResult {
   current?: number;
 }
 
-function checkBudget(email: string, sessionId: string): BudgetResult {
-  const sessionBudget = parseFloat(getAppSetting("budget_limit_session_usd", "0"));
+async function checkBudget(email: string, sessionId: string): Promise<BudgetResult> {
+  const sessionBudget = parseFloat(await getAppSetting("budget_limit_session_usd", "0"));
   if (sessionBudget > 0) {
-    const usage = getSessionTokenUsage(sessionId);
+    const usage = await getSessionTokenUsage(sessionId);
     if (usage.total_cost_usd >= sessionBudget) {
       return { exceeded: true, warning: false, type: "session", limit: sessionBudget, current: usage.total_cost_usd };
     }
@@ -57,11 +57,11 @@ function checkBudget(email: string, sessionId: string): BudgetResult {
     }
   }
 
-  const dailyBudget = parseFloat(getAppSetting("budget_limit_daily_usd", "0"));
+  const dailyBudget = parseFloat(await getAppSetting("budget_limit_daily_usd", "0"));
   if (dailyBudget > 0) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const usage = getGlobalTokenUsage({ since: today.toISOString(), userId: email });
+    const usage = await getGlobalTokenUsage({ since: today.toISOString(), userId: email });
     if (usage.total_cost_usd >= dailyBudget) {
       return { exceeded: true, warning: false, type: "daily", limit: dailyBudget, current: usage.total_cost_usd };
     }
@@ -70,12 +70,12 @@ function checkBudget(email: string, sessionId: string): BudgetResult {
     }
   }
 
-  const monthlyBudget = parseFloat(getAppSetting("budget_limit_monthly_usd", "0"));
+  const monthlyBudget = parseFloat(await getAppSetting("budget_limit_monthly_usd", "0"));
   if (monthlyBudget > 0) {
     const monthStart = new Date();
     monthStart.setDate(1);
     monthStart.setHours(0, 0, 0, 0);
-    const usage = getGlobalTokenUsage({ since: monthStart.toISOString(), userId: email });
+    const usage = await getGlobalTokenUsage({ since: monthStart.toISOString(), userId: email });
     if (usage.total_cost_usd >= monthlyBudget) {
       return { exceeded: true, warning: false, type: "monthly", limit: monthlyBudget, current: usage.total_cost_usd };
     }
@@ -101,14 +101,15 @@ async function ensureSessionAlive(
   const sessionProvider = ctx.getSessionProvider(sessionId);
   if (sessionProvider.hasSession?.(sessionId)) return true;
 
-  const dbSession = getSession(sessionId);
+  const dbSession = await getSession(sessionId);
   if (!dbSession) return false;
 
   console.log(`[session] Rebuilding GC'd session ${sessionId} for user ${email}`);
-  const userSettings = getUserSettings(email);
-  const isAdmin = Boolean((db.prepare("SELECT is_admin FROM users WHERE email = ?").get(email) as { is_admin?: number } | undefined)?.is_admin);
-  const msgGroupPerms = isAdmin ? null : getUserGroupPermissions(email);
-  const msgUserGroup = isAdmin ? null : getUserGroup(email);
+  const userSettings = await getUserSettings(email);
+  const adminRow = await dbGet<{ is_admin?: number }>("SELECT is_admin FROM users WHERE email = ?", [email]);
+  const isAdmin = Boolean(adminRow?.is_admin);
+  const msgGroupPerms = isAdmin ? null : await getUserGroupPermissions(email);
+  const msgUserGroup = isAdmin ? null : await getUserGroup(email);
   const systemPrompt = await buildSystemPrompt({
     personality: dbSession.personality ?? undefined,
     communicationStyle: msgGroupPerms?.prompt?.communication_style || "expert",
@@ -144,14 +145,14 @@ export function registerMessageHandlers(ctx: HandlerContext) {
           return;
         }
 
-        if (!canAccessSession(sessionId, email)) {
+        if (!(await canAccessSession(sessionId, email))) {
           socket.emit("claude:error", { sessionId, message: "Access denied" });
           return;
         }
 
         // Block observe-only users from sending messages
         if (!ctx.isAdmin) {
-          const msgPerms = getUserGroupPermissions(email);
+          const msgPerms = await getUserGroupPermissions(email);
           if (msgPerms.platform.observe_only) {
             socket.emit("claude:error", { sessionId, message: "Your account is in observe-only mode. You cannot interact with sessions." });
             return;
@@ -159,15 +160,15 @@ export function registerMessageHandlers(ctx: HandlerContext) {
         }
 
         // Rate limiting
-        const rl = ctx.checkRateLimit(email, sessionId);
+        const rl = await ctx.checkRateLimit(email, sessionId);
         if (!rl.ok) {
           socket.emit("claude:rate_limited", {
             sessionId,
             reason: rl.reason,
             limits: {
-              commands: getAppSetting("rate_limit_commands", "100"),
-              runtime_min: getAppSetting("rate_limit_runtime_min", "30"),
-              concurrent: getAppSetting("rate_limit_concurrent", "3"),
+              commands: await getAppSetting("rate_limit_commands", "100"),
+              runtime_min: await getAppSetting("rate_limit_runtime_min", "30"),
+              concurrent: await getAppSetting("rate_limit_concurrent", "3"),
             },
           });
           dispatchNotification(
@@ -180,11 +181,11 @@ export function registerMessageHandlers(ctx: HandlerContext) {
         }
 
         // Guard rails: check for bot-config modification attempts
-        const guardEnabled = getAppSetting("guard_rails_enabled", "true") === "true";
+        const guardEnabled = (await getAppSetting("guard_rails_enabled", "true")) === "true";
         if (guardEnabled) {
           const suspicion = checkBotConfigRequest(content);
           if (suspicion.suspicious) {
-            logActivity("security_mod_blocked", email, { reason: suspicion.reason, message: content.slice(0, 200) });
+            await logActivity("security_mod_blocked", email, { reason: suspicion.reason, message: content.slice(0, 200) });
             io.to(`session:${sessionId}`).emit("claude:output", {
               sessionId,
               parsed: {
@@ -205,7 +206,7 @@ export function registerMessageHandlers(ctx: HandlerContext) {
         ctx.incrementSessionCommands(email, sessionId);
 
         // Budget check before sending
-        const budget = checkBudget(email, sessionId);
+        const budget = await checkBudget(email, sessionId);
         if (budget.exceeded) {
           socket.emit("claude:budget_exceeded", { sessionId, type: budget.type, limit: budget.limit, current: budget.current });
           return;
@@ -241,14 +242,14 @@ export function registerMessageHandlers(ctx: HandlerContext) {
 
           if (agentName && agentTask) {
 
-          saveMessage(sessionId, "admin", content, email, "chat");
+          await saveMessage(sessionId, "admin", content, email, "chat");
           ctx.sessionCommandSubmitter.set(sessionId, email);
           io.to(`session:${sessionId}`).emit("claude:command_started", { sessionId, submittedBy: email });
-          ctx.setSessionStatus(sessionId, "running");
+          await ctx.setSessionStatus(sessionId, "running");
 
           let agentResult: string;
           try {
-            const session = getSession(sessionId);
+            const session = await getSession(sessionId);
             const result = await runSubAgent({
               agentName,
               task: agentTask,
@@ -277,7 +278,7 @@ export function registerMessageHandlers(ctx: HandlerContext) {
             parsed: { type: "done" },
             submittedBy: email,
           });
-          ctx.setSessionStatus(sessionId, "idle");
+          await ctx.setSessionStatus(sessionId, "idle");
           io.to(`session:${sessionId}`).emit("claude:command_done", { sessionId });
           return;
           }
@@ -307,14 +308,14 @@ export function registerMessageHandlers(ctx: HandlerContext) {
             return;
           }
 
-          const apiKey = getAppSetting("anthropic_api_key", "") || process.env.ANTHROPIC_API_KEY || "";
+          const apiKey = (await getAppSetting("anthropic_api_key", "")) || process.env.ANTHROPIC_API_KEY || "";
           if (!apiKey) {
             emitLocal("No Anthropic API key configured. Set it in Admin > Settings.");
             return;
           }
 
-          saveMessage(sessionId, "admin", content, email, "chat");
-          ctx.setSessionStatus(sessionId, "running");
+          await saveMessage(sessionId, "admin", content, email, "chat");
+          await ctx.setSessionStatus(sessionId, "running");
           io.to(`session:${sessionId}`).emit("claude:command_started", { sessionId, submittedBy: email });
 
           try {
@@ -349,18 +350,19 @@ export function registerMessageHandlers(ctx: HandlerContext) {
               const parsed = JSON.parse(jsonMatch[0]) as { title?: string; content?: string };
               if (!parsed.title || !parsed.content) throw new Error("Missing title or content");
 
-              const memory = db.prepare(
-                "INSERT INTO memories (title, content, created_by) VALUES (?, ?, ?) RETURNING id, title, content, created_by, created_at, updated_at"
-              ).get(parsed.title.trim(), parsed.content.trim(), email) as { title: string; content: string };
+              const memory = await dbGet<{ id: string; title: string; content: string; created_by: string; created_at: string; updated_at: string }>(
+                "INSERT INTO memories (title, content, created_by) VALUES (?, ?, ?) RETURNING id, title, content, created_by, created_at, updated_at",
+                [parsed.title.trim(), parsed.content.trim(), email]
+              );
 
-              emitLocal(`Saved to memory: **${memory.title}**\n\n${memory.content}`);
+              emitLocal(`Saved to memory: **${memory?.title}**\n\n${memory?.content}`);
             }
           } catch (err) {
             console.error("[/remember] Error:", err);
             emitLocal(`Failed to save memory: ${err instanceof Error ? err.message : "Unknown error"}`);
           }
 
-          ctx.setSessionStatus(sessionId, "idle");
+          await ctx.setSessionStatus(sessionId, "idle");
           io.to(`session:${sessionId}`).emit("claude:command_done", { sessionId });
           return;
         }
@@ -375,7 +377,7 @@ export function registerMessageHandlers(ctx: HandlerContext) {
             const contextParts: string[] = [];
             const imageMetadata: { id: string; name: string; mime_type: string }[] = [];
             for (const uploadId of attachments) {
-              const upload = getUpload(uploadId);
+              const upload = await getUpload(uploadId);
               if (!upload) continue;
               const filePath = path.join(DATA_DIR, "uploads", upload.session_id, upload.stored_name);
               if (!fs.existsSync(filePath)) continue;
@@ -405,18 +407,18 @@ export function registerMessageHandlers(ctx: HandlerContext) {
             // Store image attachment metadata for rendering
             if (imageMetadata.length > 0) {
               const existingMeta = attachments?.length ? { attachments, imageAttachments: imageMetadata } : { imageAttachments: imageMetadata };
-              saveMessage(sessionId, "admin", content, email, "chat", existingMeta);
+              await saveMessage(sessionId, "admin", content, email, "chat", existingMeta);
             } else {
               const msgMetadata = attachments?.length ? { attachments } : undefined;
-              saveMessage(sessionId, "admin", content, email, "chat", msgMetadata);
+              await saveMessage(sessionId, "admin", content, email, "chat", msgMetadata);
             }
           } catch (err) {
             console.error("[upload] Error processing attachments:", err);
             const msgMetadata = attachments?.length ? { attachments } : undefined;
-            saveMessage(sessionId, "admin", content, email, "chat", msgMetadata);
+            await saveMessage(sessionId, "admin", content, email, "chat", msgMetadata);
           }
         } else {
-          saveMessage(sessionId, "admin", content, email, "chat");
+          await saveMessage(sessionId, "admin", content, email, "chat");
         }
 
         // When AI is paused, save the message but don't forward to Claude.
@@ -446,7 +448,7 @@ export function registerMessageHandlers(ctx: HandlerContext) {
         ctx.sessionCommandSubmitter.set(sessionId, email);
         io.to(`session:${sessionId}`).emit("claude:command_started", { sessionId, submittedBy: email });
         const sessionProvider = ctx.getSessionProvider(sessionId);
-        ctx.setSessionStatus(sessionId, "running");
+        await ctx.setSessionStatus(sessionId, "running");
         sessionProvider.sendMessage(sessionId, fullContent, { inputFiles: inputFiles.length > 0 ? inputFiles : undefined });
 
         // Safety net: if after a brief delay the provider reports not-running
@@ -457,33 +459,33 @@ export function registerMessageHandlers(ctx: HandlerContext) {
             const stillSubmitting = ctx.sessionCommandSubmitter.get(sessionId);
             if (stillSubmitting === email) {
               ctx.sessionCommandSubmitter.delete(sessionId);
-              ctx.setSessionStatus(sessionId, "idle");
+              void ctx.setSessionStatus(sessionId, "idle");
               io.to(`session:${sessionId}`).emit("claude:command_done", { sessionId });
             }
           }
         }, 3000);
       } catch (err) {
-        ctx.setSessionStatus(sessionId, "idle");
+        await ctx.setSessionStatus(sessionId, "idle");
         io.to(`session:${sessionId}`).emit("claude:command_done", { sessionId });
         socket.emit("claude:error", { sessionId, message: String(err) });
       }
     },
   );
 
-  socket.on("claude:interrupt", ({ sessionId }: { sessionId: string }) => {
-    if (!canAccessSession(sessionId, email)) {
+  socket.on("claude:interrupt", async ({ sessionId }: { sessionId: string }) => {
+    if (!(await canAccessSession(sessionId, email))) {
       socket.emit("claude:error", { sessionId, message: "Access denied" });
       return;
     }
     const sp = ctx.getSessionProvider(sessionId);
     sp.interrupt(sessionId);
-    ctx.setSessionStatus(sessionId, "idle");
+    await ctx.setSessionStatus(sessionId, "idle");
   });
 
   socket.on(
     "claude:select_option",
-    ({ sessionId, choice }: { sessionId: string; choice: string }) => {
-      if (!canAccessSession(sessionId, email)) {
+    async ({ sessionId, choice }: { sessionId: string; choice: string }) => {
+      if (!(await canAccessSession(sessionId, email))) {
         socket.emit("claude:error", { sessionId, message: "Access denied" });
         return;
       }
@@ -494,8 +496,8 @@ export function registerMessageHandlers(ctx: HandlerContext) {
 
   socket.on(
     "claude:confirm",
-    ({ sessionId, value }: { sessionId: string; value: boolean }) => {
-      if (!canAccessSession(sessionId, email)) {
+    async ({ sessionId, value }: { sessionId: string; value: boolean }) => {
+      if (!(await canAccessSession(sessionId, email))) {
         socket.emit("claude:error", { sessionId, message: "Access denied" });
         return;
       }
@@ -506,8 +508,8 @@ export function registerMessageHandlers(ctx: HandlerContext) {
 
   socket.on(
     "claude:answer_question",
-    ({ sessionId, answer }: { sessionId: string; answer: string }) => {
-      if (!canAccessSession(sessionId, email)) {
+    async ({ sessionId, answer }: { sessionId: string; answer: string }) => {
+      if (!(await canAccessSession(sessionId, email))) {
         socket.emit("claude:error", { sessionId, message: "Access denied" });
         return;
       }
@@ -518,13 +520,13 @@ export function registerMessageHandlers(ctx: HandlerContext) {
 
   socket.on(
     "claude:allow_tool",
-    ({ sessionId, toolName, scope, toolCallId }: { sessionId: string; toolName: string; scope?: "session" | "once"; toolCallId?: string }) => {
-      if (!canAccessSession(sessionId, email)) {
+    async ({ sessionId, toolName, scope, toolCallId }: { sessionId: string; toolName: string; scope?: "session" | "once"; toolCallId?: string }) => {
+      if (!(await canAccessSession(sessionId, email))) {
         socket.emit("claude:error", { sessionId, message: "Access denied" });
         return;
       }
       const sp = ctx.getSessionProvider(sessionId);
-      ctx.setSessionStatus(sessionId, "running");
+      await ctx.setSessionStatus(sessionId, "running");
       sp.allowTool(sessionId, toolName, scope ?? "once", toolCallId);
     },
   );
@@ -535,41 +537,41 @@ export function registerMessageHandlers(ctx: HandlerContext) {
     "claude:edit_message",
     async ({ sessionId, messageId, newContent }: { sessionId: string; messageId: string; newContent: string }) => {
       try {
-        if (!canModifySession(sessionId, email)) {
+        if (!(await canModifySession(sessionId, email))) {
           socket.emit("claude:error", { sessionId, message: "Access denied" });
           return;
         }
 
-        const rl = ctx.checkRateLimit(email, sessionId);
+        const rl = await ctx.checkRateLimit(email, sessionId);
         if (!rl.ok) {
           socket.emit("claude:rate_limited", {
             sessionId,
             reason: rl.reason,
             limits: {
-              commands: getAppSetting("rate_limit_commands", "100"),
-              runtime_min: getAppSetting("rate_limit_runtime_min", "30"),
-              concurrent: getAppSetting("rate_limit_concurrent", "3"),
+              commands: await getAppSetting("rate_limit_commands", "100"),
+              runtime_min: await getAppSetting("rate_limit_runtime_min", "30"),
+              concurrent: await getAppSetting("rate_limit_concurrent", "3"),
             },
           });
           return;
         }
 
-        const budget = checkBudget(email, sessionId);
+        const budget = await checkBudget(email, sessionId);
         if (budget.exceeded) {
           socket.emit("claude:budget_exceeded", { sessionId, type: budget.type, limit: budget.limit, current: budget.current });
           return;
         }
 
-        const session = getSession(sessionId);
+        const session = await getSession(sessionId);
         if (!session) return;
 
-        const msg = getMessage(messageId);
+        const msg = await getMessage(messageId);
         if (!msg || msg.session_id !== sessionId) return;
 
-        deleteMessagesAfter(sessionId, msg.timestamp);
-        updateMessageContent(messageId, newContent);
+        await deleteMessagesAfter(sessionId, msg.timestamp);
+        await updateMessageContent(messageId, newContent);
 
-        const messages = getMessages(sessionId);
+        const messages = await getMessages(sessionId);
         io.to(`session:${sessionId}`).emit("claude:messages_updated", { sessionId, messages });
 
         await ensureSessionAlive(ctx, sessionId, email);
@@ -581,7 +583,7 @@ export function registerMessageHandlers(ctx: HandlerContext) {
         ctx.incrementSessionCommands(email, sessionId);
         ctx.sessionCommandSubmitter.set(sessionId, email);
         io.to(`session:${sessionId}`).emit("claude:command_started", { sessionId, submittedBy: email });
-        ctx.setSessionStatus(sessionId, "running");
+        await ctx.setSessionStatus(sessionId, "running");
         sessionProvider.sendMessage(sessionId, editPrefix + newContent);
       } catch (err) {
         socket.emit("claude:error", { message: String(err) });
@@ -591,13 +593,13 @@ export function registerMessageHandlers(ctx: HandlerContext) {
 
   socket.on(
     "claude:delete_message",
-    ({ sessionId, messageId }: { sessionId: string; messageId: string }) => {
+    async ({ sessionId, messageId }: { sessionId: string; messageId: string }) => {
       try {
-        if (!canModifySession(sessionId, email)) {
+        if (!(await canModifySession(sessionId, email))) {
           socket.emit("claude:error", { sessionId, message: "Access denied" });
           return;
         }
-        deleteMessage(messageId);
+        await deleteMessage(messageId);
         io.to(`session:${sessionId}`).emit("claude:message_deleted", { sessionId, messageId });
       } catch (err) {
         socket.emit("claude:error", { message: String(err) });
@@ -610,7 +612,7 @@ export function registerMessageHandlers(ctx: HandlerContext) {
   socket.on(
     "claude:toggle_chat",
     async ({ sessionId }: { sessionId: string }) => {
-      if (!canAccessSession(sessionId, email)) {
+      if (!(await canAccessSession(sessionId, email))) {
         socket.emit("claude:error", { sessionId, message: "Access denied" });
         return;
       }
@@ -632,7 +634,7 @@ export function registerMessageHandlers(ctx: HandlerContext) {
         // On resume: collect messages sent during the pause and feed them
         // to Claude as context so it knows what was discussed.
         if (pausedAt) {
-          const allMessages = getMessages(sessionId);
+          const allMessages = await getMessages(sessionId);
           const pausedMessages = allMessages.filter(
             (m) => m.sender_type === "admin" && m.timestamp > pausedAt,
           );
@@ -649,7 +651,7 @@ export function registerMessageHandlers(ctx: HandlerContext) {
             ctx.sessionCommandSubmitter.set(sessionId, email);
             io.to(`session:${sessionId}`).emit("claude:command_started", { sessionId, submittedBy: email });
             const sessionProvider = ctx.getSessionProvider(sessionId);
-            ctx.setSessionStatus(sessionId, "running");
+            await ctx.setSessionStatus(sessionId, "running");
             ctx.ensureSessionListener(sessionId);
             sessionProvider.sendMessage(sessionId, contextMessage);
           }
@@ -666,8 +668,8 @@ export function registerMessageHandlers(ctx: HandlerContext) {
 
   socket.on(
     "claude:get_chat_state",
-    ({ sessionId }: { sessionId: string }) => {
-      if (!canAccessSession(sessionId, email)) return;
+    async ({ sessionId }: { sessionId: string }) => {
+      if (!(await canAccessSession(sessionId, email))) return;
       const state = getAiPauseState(sessionId);
       socket.emit("claude:chat_toggled", {
         sessionId,

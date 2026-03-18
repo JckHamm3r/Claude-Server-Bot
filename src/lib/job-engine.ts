@@ -8,7 +8,7 @@ import {
 } from "./claude-db";
 import { logActivity } from "./activity-log";
 import { dispatchNotification } from "./notifications";
-import db from "./db";
+import { dbGet, dbRun } from "./db";
 
 const DATA_DIR = process.env.DATA_DIR ?? "./data";
 const LOGS_DIR = path.join(DATA_DIR, "job-logs");
@@ -113,11 +113,12 @@ exit \${EXIT_CODE}
 `;
 }
 
-function generateServiceUnit(job: Job): string {
+async function generateServiceUnit(job: Job): Promise<string> {
   const wrapperPath = wrapperScriptPath(job.id);
   const env = Object.entries(job.environment)
     .map(([k, v]) => `Environment=${k}=${v}`)
     .join("\n");
+  const secret = await getOrCreateJobSecret();
 
   return `[Unit]
 Description=Octoby Job: ${job.name}
@@ -126,7 +127,7 @@ After=network.target
 [Service]
 Type=oneshot
 ExecStart=/bin/bash ${wrapperPath}
-Environment=JOB_SECRET=${getOrCreateJobSecret()}
+Environment=JOB_SECRET=${secret}
 ${env}
 ${job.timeout_seconds > 0 ? `TimeoutStopSec=${job.timeout_seconds + 10}` : ""}
 
@@ -151,32 +152,33 @@ WantedBy=timers.target
 
 let jobSecret: string | null = null;
 
-function getOrCreateJobSecret(): string {
+async function getOrCreateJobSecret(): Promise<string> {
   if (jobSecret) return jobSecret;
   try {
-    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'job_runner_secret'").get() as { value: string } | undefined;
+    const row = await dbGet<{ value: string }>("SELECT value FROM app_settings WHERE key = 'job_runner_secret'");
     if (row?.value) {
       jobSecret = row.value;
       return jobSecret;
     }
   } catch { /* ignore */ }
   const secret = randomBytes(32).toString("hex");
-  db.prepare(
-    "INSERT INTO app_settings (key, value) VALUES ('job_runner_secret', ?) ON CONFLICT(key) DO UPDATE SET value = ?"
-  ).run(secret, secret);
+  await dbRun(
+    "INSERT INTO app_settings (key, value) VALUES ('job_runner_secret', ?) ON CONFLICT(key) DO UPDATE SET value = ?",
+    [secret, secret]
+  );
   jobSecret = secret;
   return secret;
 }
 
-export function validateJobSecret(secret: string): boolean {
-  return secret === getOrCreateJobSecret();
+export async function validateJobSecret(secret: string): Promise<boolean> {
+  return secret === await getOrCreateJobSecret();
 }
 
 /**
  * Install a job's systemd timer and service files.
  */
-export function installJob(jobId: string): { ok: boolean; error?: string } {
-  const job = getJob(jobId);
+export async function installJob(jobId: string): Promise<{ ok: boolean; error?: string }> {
+  const job = await getJob(jobId);
   if (!job) return { ok: false, error: "Job not found" };
 
   try {
@@ -189,7 +191,7 @@ export function installJob(jobId: string): { ok: boolean; error?: string } {
     fs.writeFileSync(wrapperPath, generateWrapperScript(job, apiBase), { mode: 0o755 });
 
     // Write systemd unit files
-    const serviceContent = generateServiceUnit(job);
+    const serviceContent = await generateServiceUnit(job);
     const timerContent = generateTimerUnit(job);
 
     const tmpService = path.join(DATA_DIR, `tmp-${jobId}.service`);
@@ -208,7 +210,7 @@ export function installJob(jobId: string): { ok: boolean; error?: string } {
       runSudo(`systemctl enable --now ${unitName(jobId)}.timer`);
     }
 
-    updateJob(jobId, { systemd_unit: unitName(jobId) });
+    await updateJob(jobId, { systemd_unit: unitName(jobId) });
     return { ok: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -249,17 +251,17 @@ export function uninstallJob(jobId: string): { ok: boolean; error?: string } {
 /**
  * Enable a paused job's timer.
  */
-export function enableJob(jobId: string): { ok: boolean; error?: string } {
-  const job = getJob(jobId);
+export async function enableJob(jobId: string): Promise<{ ok: boolean; error?: string }> {
+  const job = await getJob(jobId);
   if (!job) return { ok: false, error: "Job not found" };
 
   try {
     if (!job.systemd_unit) {
-      const installResult = installJob(jobId);
+      const installResult = await installJob(jobId);
       if (!installResult.ok) return installResult;
     }
     runSudo(`systemctl enable --now ${unitName(jobId)}.timer`);
-    updateJob(jobId, { status: "active", consecutive_failures: 0 });
+    await updateJob(jobId, { status: "active", consecutive_failures: 0 });
     return { ok: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -270,7 +272,7 @@ export function enableJob(jobId: string): { ok: boolean; error?: string } {
 /**
  * Disable (pause) a job's timer without removing it.
  */
-export function disableJob(jobId: string): { ok: boolean; error?: string } {
+export async function disableJob(jobId: string): Promise<{ ok: boolean; error?: string }> {
   try {
     try {
       runSudo(`systemctl stop ${unitName(jobId)}.timer`);
@@ -278,7 +280,7 @@ export function disableJob(jobId: string): { ok: boolean; error?: string } {
     try {
       runSudo(`systemctl disable ${unitName(jobId)}.timer`);
     } catch { /* ignore */ }
-    updateJob(jobId, { status: "paused" });
+    await updateJob(jobId, { status: "paused" });
     return { ok: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -289,13 +291,13 @@ export function disableJob(jobId: string): { ok: boolean; error?: string } {
 /**
  * Run a job immediately (outside its schedule).
  */
-export function runJobNow(jobId: string, userEmail: string): { ok: boolean; runId?: string; error?: string } {
-  const job = getJob(jobId);
+export async function runJobNow(jobId: string, userEmail: string): Promise<{ ok: boolean; runId?: string; error?: string }> {
+  const job = await getJob(jobId);
   if (!job) return { ok: false, error: "Job not found" };
 
-  const run = createJobRun(jobId, "manual");
+  const run = await createJobRun(jobId, "manual");
 
-  updateJob(jobId, { last_run_at: run.started_at, last_run_status: "running" });
+  await updateJob(jobId, { last_run_at: run.started_at, last_run_status: "running" });
 
   const apiBase = process.env.NEXTAUTH_URL || `http://localhost:${process.env.PORT || 3000}`;
   const scriptsDir = path.join(DATA_DIR, "job-scripts");
@@ -310,14 +312,14 @@ export function runJobNow(jobId: string, userEmail: string): { ok: boolean; runI
     env: {
       ...process.env,
       TRIGGER: "manual",
-      JOB_SECRET: getOrCreateJobSecret(),
+      JOB_SECRET: await getOrCreateJobSecret(),
     },
     detached: true,
     stdio: "ignore",
   });
   child.unref();
 
-  logActivity("job_run_manual" as never, userEmail, { jobId, jobName: job.name, runId: run.id });
+  await logActivity("job_run_manual" as never, userEmail, { jobId, jobName: job.name, runId: run.id });
 
   return { ok: true, runId: run.id };
 }
@@ -325,9 +327,9 @@ export function runJobNow(jobId: string, userEmail: string): { ok: boolean; runI
 /**
  * Handle a run start notification from the wrapper script.
  */
-export function handleRunStart(jobId: string, trigger: JobRunTrigger): string {
-  const run = createJobRun(jobId, trigger);
-  updateJob(jobId, { last_run_at: run.started_at, last_run_status: "running" });
+export async function handleRunStart(jobId: string, trigger: JobRunTrigger): Promise<string> {
+  const run = await createJobRun(jobId, trigger);
+  await updateJob(jobId, { last_run_at: run.started_at, last_run_status: "running" });
   return run.id;
 }
 
@@ -342,7 +344,7 @@ export async function handleRunFinish(
   output: string,
   logPath: string,
 ): Promise<void> {
-  const job = getJob(jobId);
+  const job = await getJob(jobId);
   if (!job) return;
 
   const status = exitCode === 0 ? "success" as const : "failed" as const;
@@ -351,7 +353,7 @@ export async function handleRunFinish(
     : output;
 
   if (runId && runId !== "unknown") {
-    updateJobRun(runId, {
+    await updateJobRun(runId, {
       finished_at: new Date().toISOString().replace("T", " ").replace("Z", ""),
       status,
       exit_code: exitCode,
@@ -371,10 +373,9 @@ export async function handleRunFinish(
     consecutive_failures: consecutive,
   };
 
-  // Auto-disable after N consecutive failures
   if (job.auto_disable_after > 0 && consecutive >= job.auto_disable_after) {
     jobUpdate.status = "failed";
-    disableJob(jobId);
+    await disableJob(jobId);
 
     await dispatchNotification(
       "job_failed" as never,
@@ -383,12 +384,11 @@ export async function handleRunFinish(
       `"${job.name}" was automatically disabled after ${consecutive} consecutive failures.`,
     ).catch(() => {});
 
-    logActivity("job_auto_disabled" as never, null, { jobId, jobName: job.name, consecutive });
+    await logActivity("job_auto_disabled" as never, null, { jobId, jobName: job.name, consecutive });
   }
 
-  updateJob(jobId, jobUpdate);
+  await updateJob(jobId, jobUpdate);
 
-  // Send notifications
   if (status === "failed" && job.notify_on_failure) {
     await dispatchNotification(
       "job_failed" as never,
@@ -443,15 +443,15 @@ export function isTimerActive(jobId: string): boolean {
 /**
  * Sync job statuses with systemd (called periodically).
  */
-export function syncJobStatuses(): void {
+export async function syncJobStatuses(): Promise<void> {
   try {
-    const jobs = listJobs();
+    const jobs = await listJobs();
     for (const job of jobs) {
       if (!job.systemd_unit) continue;
       const active = isTimerActive(job.id);
       const nextRun = active ? getTimerNextRun(job.id) : null;
       if (nextRun !== job.next_run_at) {
-        updateJob(job.id, { next_run_at: nextRun });
+        await updateJob(job.id, { next_run_at: nextRun });
       }
     }
   } catch (err) {

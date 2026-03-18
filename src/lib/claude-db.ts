@@ -1,4 +1,4 @@
-import db from "./db";
+import { dbGet, dbAll, dbRun, dbTransaction } from "./db";
 import { randomUUID } from "crypto";
 
 // ==================== SESSIONS ====================
@@ -76,43 +76,44 @@ function rowToMessage(row: Record<string, unknown>): ClaudeMessage {
   };
 }
 
-export function createSession(
+export async function createSession(
   id: string,
   createdBy: string,
   skipPermissions = false,
   model = "claude-sonnet-4-6",
   providerType = "sdk",
   personality?: string,
-): ClaudeSession {
-  db.prepare(`
+): Promise<ClaudeSession> {
+  await dbRun(`
     INSERT INTO sessions (id, created_by, skip_permissions, model, provider_type, personality)
     VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET updated_at = datetime('now')
-  `).run(id, createdBy, skipPermissions ? 1 : 0, model, providerType, personality ?? null);
-  const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(id) as Record<string, unknown>;
-  return rowToSession(row);
+  `, [id, createdBy, skipPermissions ? 1 : 0, model, providerType, personality ?? null]);
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM sessions WHERE id = ?", [id]);
+  return rowToSession(row!);
 }
 
-export function updateSessionModel(id: string, model: string): void {
-  db.prepare("UPDATE sessions SET model = ?, updated_at = datetime('now') WHERE id = ?").run(model, id);
+export async function updateSessionModel(id: string, model: string): Promise<void> {
+  await dbRun("UPDATE sessions SET model = ?, updated_at = datetime('now') WHERE id = ?", [model, id]);
 }
 
-export function getSession(id: string): ClaudeSession | null {
-  const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+export async function getSession(id: string): Promise<ClaudeSession | null> {
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM sessions WHERE id = ?", [id]);
   return row ? rowToSession(row) : null;
 }
 
-export function listSessions(createdBy: string): ClaudeSession[] {
-  // Own sessions
-  const ownRows = db.prepare("SELECT * FROM sessions WHERE created_by = ? ORDER BY updated_at DESC").all(createdBy) as Record<string, unknown>[];
-  // Shared sessions (participant but not owner)
-  const sharedRows = db.prepare(`
+export async function listSessions(createdBy: string): Promise<ClaudeSession[]> {
+  const ownRows = await dbAll<Record<string, unknown>>(
+    "SELECT * FROM sessions WHERE created_by = ? ORDER BY updated_at DESC",
+    [createdBy]
+  );
+  const sharedRows = await dbAll<Record<string, unknown>>(`
     SELECT s.*, sp.user_email as _participant_email
     FROM sessions s
     JOIN session_participants sp ON sp.session_id = s.id
     WHERE sp.user_email = ? AND s.created_by != ?
     ORDER BY s.updated_at DESC
-  `).all(createdBy, createdBy) as Record<string, unknown>[];
+  `, [createdBy, createdBy]);
 
   const own = ownRows.map(rowToSession);
   const shared = sharedRows.map((row) => {
@@ -121,7 +122,6 @@ export function listSessions(createdBy: string): ClaudeSession[] {
     return session;
   });
 
-  // Merge: own first, then shared; de-duplicate by id
   const seen = new Set<string>(own.map((s) => s.id));
   const merged = [...own];
   for (const s of shared) {
@@ -130,74 +130,77 @@ export function listSessions(createdBy: string): ClaudeSession[] {
       merged.push(s);
     }
   }
-  // Sort combined list by updated_at desc
   merged.sort((a, b) => (b.updated_at > a.updated_at ? 1 : -1));
   return merged;
 }
 
-export function renameSession(id: string, name: string): void {
-  db.prepare("UPDATE sessions SET name = ?, updated_at = datetime('now') WHERE id = ?").run(name, id);
+export async function renameSession(id: string, name: string): Promise<void> {
+  await dbRun("UPDATE sessions SET name = ?, updated_at = datetime('now') WHERE id = ?", [name, id]);
 }
 
-export function saveMessage(
+export async function saveMessage(
   sessionId: string,
   senderType: "admin" | "claude",
   content: string,
   senderId?: string,
   messageType: "chat" | "system" | "error" = "chat",
   metadata?: Record<string, unknown>,
-): ClaudeMessage {
-  return db.transaction(() => {
-    const id = randomUUID();
-    db.prepare(`
+): Promise<ClaudeMessage> {
+  const id = randomUUID();
+  await dbTransaction(async ({ run, get }) => {
+    await run(`
       INSERT INTO messages (id, session_id, sender_type, sender_id, content, message_type, metadata)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(id, sessionId, senderType, senderId ?? null, content, messageType, JSON.stringify(metadata ?? {}));
-    db.prepare("UPDATE sessions SET updated_at = datetime('now') WHERE id = ?").run(sessionId);
-    const row = db.prepare("SELECT * FROM messages WHERE id = ?").get(id) as Record<string, unknown>;
-    return rowToMessage(row);
-  })();
+    `, [id, sessionId, senderType, senderId ?? null, content, messageType, JSON.stringify(metadata ?? {})]);
+    await run("UPDATE sessions SET updated_at = datetime('now') WHERE id = ?", [sessionId]);
+    return get<Record<string, unknown>>("SELECT * FROM messages WHERE id = ?", [id]);
+  });
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM messages WHERE id = ?", [id]);
+  return rowToMessage(row!);
 }
 
-export function getMessages(sessionId: string): ClaudeMessage[] {
-  const rows = db.prepare("SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC").all(sessionId) as Record<string, unknown>[];
+export async function getMessages(sessionId: string): Promise<ClaudeMessage[]> {
+  const rows = await dbAll<Record<string, unknown>>(
+    "SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC",
+    [sessionId]
+  );
   return rows.map(rowToMessage);
 }
 
-export function deleteSession(id: string): void {
-  db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+export async function deleteSession(id: string): Promise<void> {
+  await dbRun("DELETE FROM sessions WHERE id = ?", [id]);
 }
 
-export function updateSessionTags(id: string, tags: string[]): void {
-  db.prepare("UPDATE sessions SET tags = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(tags), id);
+export async function updateSessionTags(id: string, tags: string[]): Promise<void> {
+  await dbRun("UPDATE sessions SET tags = ?, updated_at = datetime('now') WHERE id = ?", [JSON.stringify(tags), id]);
 }
 
 // ==================== SESSION STATUS ====================
 
-export function updateSessionStatus(id: string, status: SessionStatus): void {
-  db.prepare("UPDATE sessions SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, id);
+export async function updateSessionStatus(id: string, status: SessionStatus): Promise<void> {
+  await dbRun("UPDATE sessions SET status = ?, updated_at = datetime('now') WHERE id = ?", [status, id]);
 }
 
-export function updateClaudeSessionId(id: string, claudeSessionId: string | null): void {
-  db.prepare("UPDATE sessions SET claude_session_id = ?, updated_at = datetime('now') WHERE id = ?").run(claudeSessionId, id);
+export async function updateClaudeSessionId(id: string, claudeSessionId: string | null): Promise<void> {
+  await dbRun("UPDATE sessions SET claude_session_id = ?, updated_at = datetime('now') WHERE id = ?", [claudeSessionId, id]);
 }
 
 // ==================== MESSAGE EDIT / DELETE ====================
 
-export function deleteMessage(messageId: string): void {
-  db.prepare("DELETE FROM messages WHERE id = ?").run(messageId);
+export async function deleteMessage(messageId: string): Promise<void> {
+  await dbRun("DELETE FROM messages WHERE id = ?", [messageId]);
 }
 
-export function deleteMessagesAfter(sessionId: string, timestamp: string): void {
-  db.prepare("DELETE FROM messages WHERE session_id = ? AND timestamp > ?").run(sessionId, timestamp);
+export async function deleteMessagesAfter(sessionId: string, timestamp: string): Promise<void> {
+  await dbRun("DELETE FROM messages WHERE session_id = ? AND timestamp > ?", [sessionId, timestamp]);
 }
 
-export function updateMessageContent(messageId: string, content: string): void {
-  db.prepare("UPDATE messages SET content = ? WHERE id = ?").run(content, messageId);
+export async function updateMessageContent(messageId: string, content: string): Promise<void> {
+  await dbRun("UPDATE messages SET content = ? WHERE id = ?", [content, messageId]);
 }
 
-export function getMessage(messageId: string): ClaudeMessage | null {
-  const row = db.prepare("SELECT * FROM messages WHERE id = ?").get(messageId) as Record<string, unknown> | undefined;
+export async function getMessage(messageId: string): Promise<ClaudeMessage | null> {
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM messages WHERE id = ?", [messageId]);
   return row ? rowToMessage(row) : null;
 }
 
@@ -210,8 +213,11 @@ export interface SessionTokenUsage {
   message_count: number;
 }
 
-export function getSessionTokenUsage(sessionId: string): SessionTokenUsage {
-  const rows = db.prepare("SELECT metadata FROM messages WHERE session_id = ? AND sender_type = 'claude' ORDER BY timestamp ASC").all(sessionId) as { metadata: string }[];
+export async function getSessionTokenUsage(sessionId: string): Promise<SessionTokenUsage> {
+  const rows = await dbAll<{ metadata: string }>(
+    "SELECT metadata FROM messages WHERE session_id = ? AND sender_type = 'claude' ORDER BY timestamp ASC",
+    [sessionId]
+  );
   let latestInput = 0;
   let latestOutput = 0;
   let latestCost = 0;
@@ -230,7 +236,7 @@ export function getSessionTokenUsage(sessionId: string): SessionTokenUsage {
   return { total_input_tokens: latestInput, total_output_tokens: latestOutput, total_cost_usd: latestCost, message_count: count };
 }
 
-export function getGlobalTokenUsage(opts?: { since?: string; userId?: string }): SessionTokenUsage {
+export async function getGlobalTokenUsage(opts?: { since?: string; userId?: string }): Promise<SessionTokenUsage> {
   let query = "SELECT m.session_id, m.metadata FROM messages m";
   const conditions: string[] = ["m.sender_type = 'claude'"];
   const params: unknown[] = [];
@@ -246,7 +252,7 @@ export function getGlobalTokenUsage(opts?: { since?: string; userId?: string }):
   }
 
   query += " WHERE " + conditions.join(" AND ") + " ORDER BY m.timestamp ASC";
-  const rows = db.prepare(query).all(...params) as { session_id: string; metadata: string }[];
+  const rows = await dbAll<{ session_id: string; metadata: string }>(query, params as string[]);
 
   const perSession = new Map<string, { input: number; output: number; cost: number }>();
   let count = 0;
@@ -309,25 +315,27 @@ function rowToTemplate(row: Record<string, unknown>): SessionTemplate {
   };
 }
 
-export function listTemplates(): SessionTemplate[] {
-  const rows = db.prepare("SELECT * FROM session_templates ORDER BY is_default DESC, name ASC").all() as Record<string, unknown>[];
+export async function listTemplates(): Promise<SessionTemplate[]> {
+  const rows = await dbAll<Record<string, unknown>>(
+    "SELECT * FROM session_templates ORDER BY is_default DESC, name ASC"
+  );
   return rows.map(rowToTemplate);
 }
 
-export function getTemplate(id: string): SessionTemplate | null {
-  const row = db.prepare("SELECT * FROM session_templates WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+export async function getTemplate(id: string): Promise<SessionTemplate | null> {
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM session_templates WHERE id = ?", [id]);
   return row ? rowToTemplate(row) : null;
 }
 
-export function createTemplate(
+export async function createTemplate(
   data: { name: string; description?: string; system_prompt?: string; model?: string; skip_permissions?: boolean; provider_type?: string; icon?: string; is_default?: boolean },
   createdBy: string,
-): SessionTemplate {
+): Promise<SessionTemplate> {
   const id = randomUUID();
-  db.prepare(`
+  await dbRun(`
     INSERT INTO session_templates (id, name, description, system_prompt, model, skip_permissions, provider_type, icon, is_default, created_by)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  `, [
     id,
     data.name,
     data.description ?? null,
@@ -338,14 +346,15 @@ export function createTemplate(
     data.icon ?? null,
     data.is_default ? 1 : 0,
     createdBy,
-  );
-  return rowToTemplate(db.prepare("SELECT * FROM session_templates WHERE id = ?").get(id) as Record<string, unknown>);
+  ]);
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM session_templates WHERE id = ?", [id]);
+  return rowToTemplate(row!);
 }
 
-export function updateTemplate(
+export async function updateTemplate(
   id: string,
   data: Partial<{ name: string; description: string; system_prompt: string; model: string; skip_permissions: boolean; provider_type: string; icon: string; is_default: boolean }>,
-): SessionTemplate {
+): Promise<SessionTemplate> {
   const fields: string[] = [];
   const values: unknown[] = [];
   if (data.name !== undefined) { fields.push("name = ?"); values.push(data.name); }
@@ -358,12 +367,13 @@ export function updateTemplate(
   if (data.is_default !== undefined) { fields.push("is_default = ?"); values.push(data.is_default ? 1 : 0); }
   fields.push("updated_at = datetime('now')");
   values.push(id);
-  db.prepare(`UPDATE session_templates SET ${fields.join(", ")} WHERE id = ?`).run(...values as Parameters<typeof db.prepare>[0][]);
-  return rowToTemplate(db.prepare("SELECT * FROM session_templates WHERE id = ?").get(id) as Record<string, unknown>);
+  await dbRun(`UPDATE session_templates SET ${fields.join(", ")} WHERE id = ?`, values as string[]);
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM session_templates WHERE id = ?", [id]);
+  return rowToTemplate(row!);
 }
 
-export function deleteTemplate(id: string): void {
-  db.prepare("DELETE FROM session_templates WHERE id = ?").run(id);
+export async function deleteTemplate(id: string): Promise<void> {
+  await dbRun("DELETE FROM session_templates WHERE id = ?", [id]);
 }
 
 // ==================== AGENTS ====================
@@ -422,80 +432,86 @@ function rowToAgentVersion(row: Record<string, unknown>): ClaudeAgentVersion {
   };
 }
 
-export function listAgents(createdBy: string): ClaudeAgent[] {
-  const rows = db.prepare("SELECT * FROM agents WHERE created_by = ? AND status != 'archived' ORDER BY updated_at DESC").all(createdBy) as Record<string, unknown>[];
+export async function listAgents(createdBy: string): Promise<ClaudeAgent[]> {
+  const rows = await dbAll<Record<string, unknown>>(
+    "SELECT * FROM agents WHERE created_by = ? AND status != 'archived' ORDER BY updated_at DESC",
+    [createdBy]
+  );
   return rows.map(rowToAgent);
 }
 
-export function getActiveAgents(): ClaudeAgent[] {
-  const rows = db.prepare("SELECT * FROM agents WHERE status = 'active' ORDER BY name ASC").all() as Record<string, unknown>[];
+export async function getActiveAgents(): Promise<ClaudeAgent[]> {
+  const rows = await dbAll<Record<string, unknown>>(
+    "SELECT * FROM agents WHERE status = 'active' ORDER BY name ASC"
+  );
   return rows.map(rowToAgent);
 }
 
-export function getAgent(id: string): ClaudeAgent | null {
-  const row = db.prepare("SELECT * FROM agents WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+export async function getAgent(id: string): Promise<ClaudeAgent | null> {
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM agents WHERE id = ?", [id]);
   return row ? rowToAgent(row) : null;
 }
 
-export function createAgent(
+export async function createAgent(
   data: { name: string; description: string; icon?: string; model: string; allowed_tools: string[] },
   createdBy: string,
-): ClaudeAgent {
-  return db.transaction(() => {
-    const id = randomUUID();
-    db.prepare(`
+): Promise<ClaudeAgent> {
+  const id = randomUUID();
+  const versionId = randomUUID();
+  await dbTransaction(async ({ run }) => {
+    await run(`
       INSERT INTO agents (id, name, description, icon, model, allowed_tools, created_by)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(id, data.name, data.description, data.icon ?? null, data.model, JSON.stringify(data.allowed_tools), createdBy);
-    const agent = rowToAgent(db.prepare("SELECT * FROM agents WHERE id = ?").get(id) as Record<string, unknown>);
-    const versionId = randomUUID();
-    db.prepare(`
+    `, [id, data.name, data.description, data.icon ?? null, data.model, JSON.stringify(data.allowed_tools), createdBy]);
+    await run(`
       INSERT INTO agent_versions (id, agent_id, version_number, config_snapshot, change_description, created_by)
       VALUES (?, ?, 1, ?, 'Initial version', ?)
-    `).run(versionId, id, JSON.stringify({ name: agent.name, description: agent.description, icon: agent.icon, model: agent.model, allowed_tools: agent.allowed_tools, status: agent.status, current_version: 1 }), createdBy);
-    return agent;
-  })();
+    `, [versionId, id, JSON.stringify({ name: data.name, description: data.description, icon: data.icon ?? null, model: data.model, allowed_tools: data.allowed_tools, status: 'active', current_version: 1 }), createdBy]);
+  });
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM agents WHERE id = ?", [id]);
+  return rowToAgent(row!);
 }
 
-export function updateAgent(
+export async function updateAgent(
   id: string,
   data: Partial<{ name: string; description: string; icon: string; model: string; allowed_tools: string[]; status: string }>,
   updatedBy: string,
   changeDescription?: string,
-): ClaudeAgent {
-  return db.transaction(() => {
-    const fields: string[] = [];
-    const values: unknown[] = [];
-    if (data.name !== undefined) { fields.push("name = ?"); values.push(data.name); }
-    if (data.description !== undefined) { fields.push("description = ?"); values.push(data.description); }
-    if (data.icon !== undefined) { fields.push("icon = ?"); values.push(data.icon); }
-    if (data.model !== undefined) { fields.push("model = ?"); values.push(data.model); }
-    if (data.allowed_tools !== undefined) { fields.push("allowed_tools = ?"); values.push(JSON.stringify(data.allowed_tools)); }
-    if (data.status !== undefined) { fields.push("status = ?"); values.push(data.status); }
-    fields.push("updated_at = datetime('now')");
-    fields.push("current_version = current_version + 1");
-    values.push(id);
-    db.prepare(`UPDATE agents SET ${fields.join(", ")} WHERE id = ?`).run(...values as Parameters<typeof db.prepare>[0][]);
-    const agent = rowToAgent(db.prepare("SELECT * FROM agents WHERE id = ?").get(id) as Record<string, unknown>);
-    const versionId = randomUUID();
-    db.prepare(`
-      INSERT INTO agent_versions (id, agent_id, version_number, config_snapshot, change_description, created_by)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(versionId, id, agent.current_version, JSON.stringify({ name: agent.name, description: agent.description, icon: agent.icon, model: agent.model, allowed_tools: agent.allowed_tools, status: agent.status, current_version: agent.current_version }), changeDescription ?? null, updatedBy);
-    return agent;
-  })();
+): Promise<ClaudeAgent> {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  if (data.name !== undefined) { fields.push("name = ?"); values.push(data.name); }
+  if (data.description !== undefined) { fields.push("description = ?"); values.push(data.description); }
+  if (data.icon !== undefined) { fields.push("icon = ?"); values.push(data.icon); }
+  if (data.model !== undefined) { fields.push("model = ?"); values.push(data.model); }
+  if (data.allowed_tools !== undefined) { fields.push("allowed_tools = ?"); values.push(JSON.stringify(data.allowed_tools)); }
+  if (data.status !== undefined) { fields.push("status = ?"); values.push(data.status); }
+  fields.push("updated_at = datetime('now')");
+  fields.push("current_version = current_version + 1");
+  values.push(id);
+  await dbRun(`UPDATE agents SET ${fields.join(", ")} WHERE id = ?`, values as string[]);
+  const agent = rowToAgent((await dbGet<Record<string, unknown>>("SELECT * FROM agents WHERE id = ?", [id]))!);
+  const versionId = randomUUID();
+  await dbRun(`
+    INSERT INTO agent_versions (id, agent_id, version_number, config_snapshot, change_description, created_by)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `, [versionId, id, agent.current_version, JSON.stringify({ name: agent.name, description: agent.description, icon: agent.icon, model: agent.model, allowed_tools: agent.allowed_tools, status: agent.status, current_version: agent.current_version }), changeDescription ?? null, updatedBy]);
+  return agent;
 }
 
-export function deleteAgent(id: string): void {
-  db.prepare("DELETE FROM agents WHERE id = ?").run(id);
+export async function deleteAgent(id: string): Promise<void> {
+  await dbRun("DELETE FROM agents WHERE id = ?", [id]);
 }
 
-export function incrementAgentUseCount(id: string): void {
-  db.prepare("UPDATE agents SET use_count = use_count + 1 WHERE id = ?").run(id);
+export async function incrementAgentUseCount(id: string): Promise<void> {
+  await dbRun("UPDATE agents SET use_count = use_count + 1 WHERE id = ?", [id]);
 }
 
-export function getAgentVersions(agentId: string): ClaudeAgentVersion[] {
-  const rows = db.prepare("SELECT * FROM agent_versions WHERE agent_id = ? ORDER BY version_number DESC").all(agentId) as Record<string, unknown>[];
+export async function getAgentVersions(agentId: string): Promise<ClaudeAgentVersion[]> {
+  const rows = await dbAll<Record<string, unknown>>(
+    "SELECT * FROM agent_versions WHERE agent_id = ? ORDER BY version_number DESC",
+    [agentId]
+  );
   return rows.map(rowToAgentVersion);
 }
 
@@ -554,49 +570,63 @@ function rowToPlanStep(row: Record<string, unknown>): ClaudePlanStep {
   };
 }
 
-export function createPlan(sessionId: string, goal: string, createdBy: string): ClaudePlan {
+export async function createPlan(sessionId: string, goal: string, createdBy: string): Promise<ClaudePlan> {
   const id = randomUUID();
-  db.prepare("INSERT INTO plans (id, session_id, goal, created_by) VALUES (?, ?, ?, ?)").run(id, sessionId, goal, createdBy);
-  return rowToPlan(db.prepare("SELECT * FROM plans WHERE id = ?").get(id) as Record<string, unknown>);
+  await dbRun("INSERT INTO plans (id, session_id, goal, created_by) VALUES (?, ?, ?, ?)", [id, sessionId, goal, createdBy]);
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM plans WHERE id = ?", [id]);
+  return rowToPlan(row!);
 }
 
-export function getPlan(id: string): ClaudePlan | null {
-  const row = db.prepare("SELECT * FROM plans WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+export async function getPlan(id: string): Promise<ClaudePlan | null> {
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM plans WHERE id = ?", [id]);
   if (!row) return null;
   const plan = rowToPlan(row);
-  plan.steps = getPlanSteps(id);
+  plan.steps = await getPlanSteps(id);
   return plan;
 }
 
-export function updatePlanStatus(id: string, status: ClaudePlan["status"]): void {
-  db.prepare("UPDATE plans SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, id);
+export async function updatePlanStatus(id: string, status: ClaudePlan["status"]): Promise<void> {
+  await dbRun("UPDATE plans SET status = ?, updated_at = datetime('now') WHERE id = ?", [status, id]);
 }
 
-export function listPlans(sessionId: string): ClaudePlan[] {
-  const rows = db.prepare("SELECT * FROM plans WHERE session_id = ? ORDER BY created_at DESC").all(sessionId) as Record<string, unknown>[];
+export async function listPlans(sessionId: string): Promise<ClaudePlan[]> {
+  const rows = await dbAll<Record<string, unknown>>(
+    "SELECT * FROM plans WHERE session_id = ? ORDER BY created_at DESC",
+    [sessionId]
+  );
   return rows.map(rowToPlan);
 }
 
-export function listPlansForUser(email: string): ClaudePlan[] {
-  const rows = db.prepare("SELECT * FROM plans WHERE created_by = ? ORDER BY created_at DESC").all(email) as Record<string, unknown>[];
+export async function listPlansForUser(email: string): Promise<ClaudePlan[]> {
+  const rows = await dbAll<Record<string, unknown>>(
+    "SELECT * FROM plans WHERE created_by = ? ORDER BY created_at DESC",
+    [email]
+  );
   return rows.map(rowToPlan);
 }
 
-export function addPlanStep(planId: string, step: { step_order: number; summary: string; details?: string }): ClaudePlanStep {
+export async function addPlanStep(planId: string, step: { step_order: number; summary: string; details?: string }): Promise<ClaudePlanStep> {
   const id = randomUUID();
-  db.prepare("INSERT INTO plan_steps (id, plan_id, step_order, summary, details) VALUES (?, ?, ?, ?, ?)").run(id, planId, step.step_order, step.summary, step.details ?? null);
-  return rowToPlanStep(db.prepare("SELECT * FROM plan_steps WHERE id = ?").get(id) as Record<string, unknown>);
+  await dbRun(
+    "INSERT INTO plan_steps (id, plan_id, step_order, summary, details) VALUES (?, ?, ?, ?, ?)",
+    [id, planId, step.step_order, step.summary, step.details ?? null]
+  );
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM plan_steps WHERE id = ?", [id]);
+  return rowToPlanStep(row!);
 }
 
-export function getPlanSteps(planId: string): ClaudePlanStep[] {
-  const rows = db.prepare("SELECT * FROM plan_steps WHERE plan_id = ? ORDER BY step_order ASC").all(planId) as Record<string, unknown>[];
+export async function getPlanSteps(planId: string): Promise<ClaudePlanStep[]> {
+  const rows = await dbAll<Record<string, unknown>>(
+    "SELECT * FROM plan_steps WHERE plan_id = ? ORDER BY step_order ASC",
+    [planId]
+  );
   return rows.map(rowToPlanStep);
 }
 
-export function updatePlanStep(
+export async function updatePlanStep(
   id: string,
   data: Partial<{ summary: string; details: string; status: ClaudePlanStep["status"]; step_order: number; result: string; error: string; approved_by: string; executed_at: string }>,
-): ClaudePlanStep {
+): Promise<ClaudePlanStep> {
   const fields: string[] = [];
   const values: unknown[] = [];
   if (data.summary !== undefined) { fields.push("summary = ?"); values.push(data.summary); }
@@ -608,19 +638,21 @@ export function updatePlanStep(
   if (data.approved_by !== undefined) { fields.push("approved_by = ?"); values.push(data.approved_by); }
   if (data.executed_at !== undefined) { fields.push("executed_at = ?"); values.push(data.executed_at); }
   if (fields.length === 0) {
-    return rowToPlanStep(db.prepare("SELECT * FROM plan_steps WHERE id = ?").get(id) as Record<string, unknown>);
+    const row = await dbGet<Record<string, unknown>>("SELECT * FROM plan_steps WHERE id = ?", [id]);
+    return rowToPlanStep(row!);
   }
   values.push(id);
-  db.prepare(`UPDATE plan_steps SET ${fields.join(", ")} WHERE id = ?`).run(...values as Parameters<typeof db.prepare>[0][]);
-  return rowToPlanStep(db.prepare("SELECT * FROM plan_steps WHERE id = ?").get(id) as Record<string, unknown>);
+  await dbRun(`UPDATE plan_steps SET ${fields.join(", ")} WHERE id = ?`, values as string[]);
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM plan_steps WHERE id = ?", [id]);
+  return rowToPlanStep(row!);
 }
 
-export function deletePlanSteps(planId: string): void {
-  db.prepare("DELETE FROM plan_steps WHERE plan_id = ?").run(planId);
+export async function deletePlanSteps(planId: string): Promise<void> {
+  await dbRun("DELETE FROM plan_steps WHERE plan_id = ?", [planId]);
 }
 
-export function deletePlan(planId: string): void {
-  db.prepare("DELETE FROM plans WHERE id = ?").run(planId);
+export async function deletePlan(planId: string): Promise<void> {
+  await dbRun("DELETE FROM plans WHERE id = ?", [planId]);
 }
 
 // ==================== USER SETTINGS ====================
@@ -631,10 +663,9 @@ export interface ClaudeUserSettings {
   custom_default_context: string | null;
   auto_naming_enabled: boolean;
   setup_complete: boolean;
-  // User profile fields
-  experience_level: string;        // 'beginner' | 'intermediate' | 'expert'
-  server_purposes: string[];       // parsed from JSON
-  project_type: string;            // 'new' | 'existing' | ''
+  experience_level: string;
+  server_purposes: string[];
+  project_type: string;
   auto_summary: boolean;
   profile_wizard_complete: boolean;
   updated_at: string;
@@ -658,13 +689,13 @@ function rowToSettings(row: Record<string, unknown>): ClaudeUserSettings {
   };
 }
 
-export function getUserSettings(email: string): ClaudeUserSettings {
-  db.prepare("INSERT OR IGNORE INTO user_settings (email) VALUES (?)").run(email);
-  const row = db.prepare("SELECT * FROM user_settings WHERE email = ?").get(email) as Record<string, unknown>;
-  return rowToSettings(row);
+export async function getUserSettings(email: string): Promise<ClaudeUserSettings> {
+  await dbRun("INSERT OR IGNORE INTO user_settings (email) VALUES (?)", [email]);
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM user_settings WHERE email = ?", [email]);
+  return rowToSettings(row!);
 }
 
-export function updateUserSettings(
+export async function updateUserSettings(
   email: string,
   data: Partial<{
     full_trust_mode: boolean;
@@ -677,7 +708,7 @@ export function updateUserSettings(
     auto_summary: boolean;
     profile_wizard_complete: boolean;
   }>,
-): ClaudeUserSettings {
+): Promise<ClaudeUserSettings> {
   const fields: string[] = [];
   const values: unknown[] = [];
   if (data.full_trust_mode !== undefined) { fields.push("full_trust_mode = ?"); values.push(data.full_trust_mode ? 1 : 0); }
@@ -692,9 +723,10 @@ export function updateUserSettings(
   if (fields.length === 0) return getUserSettings(email);
   fields.push("updated_at = datetime('now')");
   values.push(email);
-  db.prepare("INSERT OR IGNORE INTO user_settings (email) VALUES (?)").run(email);
-  db.prepare(`UPDATE user_settings SET ${fields.join(", ")} WHERE email = ?`).run(...values as Parameters<typeof db.prepare>[0][]);
-  return rowToSettings(db.prepare("SELECT * FROM user_settings WHERE email = ?").get(email) as Record<string, unknown>);
+  await dbRun("INSERT OR IGNORE INTO user_settings (email) VALUES (?)", [email]);
+  await dbRun(`UPDATE user_settings SET ${fields.join(", ")} WHERE email = ?`, values as string[]);
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM user_settings WHERE email = ?", [email]);
+  return rowToSettings(row!);
 }
 
 // ==================== UPLOADS ====================
@@ -723,7 +755,7 @@ function rowToUpload(row: Record<string, unknown>): ClaudeUpload {
   };
 }
 
-export function createUpload(data: {
+export async function createUpload(data: {
   id: string;
   sessionId: string;
   originalName: string;
@@ -731,31 +763,34 @@ export function createUpload(data: {
   mimeType: string;
   sizeBytes: number;
   uploadedBy: string;
-}): ClaudeUpload {
-  db.prepare(`
+}): Promise<ClaudeUpload> {
+  await dbRun(`
     INSERT INTO uploads (id, session_id, original_name, stored_name, mime_type, size_bytes, uploaded_by)
     VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(data.id, data.sessionId, data.originalName, data.storedName, data.mimeType, data.sizeBytes, data.uploadedBy);
-  const row = db.prepare("SELECT * FROM uploads WHERE id = ?").get(data.id) as Record<string, unknown>;
-  return rowToUpload(row);
+  `, [data.id, data.sessionId, data.originalName, data.storedName, data.mimeType, data.sizeBytes, data.uploadedBy]);
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM uploads WHERE id = ?", [data.id]);
+  return rowToUpload(row!);
 }
 
-export function getUpload(id: string): ClaudeUpload | null {
-  const row = db.prepare("SELECT * FROM uploads WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+export async function getUpload(id: string): Promise<ClaudeUpload | null> {
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM uploads WHERE id = ?", [id]);
   return row ? rowToUpload(row) : null;
 }
 
-export function getSessionUploads(sessionId: string): ClaudeUpload[] {
-  const rows = db.prepare("SELECT * FROM uploads WHERE session_id = ? ORDER BY created_at ASC").all(sessionId) as Record<string, unknown>[];
+export async function getSessionUploads(sessionId: string): Promise<ClaudeUpload[]> {
+  const rows = await dbAll<Record<string, unknown>>(
+    "SELECT * FROM uploads WHERE session_id = ? ORDER BY created_at ASC",
+    [sessionId]
+  );
   return rows.map(rowToUpload);
 }
 
-export function deleteUpload(id: string): void {
-  db.prepare("DELETE FROM uploads WHERE id = ?").run(id);
+export async function deleteUpload(id: string): Promise<void> {
+  await dbRun("DELETE FROM uploads WHERE id = ?", [id]);
 }
 
-export function deleteSessionUploads(sessionId: string): void {
-  db.prepare("DELETE FROM uploads WHERE session_id = ?").run(sessionId);
+export async function deleteSessionUploads(sessionId: string): Promise<void> {
+  await dbRun("DELETE FROM uploads WHERE session_id = ?", [sessionId]);
 }
 
 // ==================== JOBS ====================
@@ -854,7 +889,7 @@ function rowToJobRun(row: Record<string, unknown>): JobRun {
   };
 }
 
-export function createJob(data: {
+export async function createJob(data: {
   name: string;
   description?: string;
   script_path: string;
@@ -869,14 +904,14 @@ export function createJob(data: {
   notify_on_success?: boolean;
   tags?: string[];
   ai_generated?: boolean;
-}, createdBy: string): Job {
+}, createdBy: string): Promise<Job> {
   const id = randomUUID().replace(/-/g, "").slice(0, 32);
-  db.prepare(`
+  await dbRun(`
     INSERT INTO jobs (id, name, description, script_path, schedule, schedule_display,
       working_directory, environment, max_retries, timeout_seconds, auto_disable_after,
       notify_on_failure, notify_on_success, tags, ai_generated, created_by)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  `, [
     id,
     data.name,
     data.description ?? "",
@@ -893,21 +928,22 @@ export function createJob(data: {
     JSON.stringify(data.tags ?? []),
     (data.ai_generated ?? false) ? 1 : 0,
     createdBy,
-  );
-  return rowToJob(db.prepare("SELECT * FROM jobs WHERE id = ?").get(id) as Record<string, unknown>);
+  ]);
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM jobs WHERE id = ?", [id]);
+  return rowToJob(row!);
 }
 
-export function getJob(id: string): Job | null {
-  const row = db.prepare("SELECT * FROM jobs WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+export async function getJob(id: string): Promise<Job | null> {
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM jobs WHERE id = ?", [id]);
   return row ? rowToJob(row) : null;
 }
 
-export function listJobs(): Job[] {
-  const rows = db.prepare("SELECT * FROM jobs ORDER BY updated_at DESC").all() as Record<string, unknown>[];
+export async function listJobs(): Promise<Job[]> {
+  const rows = await dbAll<Record<string, unknown>>("SELECT * FROM jobs ORDER BY updated_at DESC");
   return rows.map(rowToJob);
 }
 
-export function updateJob(
+export async function updateJob(
   id: string,
   data: Partial<{
     name: string;
@@ -932,7 +968,7 @@ export function updateJob(
     fail_count: number;
     consecutive_failures: number;
   }>,
-): Job {
+): Promise<Job> {
   const fields: string[] = [];
   const values: unknown[] = [];
   if (data.name !== undefined) { fields.push("name = ?"); values.push(data.name); }
@@ -956,26 +992,26 @@ export function updateJob(
   if (data.run_count !== undefined) { fields.push("run_count = ?"); values.push(data.run_count); }
   if (data.fail_count !== undefined) { fields.push("fail_count = ?"); values.push(data.fail_count); }
   if (data.consecutive_failures !== undefined) { fields.push("consecutive_failures = ?"); values.push(data.consecutive_failures); }
-  if (fields.length === 0) return getJob(id)!;
+  if (fields.length === 0) return (await getJob(id))!;
   fields.push("updated_at = datetime('now')");
   values.push(id);
-  db.prepare(`UPDATE jobs SET ${fields.join(", ")} WHERE id = ?`).run(...values as Parameters<typeof db.prepare>[0][]);
-  return rowToJob(db.prepare("SELECT * FROM jobs WHERE id = ?").get(id) as Record<string, unknown>);
+  await dbRun(`UPDATE jobs SET ${fields.join(", ")} WHERE id = ?`, values as string[]);
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM jobs WHERE id = ?", [id]);
+  return rowToJob(row!);
 }
 
-export function deleteJob(id: string): void {
-  db.prepare("DELETE FROM jobs WHERE id = ?").run(id);
+export async function deleteJob(id: string): Promise<void> {
+  await dbRun("DELETE FROM jobs WHERE id = ?", [id]);
 }
 
-export function createJobRun(jobId: string, triggeredBy: JobRunTrigger = "timer"): JobRun {
+export async function createJobRun(jobId: string, triggeredBy: JobRunTrigger = "timer"): Promise<JobRun> {
   const id = randomUUID().replace(/-/g, "").slice(0, 32);
-  db.prepare(
-    "INSERT INTO job_runs (id, job_id, triggered_by) VALUES (?, ?, ?)"
-  ).run(id, jobId, triggeredBy);
-  return rowToJobRun(db.prepare("SELECT * FROM job_runs WHERE id = ?").get(id) as Record<string, unknown>);
+  await dbRun("INSERT INTO job_runs (id, job_id, triggered_by) VALUES (?, ?, ?)", [id, jobId, triggeredBy]);
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM job_runs WHERE id = ?", [id]);
+  return rowToJobRun(row!);
 }
 
-export function updateJobRun(
+export async function updateJobRun(
   id: string,
   data: Partial<{
     finished_at: string;
@@ -986,7 +1022,7 @@ export function updateJobRun(
     duration_ms: number;
     error_summary: string;
   }>,
-): JobRun {
+): Promise<JobRun> {
   const fields: string[] = [];
   const values: unknown[] = [];
   if (data.finished_at !== undefined) { fields.push("finished_at = ?"); values.push(data.finished_at); }
@@ -996,28 +1032,31 @@ export function updateJobRun(
   if (data.output_log_path !== undefined) { fields.push("output_log_path = ?"); values.push(data.output_log_path); }
   if (data.duration_ms !== undefined) { fields.push("duration_ms = ?"); values.push(data.duration_ms); }
   if (data.error_summary !== undefined) { fields.push("error_summary = ?"); values.push(data.error_summary); }
-  if (fields.length === 0) return getJobRun(id)!;
+  if (fields.length === 0) return (await getJobRun(id))!;
   values.push(id);
-  db.prepare(`UPDATE job_runs SET ${fields.join(", ")} WHERE id = ?`).run(...values as Parameters<typeof db.prepare>[0][]);
-  return rowToJobRun(db.prepare("SELECT * FROM job_runs WHERE id = ?").get(id) as Record<string, unknown>);
+  await dbRun(`UPDATE job_runs SET ${fields.join(", ")} WHERE id = ?`, values as string[]);
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM job_runs WHERE id = ?", [id]);
+  return rowToJobRun(row!);
 }
 
-export function getJobRun(id: string): JobRun | null {
-  const row = db.prepare("SELECT * FROM job_runs WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+export async function getJobRun(id: string): Promise<JobRun | null> {
+  const row = await dbGet<Record<string, unknown>>("SELECT * FROM job_runs WHERE id = ?", [id]);
   return row ? rowToJobRun(row) : null;
 }
 
-export function listJobRuns(jobId: string, limit = 50): JobRun[] {
-  const rows = db.prepare(
-    "SELECT * FROM job_runs WHERE job_id = ? ORDER BY started_at DESC LIMIT ?"
-  ).all(jobId, limit) as Record<string, unknown>[];
+export async function listJobRuns(jobId: string, limit = 50): Promise<JobRun[]> {
+  const rows = await dbAll<Record<string, unknown>>(
+    "SELECT * FROM job_runs WHERE job_id = ? ORDER BY started_at DESC LIMIT ?",
+    [jobId, limit]
+  );
   return rows.map(rowToJobRun);
 }
 
-export function getActiveJobRun(jobId: string): JobRun | null {
-  const row = db.prepare(
-    "SELECT * FROM job_runs WHERE job_id = ? AND status = 'running' ORDER BY started_at DESC LIMIT 1"
-  ).get(jobId) as Record<string, unknown> | undefined;
+export async function getActiveJobRun(jobId: string): Promise<JobRun | null> {
+  const row = await dbGet<Record<string, unknown>>(
+    "SELECT * FROM job_runs WHERE job_id = ? AND status = 'running' ORDER BY started_at DESC LIMIT 1",
+    [jobId]
+  );
   return row ? rowToJobRun(row) : null;
 }
 
@@ -1033,10 +1072,10 @@ export interface SearchResult {
   timestamp: string;
 }
 
-export function searchMessages(query: string, limit = 50): SearchResult[] {
+export async function searchMessages(query: string, limit = 50): Promise<SearchResult[]> {
   try {
     const safeQuery = '"' + query.replace(/"/g, '""') + '"';
-    const rows = db.prepare(`
+    const rows = await dbAll<SearchResult>(`
       SELECT m.id as messageId, m.session_id as sessionId, s.name as sessionName,
              m.sender_type as senderType, m.content, m.timestamp,
              snippet(messages_fts, 0, '[[highlight]]', '[[/highlight]]', '...', 40) as snippet
@@ -1046,17 +1085,17 @@ export function searchMessages(query: string, limit = 50): SearchResult[] {
       WHERE messages_fts MATCH ?
       ORDER BY rank
       LIMIT ?
-    `).all(safeQuery, limit) as SearchResult[];
+    `, [safeQuery, limit]);
     return rows;
   } catch {
     return [];
   }
 }
 
-export function searchSessionMessages(sessionId: string, query: string, limit = 50): SearchResult[] {
+export async function searchSessionMessages(sessionId: string, query: string, limit = 50): Promise<SearchResult[]> {
   try {
     const safeQuery = '"' + query.replace(/"/g, '""') + '"';
-    const rows = db.prepare(`
+    const rows = await dbAll<SearchResult>(`
       SELECT m.id as messageId, m.session_id as sessionId, s.name as sessionName,
              m.sender_type as senderType, m.content, m.timestamp,
              snippet(messages_fts, 0, '[[highlight]]', '[[/highlight]]', '...', 40) as snippet
@@ -1066,7 +1105,7 @@ export function searchSessionMessages(sessionId: string, query: string, limit = 
       WHERE messages_fts MATCH ? AND m.session_id = ?
       ORDER BY rank
       LIMIT ?
-    `).all(safeQuery, sessionId, limit) as SearchResult[];
+    `, [safeQuery, sessionId, limit]);
     return rows;
   } catch {
     return [];
@@ -1085,11 +1124,12 @@ export interface DbUser {
   created_at: string;
 }
 
-export function getUser(email: string): DbUser | null {
+export async function getUser(email: string): Promise<DbUser | null> {
   try {
-    const row = db
-      .prepare("SELECT email, is_admin, first_name, last_name, avatar_url, must_change_password, created_at FROM users WHERE email = ?")
-      .get(email) as DbUser | undefined;
+    const row = await dbGet<DbUser>(
+      "SELECT email, is_admin, first_name, last_name, avatar_url, must_change_password, created_at FROM users WHERE email = ?",
+      [email]
+    );
     return row ?? null;
   } catch {
     return null;
@@ -1098,50 +1138,54 @@ export function getUser(email: string): DbUser | null {
 
 // ==================== SESSION ACCESS CONTROL ====================
 
-export function isUserAdmin(email: string): boolean {
+export async function isUserAdmin(email: string): Promise<boolean> {
   try {
-    const row = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(email) as { is_admin: number } | undefined;
+    const row = await dbGet<{ is_admin: number }>("SELECT is_admin FROM users WHERE email = ?", [email]);
     return Boolean(row?.is_admin);
   } catch {
     return false;
   }
 }
 
-export function canAccessSession(sessionId: string, email: string): boolean {
-  const session = getSession(sessionId);
+export async function canAccessSession(sessionId: string, email: string): Promise<boolean> {
+  const session = await getSession(sessionId);
   if (!session) return false;
   if (session.created_by === email) return true;
-  if (isUserAdmin(email)) return true;
-  const participant = db.prepare(
-    "SELECT 1 FROM session_participants WHERE session_id = ? AND user_email = ?"
-  ).get(sessionId, email);
+  if (await isUserAdmin(email)) return true;
+  const participant = await dbGet(
+    "SELECT 1 FROM session_participants WHERE session_id = ? AND user_email = ?",
+    [sessionId, email]
+  );
   return Boolean(participant);
 }
 
-export function canModifySession(sessionId: string, email: string): boolean {
-  const session = getSession(sessionId);
+export async function canModifySession(sessionId: string, email: string): Promise<boolean> {
+  const session = await getSession(sessionId);
   if (!session) return false;
   if (session.created_by === email) return true;
-  if (isUserAdmin(email)) return true;
+  if (await isUserAdmin(email)) return true;
   return false;
 }
 
-export function addSessionParticipant(sessionId: string, userEmail: string, role = "collaborator"): void {
-  db.prepare(
-    "INSERT OR IGNORE INTO session_participants (session_id, user_email, role) VALUES (?, ?, ?)"
-  ).run(sessionId, userEmail, role);
+export async function addSessionParticipant(sessionId: string, userEmail: string, role = "collaborator"): Promise<void> {
+  await dbRun(
+    "INSERT OR IGNORE INTO session_participants (session_id, user_email, role) VALUES (?, ?, ?)",
+    [sessionId, userEmail, role]
+  );
 }
 
-export function removeSessionParticipant(sessionId: string, userEmail: string): void {
-  db.prepare(
-    "DELETE FROM session_participants WHERE session_id = ? AND user_email = ?"
-  ).run(sessionId, userEmail);
+export async function removeSessionParticipant(sessionId: string, userEmail: string): Promise<void> {
+  await dbRun(
+    "DELETE FROM session_participants WHERE session_id = ? AND user_email = ?",
+    [sessionId, userEmail]
+  );
 }
 
-export function listSessionParticipants(sessionId: string): Array<{ user_email: string; role: string; invited_at: string }> {
-  return db.prepare(
-    "SELECT user_email, role, invited_at FROM session_participants WHERE session_id = ?"
-  ).all(sessionId) as Array<{ user_email: string; role: string; invited_at: string }>;
+export async function listSessionParticipants(sessionId: string): Promise<Array<{ user_email: string; role: string; invited_at: string }>> {
+  return dbAll<{ user_email: string; role: string; invited_at: string }>(
+    "SELECT user_email, role, invited_at FROM session_participants WHERE session_id = ?",
+    [sessionId]
+  );
 }
 
 // ==================== MEMORIES ====================
@@ -1157,83 +1201,66 @@ export interface Memory {
   updated_at: string;
 }
 
-/** Sentinel agent_id used for the main chat session */
 export const MAIN_SESSION_TARGET = "__main_session__";
 
 type MemoryRow = Omit<Memory, "is_global" | "assigned_agent_ids"> & { is_global: number };
 
-function hydrateMemo(row: MemoryRow): Memory {
-  const ids = (db.prepare(
-    "SELECT agent_id FROM memory_agent_assignments WHERE memory_id = ?"
-  ).all(row.id) as { agent_id: string }[]).map((r) => r.agent_id);
+async function hydrateMemo(row: MemoryRow): Promise<Memory> {
+  const assignments = await dbAll<{ agent_id: string }>(
+    "SELECT agent_id FROM memory_agent_assignments WHERE memory_id = ?",
+    [row.id]
+  );
+  const ids = assignments.map((r) => r.agent_id);
   return { ...row, is_global: row.is_global === 1, assigned_agent_ids: ids };
 }
 
-export function getMemories(): Memory[] {
-  const rows = db.prepare(
+export async function getMemories(): Promise<Memory[]> {
+  const rows = await dbAll<MemoryRow>(
     "SELECT id, title, content, is_global, created_by, created_at, updated_at FROM memories ORDER BY created_at ASC"
-  ).all() as MemoryRow[];
-  return rows.map(hydrateMemo);
+  );
+  return Promise.all(rows.map(hydrateMemo));
 }
 
-/**
- * Returns memories that should be injected for a given target.
- * targetId is either MAIN_SESSION_TARGET or an agent.id.
- * A memory is included if it is global OR explicitly assigned to this target.
- */
-export function getMemoriesForTarget(targetId: string): Memory[] {
-  const rows = db.prepare(`
+export async function getMemoriesForTarget(targetId: string): Promise<Memory[]> {
+  const rows = await dbAll<MemoryRow>(`
     SELECT id, title, content, is_global, created_by, created_at, updated_at
     FROM memories
     WHERE is_global = 1
        OR id IN (SELECT memory_id FROM memory_agent_assignments WHERE agent_id = ?)
     ORDER BY created_at ASC
-  `).all(targetId) as MemoryRow[];
-  return rows.map(hydrateMemo);
+  `, [targetId]);
+  return Promise.all(rows.map(hydrateMemo));
 }
 
-/**
- * Replace the full set of assignments for a memory.
- * If isGlobal is true, junction rows are cleared (they are irrelevant when global).
- */
-export function setMemoryAssignments(memoryId: string, isGlobal: boolean, agentIds: string[]): void {
-  const update = db.prepare(
-    "UPDATE memories SET is_global = ?, updated_at = datetime('now') WHERE id = ?"
-  );
-  const deleteAssignments = db.prepare(
-    "DELETE FROM memory_agent_assignments WHERE memory_id = ?"
-  );
-  const insertAssignment = db.prepare(
-    "INSERT OR IGNORE INTO memory_agent_assignments (memory_id, agent_id) VALUES (?, ?)"
-  );
-  db.transaction(() => {
-    update.run(isGlobal ? 1 : 0, memoryId);
-    deleteAssignments.run(memoryId);
+export async function setMemoryAssignments(memoryId: string, isGlobal: boolean, agentIds: string[]): Promise<void> {
+  await dbTransaction(async ({ run }) => {
+    await run("UPDATE memories SET is_global = ?, updated_at = datetime('now') WHERE id = ?", [isGlobal ? 1 : 0, memoryId]);
+    await run("DELETE FROM memory_agent_assignments WHERE memory_id = ?", [memoryId]);
     if (!isGlobal) {
       for (const agentId of agentIds) {
-        insertAssignment.run(memoryId, agentId);
+        await run("INSERT OR IGNORE INTO memory_agent_assignments (memory_id, agent_id) VALUES (?, ?)", [memoryId, agentId]);
       }
     }
-  })();
+  });
 }
 
-/** Returns all agent_ids assigned to a specific memory */
-export function getMemoryAssignments(memoryId: string): string[] {
-  return (db.prepare(
-    "SELECT agent_id FROM memory_agent_assignments WHERE memory_id = ?"
-  ).all(memoryId) as { agent_id: string }[]).map((r) => r.agent_id);
+export async function getMemoryAssignments(memoryId: string): Promise<string[]> {
+  const rows = await dbAll<{ agent_id: string }>(
+    "SELECT agent_id FROM memory_agent_assignments WHERE memory_id = ?",
+    [memoryId]
+  );
+  return rows.map((r) => r.agent_id);
 }
 
-/** Returns all non-global memories assigned to a specific agent (for agent-side UI) */
-export function getAgentMemories(agentId: string): Memory[] {
-  const rows = db.prepare(`
+export async function getAgentMemories(agentId: string): Promise<Memory[]> {
+  const rows = await dbAll<MemoryRow>(`
     SELECT m.id, m.title, m.content, m.is_global, m.created_by, m.created_at, m.updated_at
     FROM memories m
     JOIN memory_agent_assignments maa ON maa.memory_id = m.id
     WHERE maa.agent_id = ? AND m.is_global = 0
     ORDER BY m.created_at ASC
-  `).all(agentId) as MemoryRow[];
-  return rows.map(hydrateMemo);
+  `, [agentId]);
+  return Promise.all(rows.map(hydrateMemo));
 }
 
 // ==================== FILE LOCKS ====================
@@ -1262,24 +1289,20 @@ export interface QueuedOperation {
   error: string | null;
 }
 
-/**
- * Create a file lock
- * Returns true if lock was created, false if file is already locked
- */
-export function createFileLock(
+export async function createFileLock(
   sessionId: string,
   userEmail: string,
   toolName: string,
   toolCallId: string,
   filePath: string
-): boolean {
+): Promise<boolean> {
   try {
-    db.prepare(
-      "INSERT INTO file_locks (file_path, session_id, user_email, tool_name, tool_call_id) VALUES (?, ?, ?, ?, ?)"
-    ).run(filePath, sessionId, userEmail, toolName, toolCallId);
+    await dbRun(
+      "INSERT INTO file_locks (file_path, session_id, user_email, tool_name, tool_call_id) VALUES (?, ?, ?, ?, ?)",
+      [filePath, sessionId, userEmail, toolName, toolCallId]
+    );
     return true;
   } catch (err: unknown) {
-    // Primary key violation means file is already locked
     if (err instanceof Error && err.message.includes("UNIQUE constraint failed")) {
       return false;
     }
@@ -1287,53 +1310,42 @@ export function createFileLock(
   }
 }
 
-/**
- * Remove a file lock
- */
-export function removeFileLock(filePath: string, toolCallId: string): void {
-  db.prepare("DELETE FROM file_locks WHERE file_path = ? AND tool_call_id = ?").run(filePath, toolCallId);
+export async function removeFileLock(filePath: string, toolCallId: string): Promise<void> {
+  await dbRun("DELETE FROM file_locks WHERE file_path = ? AND tool_call_id = ?", [filePath, toolCallId]);
 }
 
-/**
- * Get the current lock for a file
- */
-export function getFileLock(filePath: string): FileLock | null {
-  const result = db.prepare(
-    "SELECT file_path, session_id, user_email, tool_name, tool_call_id, locked_at FROM file_locks WHERE file_path = ?"
-  ).get(filePath);
-  return result as FileLock | null;
+export async function getFileLock(filePath: string): Promise<FileLock | null> {
+  const result = await dbGet<FileLock>(
+    "SELECT file_path, session_id, user_email, tool_name, tool_call_id, locked_at FROM file_locks WHERE file_path = ?",
+    [filePath]
+  );
+  return result ?? null;
 }
 
-/**
- * Get all locks for a session
- */
-export function getSessionLocks(sessionId: string): FileLock[] {
-  return db.prepare(
-    "SELECT file_path, session_id, user_email, tool_name, tool_call_id, locked_at FROM file_locks WHERE session_id = ?"
-  ).all(sessionId) as FileLock[];
+export async function getSessionLocks(sessionId: string): Promise<FileLock[]> {
+  return dbAll<FileLock>(
+    "SELECT file_path, session_id, user_email, tool_name, tool_call_id, locked_at FROM file_locks WHERE session_id = ?",
+    [sessionId]
+  );
 }
 
-/**
- * Remove all locks for a session
- */
-export function removeSessionLocks(sessionId: string): void {
-  db.prepare("DELETE FROM file_locks WHERE session_id = ?").run(sessionId);
+export async function removeSessionLocks(sessionId: string): Promise<void> {
+  await dbRun("DELETE FROM file_locks WHERE session_id = ?", [sessionId]);
 }
 
-/**
- * Remove stale locks (older than timeout in minutes)
- */
-export function removeStaleLocks(timeoutMinutes: number): FileLock[] {
-  const staleLocks = db.prepare(
+export async function removeStaleLocks(timeoutMinutes: number): Promise<FileLock[]> {
+  const staleLocks = await dbAll<FileLock>(
     `SELECT file_path, session_id, user_email, tool_name, tool_call_id, locked_at 
      FROM file_locks 
-     WHERE datetime(locked_at) < datetime('now', '-' || ? || ' minutes')`
-  ).all(timeoutMinutes) as FileLock[];
+     WHERE datetime(locked_at) < datetime('now', '-' || ? || ' minutes')`,
+    [timeoutMinutes]
+  );
 
   if (staleLocks.length > 0) {
-    db.prepare(
-      `DELETE FROM file_locks WHERE datetime(locked_at) < datetime('now', '-' || ? || ' minutes')`
-    ).run(timeoutMinutes);
+    await dbRun(
+      `DELETE FROM file_locks WHERE datetime(locked_at) < datetime('now', '-' || ? || ' minutes')`,
+      [timeoutMinutes]
+    );
   }
 
   return staleLocks;
@@ -1341,167 +1353,148 @@ export function removeStaleLocks(timeoutMinutes: number): FileLock[] {
 
 // ==================== FILE OPERATION QUEUE ====================
 
-/**
- * Create a queued operation
- */
-export function createQueuedOperation(data: {
+export async function createQueuedOperation(data: {
   filePath: string;
   sessionId: string;
   userEmail: string;
   toolName: string;
   toolCallId: string;
   toolInput: string;
-}): string {
-  const result = db.prepare(
+}): Promise<string> {
+  // Use RETURNING to get the generated id
+  const row = await dbGet<{ id: string }>(
     `INSERT INTO file_operation_queue (file_path, session_id, user_email, tool_name, tool_call_id, tool_input)
      VALUES (?, ?, ?, ?, ?, ?)
-     RETURNING id`
-  ).get(data.filePath, data.sessionId, data.userEmail, data.toolName, data.toolCallId, data.toolInput) as { id: string };
-  return result.id;
+     RETURNING id`,
+    [data.filePath, data.sessionId, data.userEmail, data.toolName, data.toolCallId, data.toolInput]
+  );
+  return row!.id;
 }
 
-/**
- * Get the next queued operation for a file (oldest first)
- */
-export function getNextQueuedOperation(filePath: string): QueuedOperation | null {
-  const result = db.prepare(
+export async function getNextQueuedOperation(filePath: string): Promise<QueuedOperation | null> {
+  const result = await dbGet<QueuedOperation>(
     `SELECT id, file_path, session_id, user_email, tool_name, tool_call_id, tool_input, 
             queued_at, status, started_at, completed_at, error
      FROM file_operation_queue
      WHERE file_path = ? AND status = 'queued'
      ORDER BY queued_at ASC
-     LIMIT 1`
-  ).get(filePath);
-  return result as QueuedOperation | null;
+     LIMIT 1`,
+    [filePath]
+  );
+  return result ?? null;
 }
 
-/**
- * Update the status of a queued operation
- */
-export function updateQueuedOperationStatus(
+export async function updateQueuedOperationStatus(
   queueId: string,
   status: "queued" | "executing" | "completed" | "failed" | "cancelled",
   error?: string
-): void {
+): Promise<void> {
   if (status === "executing") {
-    db.prepare(
-      "UPDATE file_operation_queue SET status = ?, started_at = datetime('now') WHERE id = ?"
-    ).run(status, queueId);
+    await dbRun(
+      "UPDATE file_operation_queue SET status = ?, started_at = datetime('now') WHERE id = ?",
+      [status, queueId]
+    );
   } else if (status === "completed" || status === "failed" || status === "cancelled") {
-    db.prepare(
-      "UPDATE file_operation_queue SET status = ?, completed_at = datetime('now'), error = ? WHERE id = ?"
-    ).run(status, error ?? null, queueId);
+    await dbRun(
+      "UPDATE file_operation_queue SET status = ?, completed_at = datetime('now'), error = ? WHERE id = ?",
+      [status, error ?? null, queueId]
+    );
   } else {
-    db.prepare("UPDATE file_operation_queue SET status = ? WHERE id = ?").run(status, queueId);
+    await dbRun("UPDATE file_operation_queue SET status = ? WHERE id = ?", [status, queueId]);
   }
 }
 
-/**
- * Get all queued operations for a session
- */
-export function getSessionQueuedOps(sessionId: string): QueuedOperation[] {
-  return db.prepare(
+export async function getSessionQueuedOps(sessionId: string): Promise<QueuedOperation[]> {
+  return dbAll<QueuedOperation>(
     `SELECT id, file_path, session_id, user_email, tool_name, tool_call_id, tool_input,
             queued_at, status, started_at, completed_at, error
      FROM file_operation_queue
      WHERE session_id = ? AND status IN ('queued', 'executing')
-     ORDER BY queued_at ASC`
-  ).all(sessionId) as QueuedOperation[];
+     ORDER BY queued_at ASC`,
+    [sessionId]
+  );
 }
 
-/**
- * Get a queued operation by ID
- */
-export function getQueuedOperation(queueId: string): QueuedOperation | null {
-  const result = db.prepare(
+export async function getQueuedOperation(queueId: string): Promise<QueuedOperation | null> {
+  const result = await dbGet<QueuedOperation>(
     `SELECT id, file_path, session_id, user_email, tool_name, tool_call_id, tool_input,
             queued_at, status, started_at, completed_at, error
      FROM file_operation_queue
-     WHERE id = ?`
-  ).get(queueId);
-  return result as QueuedOperation | null;
+     WHERE id = ?`,
+    [queueId]
+  );
+  return result ?? null;
 }
 
-/**
- * Cancel a queued operation
- */
-export function cancelQueuedOperation(queueId: string): boolean {
-  const result = db.prepare(
-    "UPDATE file_operation_queue SET status = 'cancelled', completed_at = datetime('now') WHERE id = ? AND status = 'queued'"
-  ).run(queueId);
+export async function cancelQueuedOperation(queueId: string): Promise<boolean> {
+  const result = await dbRun(
+    "UPDATE file_operation_queue SET status = 'cancelled', completed_at = datetime('now') WHERE id = ? AND status = 'queued'",
+    [queueId]
+  );
   return result.changes > 0;
 }
 
-/**
- * Cancel all queued operations for a session
- */
-export function cancelSessionQueuedOps(sessionId: string): void {
-  db.prepare(
-    "UPDATE file_operation_queue SET status = 'cancelled', completed_at = datetime('now') WHERE session_id = ? AND status = 'queued'"
-  ).run(sessionId);
+export async function cancelSessionQueuedOps(sessionId: string): Promise<void> {
+  await dbRun(
+    "UPDATE file_operation_queue SET status = 'cancelled', completed_at = datetime('now') WHERE session_id = ? AND status = 'queued'",
+    [sessionId]
+  );
 }
 
-/**
- * Get the queue position for a specific operation
- */
-export function getQueuePosition(filePath: string, queueId: string): number {
-  const result = db.prepare(
+export async function getQueuePosition(filePath: string, queueId: string): Promise<number> {
+  const result = await dbGet<{ position: number }>(
     `SELECT COUNT(*) as position
      FROM file_operation_queue
      WHERE file_path = ? AND status = 'queued' AND queued_at < (
        SELECT queued_at FROM file_operation_queue WHERE id = ?
-     )`
-  ).get(filePath, queueId) as { position: number };
-  return result.position + 1; // +1 because count starts at 0
+     )`,
+    [filePath, queueId]
+  );
+  return (result?.position ?? 0) + 1;
 }
 
-/**
- * Get queue length for a file
- */
-export function getQueueLength(filePath: string): number {
-  const result = db.prepare(
-    "SELECT COUNT(*) as count FROM file_operation_queue WHERE file_path = ? AND status = 'queued'"
-  ).get(filePath) as { count: number };
-  return result.count;
+export async function getQueueLength(filePath: string): Promise<number> {
+  const result = await dbGet<{ count: number }>(
+    "SELECT COUNT(*) as count FROM file_operation_queue WHERE file_path = ? AND status = 'queued'",
+    [filePath]
+  );
+  return result?.count ?? 0;
 }
 
-/**
- * Get all active locks (for admin dashboard)
- */
-export function getAllActiveLocks(): FileLock[] {
-  return db.prepare(
+export async function getAllActiveLocks(): Promise<FileLock[]> {
+  return dbAll<FileLock>(
     "SELECT file_path, session_id, user_email, tool_name, tool_call_id, locked_at FROM file_locks ORDER BY locked_at DESC"
-  ).all() as FileLock[];
+  );
 }
 
-/**
- * Get all queued operations (for admin dashboard)
- */
-export function getAllQueuedOperations(): QueuedOperation[] {
-  return db.prepare(
+export async function getAllQueuedOperations(): Promise<QueuedOperation[]> {
+  return dbAll<QueuedOperation>(
     `SELECT id, file_path, session_id, user_email, tool_name, tool_call_id, tool_input,
             queued_at, status, started_at, completed_at, error
      FROM file_operation_queue
      WHERE status IN ('queued', 'executing')
      ORDER BY queued_at ASC`
-  ).all() as QueuedOperation[];
+  );
 }
 
 // ==================== SESSION CONTEXT JOURNAL ====================
 
-export function getSessionContext(sessionId: string): string | null {
-  const row = db.prepare("SELECT context_journal FROM sessions WHERE id = ?").get(sessionId) as { context_journal: string | null } | undefined;
+export async function getSessionContext(sessionId: string): Promise<string | null> {
+  const row = await dbGet<{ context_journal: string | null }>(
+    "SELECT context_journal FROM sessions WHERE id = ?",
+    [sessionId]
+  );
   return row?.context_journal ?? null;
 }
 
-export function updateSessionContext(sessionId: string, context: string): void {
+export async function updateSessionContext(sessionId: string, context: string): Promise<void> {
   const maxLength = 8000;
   const trimmed = context.length > maxLength ? context.slice(-maxLength) : context;
-  db.prepare("UPDATE sessions SET context_journal = ?, updated_at = datetime('now') WHERE id = ?").run(trimmed, sessionId);
+  await dbRun("UPDATE sessions SET context_journal = ?, updated_at = datetime('now') WHERE id = ?", [trimmed, sessionId]);
 }
 
-export function clearSessionContext(sessionId: string): void {
-  db.prepare("UPDATE sessions SET context_journal = NULL, updated_at = datetime('now') WHERE id = ?").run(sessionId);
+export async function clearSessionContext(sessionId: string): Promise<void> {
+  await dbRun("UPDATE sessions SET context_journal = NULL, updated_at = datetime('now') WHERE id = ?", [sessionId]);
 }
 
 // ==================== GROUP MANAGEMENT ====================
@@ -1610,10 +1603,11 @@ function parsePermValue(value: string, type: 'bool' | 'int' | 'array' | 'string'
   return value;
 }
 
-export function getGroupPermissions(groupId: string): GroupPermissions {
-  const rows = db.prepare(
-    "SELECT category, permission_key, permission_value FROM group_permissions WHERE group_id = ?"
-  ).all(groupId) as Array<{ category: string; permission_key: string; permission_value: string }>;
+export async function getGroupPermissions(groupId: string): Promise<GroupPermissions> {
+  const rows = await dbAll<{ category: string; permission_key: string; permission_value: string }>(
+    "SELECT category, permission_key, permission_value FROM group_permissions WHERE group_id = ?",
+    [groupId]
+  );
 
   const perms: GroupPermissions = JSON.parse(JSON.stringify(DEFAULT_GROUP_PERMISSIONS));
 
@@ -1624,8 +1618,6 @@ export function getGroupPermissions(groupId: string): GroupPermissions {
       if (k in perms.platform) {
         if (['visible_tabs', 'visible_settings'].includes(key)) {
           (perms.platform as Record<string, unknown>)[k] = parsePermValue(value, 'array');
-        } else if (key === 'observe_only') {
-          (perms.platform as Record<string, unknown>)[k] = parsePermValue(value, 'bool');
         } else {
           (perms.platform as Record<string, unknown>)[k] = parsePermValue(value, 'bool');
         }
@@ -1654,9 +1646,9 @@ export function getGroupPermissions(groupId: string): GroupPermissions {
   return perms;
 }
 
-export function getUserGroupPermissions(email: string): GroupPermissions {
+export async function getUserGroupPermissions(email: string): Promise<GroupPermissions> {
   try {
-    const row = db.prepare("SELECT group_id FROM users WHERE email = ?").get(email) as { group_id: string | null } | undefined;
+    const row = await dbGet<{ group_id: string | null }>("SELECT group_id FROM users WHERE email = ?", [email]);
     if (!row?.group_id) return DEFAULT_GROUP_PERMISSIONS;
     return getGroupPermissions(row.group_id);
   } catch {
@@ -1664,119 +1656,127 @@ export function getUserGroupPermissions(email: string): GroupPermissions {
   }
 }
 
-export function getUserGroup(email: string): UserGroup | null {
+export async function getUserGroup(email: string): Promise<UserGroup | null> {
   try {
-    const row = db.prepare("SELECT g.* FROM user_groups g JOIN users u ON u.group_id = g.id WHERE u.email = ?").get(email) as UserGroup | undefined;
+    const row = await dbGet<UserGroup>(
+      "SELECT g.* FROM user_groups g JOIN users u ON u.group_id = g.id WHERE u.email = ?",
+      [email]
+    );
     return row ?? null;
   } catch {
     return null;
   }
 }
 
-export function listGroups(): Array<UserGroup & { member_count: number }> {
+export async function listGroups(): Promise<Array<UserGroup & { member_count: number }>> {
   try {
-    return db.prepare(`
+    return dbAll<UserGroup & { member_count: number }>(`
       SELECT g.*, COUNT(u.email) as member_count
       FROM user_groups g
       LEFT JOIN users u ON u.group_id = g.id
       GROUP BY g.id
       ORDER BY g.is_system DESC, g.name ASC
-    `).all() as Array<UserGroup & { member_count: number }>;
+    `);
   } catch {
     return [];
   }
 }
 
-export function getGroup(id: string): UserGroup | null {
+export async function getGroup(id: string): Promise<UserGroup | null> {
   try {
-    return db.prepare("SELECT * FROM user_groups WHERE id = ?").get(id) as UserGroup | undefined ?? null;
+    const row = await dbGet<UserGroup>("SELECT * FROM user_groups WHERE id = ?", [id]);
+    return row ?? null;
   } catch {
     return null;
   }
 }
 
-export function createGroup(id: string, name: string, description: string, color: string, icon: string): UserGroup {
-  db.prepare(
-    "INSERT INTO user_groups (id, name, description, color, icon, is_system) VALUES (?, ?, ?, ?, ?, 0)"
-  ).run(id, name, description, color, icon);
+export async function createGroup(id: string, name: string, description: string, color: string, icon: string): Promise<UserGroup> {
+  await dbRun(
+    "INSERT INTO user_groups (id, name, description, color, icon, is_system) VALUES (?, ?, ?, ?, ?, 0)",
+    [id, name, description, color, icon]
+  );
   const defaultPerms = Object.entries(DEFAULT_GROUP_PERMISSIONS).flatMap(([cat, keys]) =>
     Object.entries(keys as Record<string, unknown>).map(([key, val]) => {
-      let strVal: string;
-      if (Array.isArray(val)) strVal = JSON.stringify(val);
-      else strVal = String(val);
+      const strVal = Array.isArray(val) ? JSON.stringify(val) : String(val);
       return [cat, key, strVal];
     })
   );
-  const insertPerm = db.prepare("INSERT OR IGNORE INTO group_permissions (group_id, category, permission_key, permission_value) VALUES (?, ?, ?, ?)");
   for (const [cat, key, val] of defaultPerms) {
-    insertPerm.run(id, cat, key, val);
+    await dbRun(
+      "INSERT OR IGNORE INTO group_permissions (group_id, category, permission_key, permission_value) VALUES (?, ?, ?, ?)",
+      [id, cat, key, val]
+    );
   }
-  return getGroup(id)!;
+  return (await getGroup(id))!;
 }
 
-export function updateGroup(id: string, updates: Partial<Pick<UserGroup, 'name' | 'description' | 'color' | 'icon'>>): void {
+export async function updateGroup(id: string, updates: Partial<Pick<UserGroup, 'name' | 'description' | 'color' | 'icon'>>): Promise<void> {
   const fields = Object.entries(updates).map(([k]) => `${k} = ?`).join(', ');
   const values = Object.values(updates);
   if (fields) {
-    db.prepare(`UPDATE user_groups SET ${fields}, updated_at = datetime('now') WHERE id = ?`).run(...values, id);
+    await dbRun(`UPDATE user_groups SET ${fields}, updated_at = datetime('now') WHERE id = ?`, [...values, id] as string[]);
   }
 }
 
-export function deleteGroup(id: string): void {
-  db.prepare("UPDATE users SET group_id = NULL WHERE group_id = ?").run(id);
-  db.prepare("DELETE FROM user_groups WHERE id = ? AND is_system = 0").run(id);
+export async function deleteGroup(id: string): Promise<void> {
+  await dbRun("UPDATE users SET group_id = NULL WHERE group_id = ?", [id]);
+  await dbRun("DELETE FROM user_groups WHERE id = ? AND is_system = 0", [id]);
 }
 
-export function setGroupPermission(groupId: string, category: string, key: string, value: string): void {
-  db.prepare(
-    "INSERT INTO group_permissions (group_id, category, permission_key, permission_value) VALUES (?, ?, ?, ?) ON CONFLICT(group_id, category, permission_key) DO UPDATE SET permission_value = excluded.permission_value"
-  ).run(groupId, category, key, value);
-  db.prepare("UPDATE user_groups SET updated_at = datetime('now') WHERE id = ?").run(groupId);
-}
-
-export function setGroupPermissions(groupId: string, permissions: Partial<{
-  [category: string]: Record<string, unknown>;
-}>): void {
-  const stmt = db.prepare(
-    "INSERT INTO group_permissions (group_id, category, permission_key, permission_value) VALUES (?, ?, ?, ?) ON CONFLICT(group_id, category, permission_key) DO UPDATE SET permission_value = excluded.permission_value"
+export async function setGroupPermission(groupId: string, category: string, key: string, value: string): Promise<void> {
+  await dbRun(
+    "INSERT INTO group_permissions (group_id, category, permission_key, permission_value) VALUES (?, ?, ?, ?) ON CONFLICT(group_id, category, permission_key) DO UPDATE SET permission_value = excluded.permission_value",
+    [groupId, category, key, value]
   );
+  await dbRun("UPDATE user_groups SET updated_at = datetime('now') WHERE id = ?", [groupId]);
+}
+
+export async function setGroupPermissions(groupId: string, permissions: Partial<{
+  [category: string]: Record<string, unknown>;
+}>): Promise<void> {
   for (const [cat, keys] of Object.entries(permissions)) {
     for (const [key, val] of Object.entries(keys as Record<string, unknown>)) {
-      let strVal: string;
-      if (Array.isArray(val)) strVal = JSON.stringify(val);
-      else strVal = String(val);
-      stmt.run(groupId, cat, key, strVal);
+      const strVal = Array.isArray(val) ? JSON.stringify(val) : String(val);
+      await dbRun(
+        "INSERT INTO group_permissions (group_id, category, permission_key, permission_value) VALUES (?, ?, ?, ?) ON CONFLICT(group_id, category, permission_key) DO UPDATE SET permission_value = excluded.permission_value",
+        [groupId, cat, key, strVal]
+      );
     }
   }
-  db.prepare("UPDATE user_groups SET updated_at = datetime('now') WHERE id = ?").run(groupId);
+  await dbRun("UPDATE user_groups SET updated_at = datetime('now') WHERE id = ?", [groupId]);
 }
 
-export function listGroupMembers(groupId: string): Array<{ email: string; first_name: string; last_name: string; is_admin: number; avatar_url: string | null }> {
+export async function listGroupMembers(groupId: string): Promise<Array<{ email: string; first_name: string; last_name: string; is_admin: number; avatar_url: string | null }>> {
   try {
-    return db.prepare("SELECT email, first_name, last_name, is_admin, avatar_url FROM users WHERE group_id = ? ORDER BY email ASC").all(groupId) as Array<{ email: string; first_name: string; last_name: string; is_admin: number; avatar_url: string | null }>;
+    return dbAll<{ email: string; first_name: string; last_name: string; is_admin: number; avatar_url: string | null }>(
+      "SELECT email, first_name, last_name, is_admin, avatar_url FROM users WHERE group_id = ? ORDER BY email ASC",
+      [groupId]
+    );
   } catch {
     return [];
   }
 }
 
-export function assignUserToGroup(email: string, groupId: string | null): void {
-  db.prepare("UPDATE users SET group_id = ? WHERE email = ?").run(groupId, email);
+export async function assignUserToGroup(email: string, groupId: string | null): Promise<void> {
+  await dbRun("UPDATE users SET group_id = ? WHERE email = ?", [groupId, email]);
 }
 
-export function cloneGroup(sourceId: string, newId: string, newName: string): UserGroup {
-  const source = getGroup(sourceId);
+export async function cloneGroup(sourceId: string, newId: string, newName: string): Promise<UserGroup> {
+  const source = await getGroup(sourceId);
   if (!source) throw new Error('Source group not found');
 
-  db.prepare(
-    "INSERT INTO user_groups (id, name, description, color, icon, is_system) VALUES (?, ?, ?, ?, ?, 0)"
-  ).run(newId, newName, source.description, source.color, source.icon);
+  await dbRun(
+    "INSERT INTO user_groups (id, name, description, color, icon, is_system) VALUES (?, ?, ?, ?, ?, 0)",
+    [newId, newName, source.description, source.color, source.icon]
+  );
 
-  db.prepare(`
+  await dbRun(`
     INSERT INTO group_permissions (group_id, category, permission_key, permission_value)
     SELECT ?, category, permission_key, permission_value FROM group_permissions WHERE group_id = ?
-  `).run(newId, sourceId);
+  `, [newId, sourceId]);
 
-  return getGroup(newId)!;
+  return (await getGroup(newId))!;
 }
 
 // ==================== SECURITY GROUPS (IP ALLOWLISTS) ====================
@@ -1794,36 +1794,38 @@ export interface SecurityGroupWithCount extends SecurityGroup {
   member_count: number;
 }
 
-export function listSecurityGroups(): SecurityGroupWithCount[] {
+export async function listSecurityGroups(): Promise<SecurityGroupWithCount[]> {
   try {
-    return db.prepare(`
+    return dbAll<SecurityGroupWithCount>(`
       SELECT sg.*, COUNT(usg.user_email) as member_count
       FROM security_groups sg
       LEFT JOIN user_security_groups usg ON usg.security_group_id = sg.id
       GROUP BY sg.id
       ORDER BY sg.name ASC
-    `).all() as SecurityGroupWithCount[];
+    `);
   } catch {
     return [];
   }
 }
 
-export function getSecurityGroup(id: string): SecurityGroup | null {
+export async function getSecurityGroup(id: string): Promise<SecurityGroup | null> {
   try {
-    return db.prepare("SELECT * FROM security_groups WHERE id = ?").get(id) as SecurityGroup | undefined ?? null;
+    const row = await dbGet<SecurityGroup>("SELECT * FROM security_groups WHERE id = ?", [id]);
+    return row ?? null;
   } catch {
     return null;
   }
 }
 
-export function createSecurityGroup(id: string, name: string, description: string, allowedIps: string[]): SecurityGroup {
-  db.prepare(
-    "INSERT INTO security_groups (id, name, description, allowed_ips) VALUES (?, ?, ?, ?)"
-  ).run(id, name, description, JSON.stringify(allowedIps));
-  return getSecurityGroup(id)!;
+export async function createSecurityGroup(id: string, name: string, description: string, allowedIps: string[]): Promise<SecurityGroup> {
+  await dbRun(
+    "INSERT INTO security_groups (id, name, description, allowed_ips) VALUES (?, ?, ?, ?)",
+    [id, name, description, JSON.stringify(allowedIps)]
+  );
+  return (await getSecurityGroup(id))!;
 }
 
-export function updateSecurityGroup(id: string, updates: { name?: string; description?: string; allowed_ips?: string[] }): void {
+export async function updateSecurityGroup(id: string, updates: { name?: string; description?: string; allowed_ips?: string[] }): Promise<void> {
   const sets: string[] = [];
   const vals: unknown[] = [];
   if (updates.name !== undefined) { sets.push("name = ?"); vals.push(updates.name); }
@@ -1831,39 +1833,41 @@ export function updateSecurityGroup(id: string, updates: { name?: string; descri
   if (updates.allowed_ips !== undefined) { sets.push("allowed_ips = ?"); vals.push(JSON.stringify(updates.allowed_ips)); }
   if (sets.length === 0) return;
   sets.push("updated_at = datetime('now')");
-  db.prepare(`UPDATE security_groups SET ${sets.join(", ")} WHERE id = ?`).run(...vals, id);
+  await dbRun(`UPDATE security_groups SET ${sets.join(", ")} WHERE id = ?`, [...vals, id] as string[]);
 }
 
-export function deleteSecurityGroup(id: string): void {
-  db.prepare("DELETE FROM security_groups WHERE id = ?").run(id);
+export async function deleteSecurityGroup(id: string): Promise<void> {
+  await dbRun("DELETE FROM security_groups WHERE id = ?", [id]);
 }
 
-export function assignUserSecurityGroup(userEmail: string, groupId: string, assignedBy: string): void {
-  db.prepare(
-    "INSERT OR IGNORE INTO user_security_groups (user_email, security_group_id, assigned_by) VALUES (?, ?, ?)"
-  ).run(userEmail, groupId, assignedBy);
+export async function assignUserSecurityGroup(userEmail: string, groupId: string, assignedBy: string): Promise<void> {
+  await dbRun(
+    "INSERT OR IGNORE INTO user_security_groups (user_email, security_group_id, assigned_by) VALUES (?, ?, ?)",
+    [userEmail, groupId, assignedBy]
+  );
 }
 
-export function removeUserSecurityGroup(userEmail: string, groupId: string): void {
-  db.prepare(
-    "DELETE FROM user_security_groups WHERE user_email = ? AND security_group_id = ?"
-  ).run(userEmail, groupId);
+export async function removeUserSecurityGroup(userEmail: string, groupId: string): Promise<void> {
+  await dbRun(
+    "DELETE FROM user_security_groups WHERE user_email = ? AND security_group_id = ?",
+    [userEmail, groupId]
+  );
 }
 
-export function getUserSecurityGroups(userEmail: string): SecurityGroup[] {
+export async function getUserSecurityGroups(userEmail: string): Promise<SecurityGroup[]> {
   try {
-    return db.prepare(`
+    return dbAll<SecurityGroup>(`
       SELECT sg.* FROM security_groups sg
       INNER JOIN user_security_groups usg ON usg.security_group_id = sg.id
       WHERE usg.user_email = ?
       ORDER BY sg.name ASC
-    `).all(userEmail) as SecurityGroup[];
+    `, [userEmail]);
   } catch {
     return [];
   }
 }
 
-export function getSecurityGroupMembers(groupId: string): Array<{
+export async function getSecurityGroupMembers(groupId: string): Promise<Array<{
   email: string;
   first_name: string;
   last_name: string;
@@ -1871,16 +1875,9 @@ export function getSecurityGroupMembers(groupId: string): Array<{
   avatar_url: string | null;
   assigned_at: string;
   assigned_by: string | null;
-}> {
+}>> {
   try {
-    return db.prepare(`
-      SELECT u.email, u.first_name, u.last_name, u.is_admin, u.avatar_url,
-             usg.assigned_at, usg.assigned_by
-      FROM users u
-      INNER JOIN user_security_groups usg ON usg.user_email = u.email
-      WHERE usg.security_group_id = ?
-      ORDER BY u.email ASC
-    `).all(groupId) as Array<{
+    return dbAll<{
       email: string;
       first_name: string;
       last_name: string;
@@ -1888,32 +1885,35 @@ export function getSecurityGroupMembers(groupId: string): Array<{
       avatar_url: string | null;
       assigned_at: string;
       assigned_by: string | null;
-    }>;
+    }>(`
+      SELECT u.email, u.first_name, u.last_name, u.is_admin, u.avatar_url,
+             usg.assigned_at, usg.assigned_by
+      FROM users u
+      INNER JOIN user_security_groups usg ON usg.user_email = u.email
+      WHERE usg.security_group_id = ?
+      ORDER BY u.email ASC
+    `, [groupId]);
   } catch {
     return [];
   }
 }
 
-/**
- * Returns the merged IP allowlist for a user:
- * union of users.allowed_ips + all assigned security_groups.allowed_ips.
- * Returns [] if the user has no restrictions (unrestricted access).
- */
-export function getUserEffectiveAllowedIPs(email: string): string[] {
+export async function getUserEffectiveAllowedIPs(email: string): Promise<string[]> {
   try {
-    const userRow = db.prepare("SELECT allowed_ips FROM users WHERE email = ?").get(email) as { allowed_ips: string | null } | undefined;
+    const userRow = await dbGet<{ allowed_ips: string | null }>(
+      "SELECT allowed_ips FROM users WHERE email = ?",
+      [email]
+    );
     const userIPs: string[] = parseStoredIPsDB(userRow?.allowed_ips);
 
-    const groups = db.prepare(`
+    const groups = await dbAll<{ allowed_ips: string }>(`
       SELECT sg.allowed_ips FROM security_groups sg
       INNER JOIN user_security_groups usg ON usg.security_group_id = sg.id
       WHERE usg.user_email = ?
-    `).all(email) as Array<{ allowed_ips: string }>;
+    `, [email]);
 
     const groupIPs: string[] = groups.flatMap((g) => parseStoredIPsDB(g.allowed_ips));
-
-    const merged = [...new Set([...userIPs, ...groupIPs])];
-    return merged;
+    return [...new Set([...userIPs, ...groupIPs])];
   } catch {
     return [];
   }
@@ -1929,13 +1929,12 @@ function parseStoredIPsDB(json: string | null | undefined): string[] {
   }
 }
 
-/**
- * For the "Test IP" tool — find all security groups that would allow the given IP.
- */
-export function findSecurityGroupsMatchingIP(ip: string): Array<{ id: string; name: string; matched_ips: string[] }> {
+export async function findSecurityGroupsMatchingIP(ip: string): Promise<Array<{ id: string; name: string; matched_ips: string[] }>> {
   try {
-    const { isIPInCIDR } = require("./ip-allowlist") as typeof import("./ip-allowlist");
-    const groups = db.prepare("SELECT id, name, allowed_ips FROM security_groups").all() as Array<{ id: string; name: string; allowed_ips: string }>;
+    const { isIPInCIDR } = await import("./ip-allowlist");
+    const groups = await dbAll<{ id: string; name: string; allowed_ips: string }>(
+      "SELECT id, name, allowed_ips FROM security_groups"
+    );
     const result = [];
     for (const g of groups) {
       const ips = parseStoredIPsDB(g.allowed_ips);
@@ -1948,17 +1947,15 @@ export function findSecurityGroupsMatchingIP(ip: string): Array<{ id: string; na
   }
 }
 
-/**
- * For the "Test IP" tool — find all users whose effective allowlist covers the given IP.
- * Returns users that would be BLOCKED (IP not in their allowlist) when they have restrictions.
- */
-export function findUsersBlockedByIP(ip: string): Array<{ email: string; first_name: string; last_name: string }> {
+export async function findUsersBlockedByIP(ip: string): Promise<Array<{ email: string; first_name: string; last_name: string }>> {
   try {
-    const { isIPInAllowList } = require("./ip-allowlist") as typeof import("./ip-allowlist");
-    const users = db.prepare("SELECT email, first_name, last_name FROM users").all() as Array<{ email: string; first_name: string; last_name: string }>;
+    const { isIPInAllowList } = await import("./ip-allowlist");
+    const users = await dbAll<{ email: string; first_name: string; last_name: string }>(
+      "SELECT email, first_name, last_name FROM users"
+    );
     const blocked = [];
     for (const u of users) {
-      const allowedIPs = getUserEffectiveAllowedIPs(u.email);
+      const allowedIPs = await getUserEffectiveAllowedIPs(u.email);
       if (allowedIPs.length > 0 && !isIPInAllowList(ip, allowedIPs)) {
         blocked.push(u);
       }

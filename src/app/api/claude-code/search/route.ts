@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
-import db from "@/lib/db";
+import { dbGet, dbAll } from "@/lib/db";
 import { searchMessages, searchSessionMessages } from "@/lib/claude-db";
 
 export async function GET(req: NextRequest) {
@@ -21,15 +21,15 @@ export async function GET(req: NextRequest) {
   const sanitized = q.trim().split(/\s+/).map(w => `"${w.replace(/"/g, '""')}"`).join(" ");
 
   const results = sessionId
-    ? searchSessionMessages(sessionId, sanitized, limit)
-    : searchMessages(sanitized, limit);
+    ? await searchSessionMessages(sessionId, sanitized, limit)
+    : await searchMessages(sanitized, limit);
 
   // For non-admin users, filter results to only sessions they own or participate in
-  const user = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(token.email) as { is_admin: number } | undefined;
+  const user = await dbGet<{ is_admin: number }>("SELECT is_admin FROM users WHERE email = ?", [token.email]);
   if (!user?.is_admin && !sessionId) {
-    const ownedIds = (db.prepare("SELECT id FROM sessions WHERE created_by = ?").all(token.email) as { id: string }[]).map(r => r.id);
-    const participantIds = (db.prepare("SELECT session_id FROM session_participants WHERE user_email = ?").all(token.email) as { session_id: string }[]).map(r => r.session_id);
-    const userSessionIds = new Set([...ownedIds, ...participantIds]);
+    const owned = await dbAll<{ id: string }>("SELECT id FROM sessions WHERE created_by = ?", [token.email]);
+    const participating = await dbAll<{ session_id: string }>("SELECT session_id FROM session_participants WHERE user_email = ?", [token.email]);
+    const userSessionIds = new Set([...owned.map(r => r.id), ...participating.map(r => r.session_id)]);
     const filtered = results.filter((r: { sessionId: string }) => userSessionIds.has(r.sessionId));
     return NextResponse.json({ results: filtered });
   }

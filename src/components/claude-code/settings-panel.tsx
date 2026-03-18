@@ -22,7 +22,6 @@ import {
   Settings,
   Bell,
   Bot,
-  Palette,
   FileText,
   Users,
   Users2,
@@ -50,7 +49,7 @@ import { SmtpSection } from "@/components/claude-code/settings/smtp-section";
 import { NotificationsSection } from "@/components/claude-code/settings/notifications-section";
 import { SecuritySection } from "@/components/claude-code/settings/security-section";
 import { TemplatesSection } from "@/components/claude-code/settings/templates-section";
-import { CustomizationSection } from "@/components/claude-code/settings/customization-section";
+import { TransformerSection } from "@/components/claude-code/settings/transformer-section";
 import { ServicesSection } from "@/components/claude-code/settings/services-section";
 import { PackagesSection } from "@/components/claude-code/settings/packages-section";
 import { SystemServiceManagerSection } from "@/components/claude-code/settings/system-service-manager-section";
@@ -58,12 +57,13 @@ import { SecretsSection } from "@/components/claude-code/settings/secrets-sectio
 import { UserManagementSection } from "@/components/claude-code/settings/user-management-section";
 import { UserGroupsSection } from "@/components/claude-code/settings/user-groups-section";
 import SecurityGroupsSection from "@/components/claude-code/settings/security-groups-section";
+import { CustomizationSection } from "@/components/claude-code/settings/customization-section";
 import { useUserProfile, invalidateProfileCache } from "@/hooks/use-user-profile";
 
 type SectionKey =
   | "general"
   | "bot_identity"
-  | "customization"
+  | "transformer"
   | "rate_limits"
   | "project"
   | "activity_log"
@@ -226,7 +226,7 @@ export function SettingsPanel() {
   useEffect(() => {
     const sectionGroups: { label: string; sections: { key: SectionKey }[] }[] = [
       { label: "User", sections: [{ key: "general" }, { key: "notifications" }] },
-      { label: "Bot", sections: [{ key: "bot_identity" }, { key: "customization" }, { key: "templates" }] },
+      { label: "Bot", sections: [{ key: "bot_identity" }, { key: "transformer" }, { key: "templates" }] },
       { label: "Access & Security", sections: [{ key: "user_management" }, { key: "user_groups" }, { key: "security" }, { key: "rate_limits" }, { key: "budgets" }, { key: "api_key" }, { key: "secrets" }] },
       { label: "Server", sections: [{ key: "system" }, { key: "services" }, { key: "service_manager" }, { key: "packages" }, { key: "updates" }, { key: "project" }] },
       { label: "Networking & Data", sections: [{ key: "domains" }, { key: "smtp" }, { key: "backup" }, { key: "database" }, { key: "activity_log" }] },
@@ -1016,6 +1016,9 @@ export function SettingsPanel() {
         {activeSection === "notifications" && <NotificationsSection />}
 
         {activeSection === "security" && <SecuritySection />}
+
+        {/* ── Transformers ── */}
+        {activeSection === "transformer" && <TransformerSection />}
 
         {/* ── Templates ── */}
         {activeSection === "templates" && <TemplatesSection />}

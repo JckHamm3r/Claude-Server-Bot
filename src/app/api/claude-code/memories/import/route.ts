@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import db from "@/lib/db";
+import { dbGet, dbTransaction } from "@/lib/db";
+import { getAppSetting } from "@/lib/app-settings";
 
-function getApiKey(): string {
+async function getApiKey(): Promise<string> {
   try {
-    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'anthropic_api_key'").get() as { value: string } | undefined;
-    if (row?.value) return row.value;
+    const value = await getAppSetting("anthropic_api_key", "");
+    if (value) return value;
   } catch { /* fallback to env */ }
   return process.env.ANTHROPIC_API_KEY ?? "";
 }
@@ -110,12 +111,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const user = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(session.user.email) as { is_admin: number } | undefined;
+  const user = await dbGet<{ is_admin: number }>("SELECT is_admin FROM users WHERE email = ?", [session.user.email]);
   if (!user?.is_admin) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const apiKey = getApiKey();
+  const apiKey = await getApiKey();
   if (!apiKey) {
     return NextResponse.json(
       { error: "No Anthropic API key configured. Set it in Admin > Settings to use AI import." },
@@ -150,16 +151,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "No memories could be extracted from the document" }, { status: 422 });
   }
 
-  // Insert all parsed memories in a transaction
-  const insertMemory = db.prepare(
-    "INSERT INTO memories (title, content, created_by) VALUES (?, ?, ?) RETURNING id, title, content, created_by, created_at, updated_at"
-  );
-
-  const insertedMemories = db.transaction(() => {
-    return parsedMemories.map((m) =>
-      insertMemory.get(m.title, m.content, session.user!.email) as MemoryRow
-    );
-  })();
+  const email = session.user.email;
+  const insertedMemories = await dbTransaction(async ({ get }) => {
+    const results: MemoryRow[] = [];
+    for (const m of parsedMemories) {
+      const row = await get<MemoryRow>(
+        "INSERT INTO memories (title, content, created_by) VALUES (?, ?, ?) RETURNING id, title, content, created_by, created_at, updated_at",
+        [m.title, m.content, email]
+      );
+      if (row) results.push(row);
+    }
+    return results;
+  });
 
   return NextResponse.json({ memories: insertedMemories, count: insertedMemories.length }, { status: 201 });
 }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import db from "@/lib/db";
+import { dbGet } from "@/lib/db";
 import {
   getSecurityGroup,
   assignUserSecurityGroup,
@@ -9,8 +9,8 @@ import {
 } from "@/lib/claude-db";
 import { logActivity } from "@/lib/activity-log";
 
-function isAdmin(email: string): boolean {
-  const row = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(email) as { is_admin: number } | undefined;
+async function isAdmin(email: string): Promise<boolean> {
+  const row = await dbGet<{ is_admin: number }>("SELECT is_admin FROM users WHERE email = ?", [email]);
   return Boolean(row?.is_admin);
 }
 
@@ -20,9 +20,9 @@ export async function POST(
 ) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!isAdmin(session.user.email)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!await isAdmin(session.user.email)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const group = getSecurityGroup(params.id);
+  const group = await getSecurityGroup(params.id);
   if (!group) return NextResponse.json({ error: "Security group not found" }, { status: 404 });
 
   let body: { email: string };
@@ -35,11 +35,11 @@ export async function POST(
   const { email } = body;
   if (!email) return NextResponse.json({ error: "Missing email" }, { status: 400 });
 
-  const userExists = db.prepare("SELECT email FROM users WHERE email = ?").get(email);
+  const userExists = await dbGet("SELECT email FROM users WHERE email = ?", [email]);
   if (!userExists) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-  assignUserSecurityGroup(email, params.id, session.user.email);
-  logActivity("security_group_member_added", session.user.email, { group_id: params.id, group_name: group.name, user_email: email });
+  await assignUserSecurityGroup(email, params.id, session.user.email);
+  await logActivity("security_group_member_added", session.user.email, { group_id: params.id, group_name: group.name, user_email: email });
 
   return NextResponse.json({ ok: true });
 }
@@ -50,9 +50,9 @@ export async function DELETE(
 ) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!isAdmin(session.user.email)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!await isAdmin(session.user.email)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const group = getSecurityGroup(params.id);
+  const group = await getSecurityGroup(params.id);
   if (!group) return NextResponse.json({ error: "Security group not found" }, { status: 404 });
 
   let body: { email: string };
@@ -65,8 +65,8 @@ export async function DELETE(
   const { email } = body;
   if (!email) return NextResponse.json({ error: "Missing email" }, { status: 400 });
 
-  removeUserSecurityGroup(email, params.id);
-  logActivity("security_group_member_removed", session.user.email, { group_id: params.id, group_name: group.name, user_email: email });
+  await removeUserSecurityGroup(email, params.id);
+  await logActivity("security_group_member_removed", session.user.email, { group_id: params.id, group_name: group.name, user_email: email });
 
   return NextResponse.json({ ok: true });
 }

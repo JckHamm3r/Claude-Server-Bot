@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import db from "@/lib/db";
+import { dbGet } from "@/lib/db";
 import { sendMail } from "@/lib/smtp";
 
-function requireAdmin(email: string): boolean {
-  const user = db
-    .prepare("SELECT is_admin FROM users WHERE email = ?")
-    .get(email) as { is_admin: number } | undefined;
+async function requireAdmin(email: string): Promise<boolean> {
+  const user = await dbGet<{ is_admin: number }>(
+    "SELECT is_admin FROM users WHERE email = ?",
+    [email]
+  );
   return Boolean(user?.is_admin);
 }
 
@@ -16,7 +17,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!requireAdmin(session.user.email)) {
+  if (!(await requireAdmin(session.user.email))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

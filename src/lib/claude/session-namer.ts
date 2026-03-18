@@ -1,8 +1,8 @@
-import db from "../db";
+import { dbGet } from "../db";
 
-function getApiKey(): string {
+async function getApiKey(): Promise<string> {
   try {
-    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'anthropic_api_key'").get() as { value: string } | undefined;
+    const row = await dbGet<{ value: string }>("SELECT value FROM app_settings WHERE key = 'anthropic_api_key'");
     if (row?.value) return row.value;
   } catch { /* fallback to env */ }
   return process.env.ANTHROPIC_API_KEY ?? "";
@@ -19,7 +19,7 @@ export async function generateSessionName(
 ): Promise<string> {
   const fallback = userMessage.trim().slice(0, 50) || "New Session";
 
-  const apiKey = getApiKey();
+  const apiKey = await getApiKey();
   if (!apiKey) return fallback;
 
   const replySnippet = assistantReply

@@ -1,19 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import db from "@/lib/db";
-import { findSecurityGroupsMatchingIP, findUsersBlockedByIP } from "@/lib/claude-db";
+import { dbGet, dbAll } from "@/lib/db";
+import {
+  findSecurityGroupsMatchingIP,
+  findUsersBlockedByIP,
+  getUserEffectiveAllowedIPs,
+} from "@/lib/claude-db";
 import { isIPInAllowList, validateIPOrCIDR } from "@/lib/ip-allowlist";
 
-function isAdmin(email: string): boolean {
-  const row = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(email) as { is_admin: number } | undefined;
+async function isAdmin(email: string): Promise<boolean> {
+  const row = await dbGet<{ is_admin: number }>("SELECT is_admin FROM users WHERE email = ?", [email]);
   return Boolean(row?.is_admin);
 }
 
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!isAdmin(session.user.email)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!await isAdmin(session.user.email)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   let body: { ip: string };
   try {
@@ -34,21 +38,16 @@ export async function POST(request: NextRequest) {
 
   const normalizedIP = ip.trim();
 
-  // Security groups that would allow this IP
-  const matchingGroups = findSecurityGroupsMatchingIP(normalizedIP);
+  const matchingGroups = await findSecurityGroupsMatchingIP(normalizedIP);
+  const blockedUsers = await findUsersBlockedByIP(normalizedIP);
 
-  // Users who would be BLOCKED by this IP
-  const blockedUsers = findUsersBlockedByIP(normalizedIP);
-
-  // All users with restrictions and whether this IP would be allowed
-  const allUsers = db.prepare(`
+  const allUsers = await dbAll<{ email: string; first_name: string; last_name: string; allowed_ips: string | null }>(`
     SELECT u.email, u.first_name, u.last_name, u.allowed_ips
     FROM users u
-  `).all() as Array<{ email: string; first_name: string; last_name: string; allowed_ips: string | null }>;
+  `);
 
-  const { getUserEffectiveAllowedIPs } = await import("@/lib/claude-db");
-  const userResults = allUsers.map((u) => {
-    const allowedIPs = getUserEffectiveAllowedIPs(u.email);
+  const userResults = await Promise.all(allUsers.map(async (u) => {
+    const allowedIPs = await getUserEffectiveAllowedIPs(u.email);
     if (allowedIPs.length === 0) {
       return { email: u.email, first_name: u.first_name, last_name: u.last_name, restricted: false, allowed: true };
     }
@@ -59,7 +58,7 @@ export async function POST(request: NextRequest) {
       restricted: true,
       allowed: isIPInAllowList(normalizedIP, allowedIPs),
     };
-  });
+  }));
 
   return NextResponse.json({
     ip: normalizedIP,

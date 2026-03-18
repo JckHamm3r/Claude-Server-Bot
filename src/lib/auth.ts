@@ -10,6 +10,7 @@ import {
   blockIP,
   getIPProtectionSettings,
 } from "./ip-protection";
+import { dbGet, dbRun } from "./db";
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -26,38 +27,35 @@ export const authOptions: NextAuthOptions = {
           const ipSettings = getIPProtectionSettings();
           const ip = extractIP((req?.headers ?? {}) as Record<string, string | string[] | undefined>);
 
-          // Check if IP is blocked
           if (ipSettings.enabled) {
-            const block = isIPBlocked(ip);
+            const block = await isIPBlocked(ip);
             if (block.blocked) {
               throw new Error(`IP_BLOCKED: ${block.reason ?? "Too many failed attempts"}`);
             }
           }
 
-          // Import db lazily to avoid edge-runtime issues
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const db = (require("./db") as { default: import("better-sqlite3").Database }).default;
-          const user = db.prepare("SELECT * FROM users WHERE email = ?").get(credentials.email) as
-            | { email: string; hash: string; is_admin: number }
-            | undefined;
+          const user = await dbGet<{ email: string; hash: string; is_admin: number }>(
+            "SELECT * FROM users WHERE email = ?",
+            [credentials.email]
+          );
 
           if (!user) {
             if (ipSettings.enabled) {
-              recordLoginAttempt(ip, credentials.email, false);
-              const count = getFailedAttemptCount(ip, ipSettings.windowMinutes);
+              await recordLoginAttempt(ip, credentials.email, false);
+              const count = await getFailedAttemptCount(ip, ipSettings.windowMinutes);
               if (count >= ipSettings.maxAttempts) {
-                blockIP(ip, "Too many failed login attempts", "temporary", ipSettings.blockDurationMinutes, "system");
-                logActivity("security_ip_blocked", null, { ip, attempts: count });
-                // Dispatch notification to admins (lazy import to avoid circular deps)
+                await blockIP(ip, "Too many failed login attempts", "temporary", ipSettings.blockDurationMinutes, "system");
+                await logActivity("security_ip_blocked", null, { ip, attempts: count });
                 try {
                   const { dispatchNotification } = await import("./notifications");
-                  const admins = db.prepare("SELECT email FROM users WHERE is_admin = 1").all() as { email: string }[];
-                  for (const admin of admins) {
+                  const admins = await dbGet<{ email: string }[]>("SELECT email FROM users WHERE is_admin = 1");
+                  const adminList = Array.isArray(admins) ? admins : (admins ? [admins] : []);
+                  for (const admin of adminList) {
                     dispatchNotification("security_ip_blocked", admin.email, "IP Blocked — Brute Force Detected", `IP ${ip} was automatically blocked after ${count} failed login attempts.`).catch(() => {});
                   }
                 } catch { /* ignore */ }
               }
-              logActivity("security_failed_login", credentials.email, { ip });
+              await logActivity("security_failed_login", credentials.email, { ip });
             }
             return null;
           }
@@ -65,45 +63,43 @@ export const authOptions: NextAuthOptions = {
           const valid = await bcrypt.compare(credentials.password, user.hash);
           if (!valid) {
             if (ipSettings.enabled) {
-              recordLoginAttempt(ip, credentials.email, false);
-              const count = getFailedAttemptCount(ip, ipSettings.windowMinutes);
+              await recordLoginAttempt(ip, credentials.email, false);
+              const count = await getFailedAttemptCount(ip, ipSettings.windowMinutes);
               if (count >= ipSettings.maxAttempts) {
-                blockIP(ip, "Too many failed login attempts", "temporary", ipSettings.blockDurationMinutes, "system");
-                logActivity("security_ip_blocked", null, { ip, attempts: count });
+                await blockIP(ip, "Too many failed login attempts", "temporary", ipSettings.blockDurationMinutes, "system");
+                await logActivity("security_ip_blocked", null, { ip, attempts: count });
                 try {
                   const { dispatchNotification } = await import("./notifications");
-                  const admins = db.prepare("SELECT email FROM users WHERE is_admin = 1").all() as { email: string }[];
-                  for (const admin of admins) {
+                  const admins = await dbGet<{ email: string }[]>("SELECT email FROM users WHERE is_admin = 1");
+                  const adminList = Array.isArray(admins) ? admins : (admins ? [admins] : []);
+                  for (const admin of adminList) {
                     dispatchNotification("security_ip_blocked", admin.email, "IP Blocked — Brute Force Detected", `IP ${ip} was automatically blocked after ${count} failed login attempts.`).catch(() => {});
                   }
                 } catch { /* ignore */ }
               }
-              logActivity("security_failed_login", credentials.email, { ip });
+              await logActivity("security_failed_login", credentials.email, { ip });
             }
             return null;
           }
 
-          // Successful login
           if (ipSettings.enabled) {
-            recordLoginAttempt(ip, credentials.email, true);
+            await recordLoginAttempt(ip, credentials.email, true);
           }
 
-          // Check per-user IP allowlist (security groups + direct user IPs)
           try {
             const { getUserEffectiveAllowedIPs } = await import("./claude-db");
             const { isIPInAllowList } = await import("./ip-allowlist");
-            const allowedIPs = getUserEffectiveAllowedIPs(credentials.email);
+            const allowedIPs = await getUserEffectiveAllowedIPs(credentials.email);
             if (allowedIPs.length > 0 && !isIPInAllowList(ip, allowedIPs)) {
-              logActivity("security_ip_restricted_login", credentials.email, { ip });
+              await logActivity("security_ip_restricted_login", credentials.email, { ip });
               throw new Error(`IP_NOT_ALLOWED: Access from ${ip} is not permitted for this account`);
             }
           } catch (ipErr) {
             const ipErrMsg = String(ipErr);
             if (ipErrMsg.includes("IP_NOT_ALLOWED:")) throw ipErr;
-            // Non-fatal: DB/import error — allow login
           }
 
-          logActivity("user_login", user.email);
+          await logActivity("user_login", user.email);
 
           return {
             id: user.email,
@@ -113,8 +109,8 @@ export const authOptions: NextAuthOptions = {
           };
         } catch (err) {
           const msg = String(err);
-          if (msg.includes("IP_BLOCKED:")) throw err; // re-throw so NextAuth surfaces it
-          if (msg.includes("IP_NOT_ALLOWED:")) throw err; // re-throw so NextAuth surfaces it
+          if (msg.includes("IP_BLOCKED:")) throw err;
+          if (msg.includes("IP_NOT_ALLOWED:")) throw err;
           console.error("[auth] authorize error:", err);
           return null;
         }
@@ -124,7 +120,7 @@ export const authOptions: NextAuthOptions = {
 
   session: {
     strategy: "jwt",
-    maxAge: 24 * 60 * 60, // 24 hours
+    maxAge: 24 * 60 * 60,
   },
 
   pages: {
@@ -133,9 +129,6 @@ export const authOptions: NextAuthOptions = {
 
   callbacks: {
     async jwt({ token, user }) {
-      // On initial sign-in (user object is present) OR on periodic refresh,
-      // load the latest values from the database. Reading setupComplete only
-      // on refresh meant every fresh login saw the setup wizard for up to 5 min.
       const REFRESH_INTERVAL = 5 * 60 * 1000;
       const lastRefresh = (token.lastRefresh as number) ?? 0;
       const shouldRefresh = !!user || (Date.now() - lastRefresh > REFRESH_INTERVAL);
@@ -147,11 +140,10 @@ export const authOptions: NextAuthOptions = {
 
       if (shouldRefresh) {
         try {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const db = (require("./db") as { default: import("better-sqlite3").Database }).default;
-          const row = db.prepare("SELECT is_admin, first_name, last_name, must_change_password, group_id FROM users WHERE email = ?").get(token.email as string) as
-            | { is_admin: number; first_name: string; last_name: string; must_change_password: number; group_id: string | null }
-            | undefined;
+          const row = await dbGet<{ is_admin: number; first_name: string; last_name: string; must_change_password: number; group_id: string | null }>(
+            "SELECT is_admin, first_name, last_name, must_change_password, group_id FROM users WHERE email = ?",
+            [token.email as string]
+          );
           if (row) {
             token.isAdmin = Boolean(row.is_admin);
             token.firstName = row.first_name ?? "";
@@ -160,32 +152,26 @@ export const authOptions: NextAuthOptions = {
             token.groupId = row.group_id ?? null;
           }
 
-          // Load per-user IP allowlist (user direct + security groups)
           try {
-            const { getUserEffectiveAllowedIPs } = require("./claude-db") as typeof import("./claude-db");
-            token.allowedIps = getUserEffectiveAllowedIPs(token.email as string);
+            const { getUserEffectiveAllowedIPs } = await import("./claude-db");
+            token.allowedIps = await getUserEffectiveAllowedIPs(token.email as string);
           } catch {
             token.allowedIps = [];
           }
 
-          // Non-admin users don't go through the setup wizard.
-          // Auto-mark their setup_complete on first encounter so the middleware
-          // never redirects them to /setup.
           if (!token.isAdmin) {
             token.setupComplete = true;
-            // Persist the flag so it survives JWT refreshes
-            db.prepare("INSERT OR IGNORE INTO user_settings (email) VALUES (?)").run(token.email as string);
-            db.prepare("UPDATE user_settings SET setup_complete = 1 WHERE email = ?").run(token.email as string);
+            await dbRun("INSERT OR IGNORE INTO user_settings (email) VALUES (?)", [token.email as string]);
+            await dbRun("UPDATE user_settings SET setup_complete = 1 WHERE email = ?", [token.email as string]);
           } else {
-            const globalSetup = db.prepare("SELECT value FROM app_settings WHERE key = 'setup_complete'").get() as
-              | { value: string }
-              | undefined;
+            const globalSetup = await dbGet<{ value: string }>(
+              "SELECT value FROM app_settings WHERE key = 'setup_complete'"
+            );
             token.setupComplete = globalSetup?.value === "true";
           }
 
           token.lastRefresh = Date.now();
         } catch {
-          // DB unavailable in edge runtime — keep existing value
           if (user) token.lastRefresh = Date.now();
         }
       }
@@ -207,12 +193,10 @@ export const authOptions: NextAuthOptions = {
       const prefix = process.env.NEXT_PUBLIC_CLAUDE_BOT_PATH_PREFIX ?? "c";
       const basePath = slug ? `/${prefix}/${slug}` : "";
       
-      // If redirecting to root, add the basePath
       if (url === baseUrl || url === `${baseUrl}/`) {
         return `${baseUrl}${basePath}/`;
       }
       
-      // If URL is relative and doesn't include basePath, add it
       if (url.startsWith("/") && !url.startsWith(basePath)) {
         return `${baseUrl}${basePath}${url}`;
       }

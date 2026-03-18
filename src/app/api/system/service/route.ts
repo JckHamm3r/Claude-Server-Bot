@@ -1,22 +1,18 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import db from "@/lib/db";
+import { dbGet } from "@/lib/db";
 import { execFileSync, spawn } from "child_process";
 import path from "path";
 
 const SERVICE_NAME = "claude-bot";
-
-function requireAdmin() {
-  return db.prepare("SELECT is_admin FROM users WHERE email = ?");
-}
 
 async function checkAuth(): Promise<{ error: NextResponse } | { email: string }> {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  const user = requireAdmin().get(session.user.email) as { is_admin: number } | undefined;
+  const user = await dbGet<{ is_admin: number }>("SELECT is_admin FROM users WHERE email = ?", [session.user.email]);
   if (!user?.is_admin) {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }

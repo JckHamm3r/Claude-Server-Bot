@@ -1,4 +1,4 @@
-import db from "./db";
+import { dbRun } from "./db";
 
 export type ActivityEventType =
   | "user_login"
@@ -22,6 +22,7 @@ export type ActivityEventType =
   | "smtp_saved"
   | "smtp_test_sent"
   | "customization_session_started"
+  | "transformer_session_started"
   | "notification_preference_updated"
   | "security_mod_blocked"
   | "security_prompt_injection_detected"
@@ -55,15 +56,16 @@ export type ActivityEventType =
   | "security_group_member_removed"
   | "user_ip_allowlist_updated";
 
-export function logActivity(
+export async function logActivity(
   event_type: ActivityEventType,
   user_email: string | null,
   details?: object
-): void {
+): Promise<void> {
   try {
-    db.prepare(
-      "INSERT INTO activity_log (event_type, user_email, details) VALUES (?, ?, ?)"
-    ).run(event_type, user_email ?? null, details ? JSON.stringify(details) : null);
+    await dbRun(
+      "INSERT INTO activity_log (event_type, user_email, details) VALUES (?, ?, ?)",
+      [event_type, user_email ?? null, details ? JSON.stringify(details) : null]
+    );
   } catch (err) {
     console.error("[activity-log] failed to log:", err);
   }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import db from "@/lib/db";
+import { dbGet } from "@/lib/db";
 import {
   getSecurityGroup,
   updateSecurityGroup,
@@ -11,8 +11,8 @@ import {
 import { validateIPOrCIDR } from "@/lib/ip-allowlist";
 import { logActivity } from "@/lib/activity-log";
 
-function isAdmin(email: string): boolean {
-  const row = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(email) as { is_admin: number } | undefined;
+async function isAdmin(email: string): Promise<boolean> {
+  const row = await dbGet<{ is_admin: number }>("SELECT is_admin FROM users WHERE email = ?", [email]);
   return Boolean(row?.is_admin);
 }
 
@@ -22,12 +22,12 @@ export async function GET(
 ) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!isAdmin(session.user.email)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!await isAdmin(session.user.email)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const group = getSecurityGroup(params.id);
+  const group = await getSecurityGroup(params.id);
   if (!group) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const members = getSecurityGroupMembers(params.id);
+  const members = await getSecurityGroupMembers(params.id);
   return NextResponse.json({ group, members });
 }
 
@@ -37,9 +37,9 @@ export async function PATCH(
 ) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!isAdmin(session.user.email)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!await isAdmin(session.user.email)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const group = getSecurityGroup(params.id);
+  const group = await getSecurityGroup(params.id);
   if (!group) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   let body: { name?: string; description?: string; allowed_ips?: string[] };
@@ -60,12 +60,12 @@ export async function PATCH(
   }
 
   if (body.name !== undefined) {
-    const clash = db.prepare("SELECT id FROM security_groups WHERE name = ? AND id != ?").get(body.name.trim(), params.id);
+    const clash = await dbGet("SELECT id FROM security_groups WHERE name = ? AND id != ?", [body.name.trim(), params.id]);
     if (clash) return NextResponse.json({ error: "A security group with that name already exists" }, { status: 409 });
   }
 
-  updateSecurityGroup(params.id, body);
-  logActivity("security_group_updated", session.user.email, { group_id: params.id, group_name: group.name });
+  await updateSecurityGroup(params.id, body);
+  await logActivity("security_group_updated", session.user.email, { group_id: params.id, group_name: group.name });
 
   return NextResponse.json({ ok: true });
 }
@@ -76,13 +76,13 @@ export async function DELETE(
 ) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!isAdmin(session.user.email)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!await isAdmin(session.user.email)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const group = getSecurityGroup(params.id);
+  const group = await getSecurityGroup(params.id);
   if (!group) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  deleteSecurityGroup(params.id);
-  logActivity("security_group_deleted", session.user.email, { group_id: params.id, group_name: group.name });
+  await deleteSecurityGroup(params.id);
+  await logActivity("security_group_deleted", session.user.email, { group_id: params.id, group_name: group.name });
 
   return NextResponse.json({ ok: true });
 }

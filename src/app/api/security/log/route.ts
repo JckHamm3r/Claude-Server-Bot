@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 import { authOptions } from "@/lib/auth";
-import db from "@/lib/db";
+import { dbAll } from "@/lib/db";
 
 export async function GET(request: Request) {
   const session = await getServerSession(authOptions);
@@ -16,21 +16,21 @@ export async function GET(request: Request) {
   let rows: { id: number; timestamp: string; event_type: string; user_email: string | null; details: string | null }[];
 
   if (cursor) {
-    rows = db.prepare(`
+    rows = await dbAll<{ id: number; timestamp: string; event_type: string; user_email: string | null; details: string | null }>(`
       SELECT id, timestamp, event_type, user_email, details
       FROM activity_log
       WHERE event_type LIKE 'security_%' AND id < ?
       ORDER BY id DESC
       LIMIT ?
-    `).all(parseInt(cursor, 10), limit) as typeof rows;
+    `, [parseInt(cursor, 10), limit]);
   } else {
-    rows = db.prepare(`
+    rows = await dbAll<{ id: number; timestamp: string; event_type: string; user_email: string | null; details: string | null }>(`
       SELECT id, timestamp, event_type, user_email, details
       FROM activity_log
       WHERE event_type LIKE 'security_%'
       ORDER BY id DESC
       LIMIT ?
-    `).all(limit) as typeof rows;
+    `, [limit]);
   }
 
   const nextCursor = rows.length === limit ? String(rows[rows.length - 1].id) : null;

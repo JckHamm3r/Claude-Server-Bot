@@ -1,4 +1,5 @@
 import { getAppSetting } from "./app-settings";
+import { dbGet, dbAll, dbRun } from "./db";
 
 // source_type values:
 //   "app"       — blocked by app's own login-failure threshold
@@ -18,43 +19,39 @@ export interface BlockedIP {
   source_type: "app" | "manual" | "fail2ban" | "api_abuse";
 }
 
-function getDb() {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  return (require("./db") as { default: import("better-sqlite3").Database }).default;
-}
-
-export function recordLoginAttempt(ip: string, email: string | null, success: boolean): void {
+export async function recordLoginAttempt(ip: string, email: string | null, success: boolean): Promise<void> {
   try {
-    getDb().prepare(
-      "INSERT INTO login_attempts (ip_address, email_attempted, success) VALUES (?, ?, ?)"
-    ).run(ip, email ?? null, success ? 1 : 0);
+    await dbRun(
+      "INSERT INTO login_attempts (ip_address, email_attempted, success) VALUES (?, ?, ?)",
+      [ip, email ?? null, success ? 1 : 0]
+    );
   } catch (err) {
     console.error("[ip-protection] recordLoginAttempt error:", err);
   }
 }
 
-export function getFailedAttemptCount(ip: string, windowMinutes: number): number {
+export async function getFailedAttemptCount(ip: string, windowMinutes: number): Promise<number> {
   try {
-    const row = getDb().prepare(`
+    const row = await dbGet<{ count: number }>(`
       SELECT COUNT(*) as count FROM login_attempts
       WHERE ip_address = ?
         AND success = 0
         AND created_at > datetime('now', '-' || ? || ' minutes')
-    `).get(ip, windowMinutes) as { count: number };
-    return row.count;
+    `, [ip, windowMinutes]);
+    return row?.count ?? 0;
   } catch (err) {
     console.error("[ip-protection] getFailedAttemptCount error:", err);
     return 999;
   }
 }
 
-export function isIPBlocked(ip: string): { blocked: boolean; reason?: string; unblockAt?: string } {
+export async function isIPBlocked(ip: string): Promise<{ blocked: boolean; reason?: string; unblockAt?: string }> {
   try {
-    const row = getDb().prepare(`
+    const row = await dbGet<{ ip_address: string; block_reason: string; block_type: string; unblock_at: string | null }>(`
       SELECT ip_address, block_reason, block_type, unblock_at FROM blocked_ips
       WHERE ip_address = ?
         AND (block_type = 'permanent' OR unblock_at IS NULL OR unblock_at > datetime('now'))
-    `).get(ip) as { ip_address: string; block_reason: string; block_type: string; unblock_at: string | null } | undefined;
+    `, [ip]);
 
     if (!row) return { blocked: false };
     return {
@@ -68,19 +65,18 @@ export function isIPBlocked(ip: string): { blocked: boolean; reason?: string; un
   }
 }
 
-export function blockIP(
+export async function blockIP(
   ip: string,
   reason: string,
   type: "temporary" | "permanent",
   durationMinutes: number,
   blockedBy: string,
   sourceType: BlockedIP["source_type"] = "app"
-): void {
+): Promise<void> {
   try {
-    const db = getDb();
-    const failedCount = sourceType === "api_abuse" ? 0 : getFailedAttemptCount(ip, Math.max(durationMinutes, 60));
+    const failedCount = sourceType === "api_abuse" ? 0 : await getFailedAttemptCount(ip, Math.max(durationMinutes, 60));
     if (type === "temporary") {
-      db.prepare(`
+      await dbRun(`
         INSERT INTO blocked_ips (ip_address, block_reason, block_type, failed_attempt_count, blocked_by, unblock_at, source_type)
         VALUES (?, ?, ?, ?, ?, datetime('now', '+' || ? || ' minutes'), ?)
         ON CONFLICT(ip_address) DO UPDATE SET
@@ -91,9 +87,9 @@ export function blockIP(
           blocked_at = datetime('now'),
           unblock_at = datetime('now', '+' || ? || ' minutes'),
           source_type = excluded.source_type
-      `).run(ip, reason, type, failedCount, blockedBy, durationMinutes, sourceType, durationMinutes);
+      `, [ip, reason, type, failedCount, blockedBy, durationMinutes, sourceType, durationMinutes]);
     } else {
-      db.prepare(`
+      await dbRun(`
         INSERT INTO blocked_ips (ip_address, block_reason, block_type, failed_attempt_count, blocked_by, unblock_at, source_type)
         VALUES (?, ?, ?, ?, ?, NULL, ?)
         ON CONFLICT(ip_address) DO UPDATE SET
@@ -104,7 +100,7 @@ export function blockIP(
           blocked_at = datetime('now'),
           unblock_at = NULL,
           source_type = excluded.source_type
-      `).run(ip, reason, type, failedCount, blockedBy, sourceType);
+      `, [ip, reason, type, failedCount, blockedBy, sourceType]);
     }
 
     // Bidirectional fail2ban sync: push app-originated blocks into fail2ban
@@ -125,9 +121,9 @@ export function blockIP(
   }
 }
 
-export function unblockIP(ip: string): void {
+export async function unblockIP(ip: string): Promise<void> {
   try {
-    getDb().prepare("DELETE FROM blocked_ips WHERE ip_address = ?").run(ip);
+    await dbRun("DELETE FROM blocked_ips WHERE ip_address = ?", [ip]);
 
     // Bidirectional fail2ban sync: unban in fail2ban too
     try {
@@ -145,30 +141,27 @@ export function unblockIP(ip: string): void {
   }
 }
 
-export function getBlockedIPs(): BlockedIP[] {
+export async function getBlockedIPs(): Promise<BlockedIP[]> {
   try {
-    return getDb().prepare(
-      "SELECT * FROM blocked_ips ORDER BY blocked_at DESC"
-    ).all() as BlockedIP[];
+    return await dbAll<BlockedIP>("SELECT * FROM blocked_ips ORDER BY blocked_at DESC");
   } catch {
     return [];
   }
 }
 
-export function cleanupExpiredBlocks(): void {
+export async function cleanupExpiredBlocks(): Promise<void> {
   try {
-    const db = getDb();
-    db.prepare(
+    await dbRun(
       "DELETE FROM blocked_ips WHERE block_type = 'temporary' AND unblock_at IS NOT NULL AND unblock_at <= datetime('now')"
-    ).run();
+    );
     // Also clean up old login attempts (keep last 7 days)
-    db.prepare(
+    await dbRun(
       "DELETE FROM login_attempts WHERE created_at < datetime('now', '-7 days')"
-    ).run();
+    );
     // Clean up stale API request count windows (older than 2 hours)
-    db.prepare(
+    await dbRun(
       "DELETE FROM api_request_counts WHERE window_start < datetime('now', '-2 hours')"
-    ).run();
+    );
   } catch (err) {
     console.error("[ip-protection] cleanupExpiredBlocks error:", err);
   }
@@ -218,15 +211,13 @@ export function getApiAbuseSettings() {
  * Record one API request for an IP and return whether it should be blocked.
  * Uses a 60-second tumbling window stored in api_request_counts.
  */
-export function checkAndRecordApiRequest(ip: string): { blocked: boolean; count?: number } {
+export async function checkAndRecordApiRequest(ip: string): Promise<{ blocked: boolean; count?: number }> {
   try {
     const settings = getApiAbuseSettings();
     if (!settings.enabled) return { blocked: false };
 
     // Skip loopback
     if (ip === "127.0.0.1" || ip === "::1") return { blocked: false };
-
-    const db = getDb();
 
     // Current window key: truncate to the nearest window boundary
     const windowStart = new Date();
@@ -237,21 +228,22 @@ export function checkAndRecordApiRequest(ip: string): { blocked: boolean; count?
     const windowKey = windowStart.toISOString().slice(0, 19).replace("T", " ");
 
     // Upsert count
-    db.prepare(`
+    await dbRun(`
       INSERT INTO api_request_counts (ip_address, window_start, request_count)
       VALUES (?, ?, 1)
       ON CONFLICT(ip_address, window_start) DO UPDATE SET
         request_count = request_count + 1
-    `).run(ip, windowKey);
+    `, [ip, windowKey]);
 
-    const row = db.prepare(
-      "SELECT request_count FROM api_request_counts WHERE ip_address = ? AND window_start = ?"
-    ).get(ip, windowKey) as { request_count: number } | undefined;
+    const row = await dbGet<{ request_count: number }>(
+      "SELECT request_count FROM api_request_counts WHERE ip_address = ? AND window_start = ?",
+      [ip, windowKey]
+    );
 
     const count = row?.request_count ?? 1;
     if (count >= settings.maxRequests) {
       // Auto-block
-      blockIP(
+      await blockIP(
         ip,
         `API abuse — ${count} requests in ${settings.windowSeconds}s`,
         "temporary",
@@ -277,7 +269,7 @@ export function checkAndRecordApiRequest(ip: string): { blocked: boolean; count?
  * source_type='fail2ban'. IPs that were previously synced from fail2ban
  * but are no longer in fail2ban's ban list are removed.
  */
-export function syncFail2BanBans(): { added: number; removed: number; error?: string } {
+export async function syncFail2BanBans(): Promise<{ added: number; removed: number; error?: string }> {
   try {
     const { getFail2BanSettings, getBannedIPs, jailExists: checkJailExists } = (() => {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -300,12 +292,11 @@ export function syncFail2BanBans(): { added: number; removed: number; error?: st
     }
 
     const bannedByF2B = new Set(getBannedIPs(settings.jail));
-    const db = getDb();
 
     // IPs already tracked in DB that came from fail2ban
-    const existingF2B = db.prepare(
+    const existingF2B = await dbAll<{ ip_address: string }>(
       "SELECT ip_address FROM blocked_ips WHERE source_type = 'fail2ban'"
-    ).all() as { ip_address: string }[];
+    );
     const existingF2BSet = new Set(existingF2B.map((r) => r.ip_address));
 
     let added = 0;
@@ -315,12 +306,12 @@ export function syncFail2BanBans(): { added: number; removed: number; error?: st
     for (const ip of bannedByF2B) {
       if (!existingF2BSet.has(ip)) {
         // Insert as permanent (fail2ban manages expiry)
-        db.prepare(`
+        await dbRun(`
           INSERT INTO blocked_ips (ip_address, block_reason, block_type, failed_attempt_count, blocked_by, unblock_at, source_type)
           VALUES (?, ?, 'permanent', 0, 'fail2ban', NULL, 'fail2ban')
           ON CONFLICT(ip_address) DO UPDATE SET
             source_type = CASE WHEN source_type = 'fail2ban' THEN 'fail2ban' ELSE source_type END
-        `).run(ip, `Banned by fail2ban (jail: ${settings.jail})`);
+        `, [ip, `Banned by fail2ban (jail: ${settings.jail})`]);
         added++;
       }
     }
@@ -328,7 +319,7 @@ export function syncFail2BanBans(): { added: number; removed: number; error?: st
     // Remove IPs that were sourced from fail2ban but are no longer in fail2ban's ban list
     for (const { ip_address } of existingF2B) {
       if (!bannedByF2B.has(ip_address)) {
-        db.prepare("DELETE FROM blocked_ips WHERE ip_address = ? AND source_type = 'fail2ban'").run(ip_address);
+        await dbRun("DELETE FROM blocked_ips WHERE ip_address = ? AND source_type = 'fail2ban'", [ip_address]);
         removed++;
       }
     }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import db from "@/lib/db";
+import { dbGet, dbRun } from "@/lib/db";
 
 interface SmtpRow {
   host: string;
@@ -16,10 +16,11 @@ interface SmtpRow {
   updated_at: string;
 }
 
-function requireAdmin(email: string): boolean {
-  const user = db
-    .prepare("SELECT is_admin FROM users WHERE email = ?")
-    .get(email) as { is_admin: number } | undefined;
+async function requireAdmin(email: string): Promise<boolean> {
+  const user = await dbGet<{ is_admin: number }>(
+    "SELECT is_admin FROM users WHERE email = ?",
+    [email]
+  );
   return Boolean(user?.is_admin);
 }
 
@@ -28,15 +29,13 @@ export async function GET() {
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!requireAdmin(session.user.email)) {
+  if (!(await requireAdmin(session.user.email))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const row = db
-    .prepare(
-      "SELECT host, port, secure, username, password, from_name, from_address, reply_to, enabled, updated_at FROM smtp_settings WHERE id = 1"
-    )
-    .get() as SmtpRow | undefined;
+  const row = await dbGet<SmtpRow>(
+    "SELECT host, port, secure, username, password, from_name, from_address, reply_to, enabled, updated_at FROM smtp_settings WHERE id = 1"
+  );
 
   if (!row) {
     return NextResponse.json({
@@ -76,7 +75,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!requireAdmin(session.user.email)) {
+  if (!(await requireAdmin(session.user.email))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -120,7 +119,7 @@ export async function POST(request: NextRequest) {
     params.push(body.password ?? "");
   }
 
-  db.prepare(
+  await dbRun(
     `UPDATE smtp_settings SET
       host = ?,
       port = ?,
@@ -132,8 +131,9 @@ export async function POST(request: NextRequest) {
       enabled = ?,
       ${passwordSql},
       updated_at = datetime('now')
-    WHERE id = 1`
-  ).run(...params);
+    WHERE id = 1`,
+    params
+  );
 
   return NextResponse.json({ ok: true });
 }

@@ -1,23 +1,14 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { dbGet, dbPragma } from "@/lib/db";
 import path from "path";
 import fs from "fs";
-import type Database from "better-sqlite3";
 
 export const dynamic = "force-dynamic";
 
-let dbInstance: Database.Database | null = null;
-
-async function getDb(): Promise<Database.Database> {
-  if (!dbInstance) {
-    const mod = (await import("@/lib/db")) as { default: Database.Database };
-    dbInstance = mod.default;
-  }
-  return dbInstance;
-}
-
 const DATA_DIR = process.env.DATA_DIR ?? "./data";
+const DB_PATH = path.join(DATA_DIR, "claude-bot.db");
 const MANUAL_BACKUP_DIR = path.join(DATA_DIR, "backups", "manual");
 const MAX_MANUAL_BACKUPS = 3;
 
@@ -42,10 +33,7 @@ export async function POST() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const db = await getDb();
-  const user = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(session.user.email) as
-    | { is_admin: number }
-    | undefined;
+  const user = await dbGet<{ is_admin: number }>("SELECT is_admin FROM users WHERE email = ?", [session.user.email]);
   if (!user?.is_admin) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -57,7 +45,9 @@ export async function POST() {
     const backupName = `claude-bot-${timestamp}.db`;
     const backupPath = path.join(MANUAL_BACKUP_DIR, backupName);
 
-    await db.backup(backupPath);
+    // Checkpoint WAL to ensure all data is flushed to main DB file before copy
+    await dbPragma("wal_checkpoint(TRUNCATE)");
+    fs.copyFileSync(DB_PATH, backupPath);
 
     rotateBackups(MANUAL_BACKUP_DIR, MAX_MANUAL_BACKUPS);
 

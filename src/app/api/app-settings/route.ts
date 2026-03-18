@@ -1,26 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import type Database from "better-sqlite3";
+import { dbGet, dbAll, dbRun } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
-let dbInstance: Database.Database | null = null;
-
-async function getDb(): Promise<Database.Database> {
-  if (!dbInstance) {
-    // Lazy-load DB so build-time route analysis does not initialize SQLite.
-    const mod = (await import("@/lib/db")) as { default: Database.Database };
-    dbInstance = mod.default;
-  }
-  return dbInstance;
-}
-
 async function requireAdmin(email: string): Promise<boolean> {
-  const db = await getDb();
-  const user = db
-    .prepare("SELECT is_admin FROM users WHERE email = ?")
-    .get(email) as { is_admin: number } | undefined;
+  const user = await dbGet<{ is_admin: number }>(
+    "SELECT is_admin FROM users WHERE email = ?",
+    [email]
+  );
   return Boolean(user?.is_admin);
 }
 
@@ -33,10 +22,9 @@ export async function GET() {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const db = await getDb();
-  const rows = db
-    .prepare("SELECT key, value FROM app_settings ORDER BY key ASC")
-    .all() as { key: string; value: string }[];
+  const rows = await dbAll<{ key: string; value: string }>(
+    "SELECT key, value FROM app_settings ORDER BY key ASC"
+  );
 
   const settings: Record<string, string> = {};
   for (const row of rows) {
@@ -55,7 +43,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const db = await getDb();
   let body: Record<string, unknown>;
   try {
     body = await request.json();
@@ -66,16 +53,6 @@ export async function POST(request: NextRequest) {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return NextResponse.json({ error: "Expected a JSON object" }, { status: 400 });
   }
-
-  const upsert = db.prepare(
-    "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
-  );
-
-  const upsertMany = db.transaction((entries: [string, string][]) => {
-    for (const [k, v] of entries) {
-      upsert.run(k, v);
-    }
-  });
 
   const KNOWN_KEYS = new Set([
     "personality", "personality_custom",
@@ -99,7 +76,12 @@ export async function POST(request: NextRequest) {
 
   const unknownKeys = entries.filter(([k]) => !KNOWN_KEYS.has(k)).map(([k]) => k);
 
-  upsertMany(entries);
+  const upsertSql =
+    "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at";
+
+  for (const [k, v] of entries) {
+    await dbRun(upsertSql, [k, v]);
+  }
 
   if (unknownKeys.length > 0) {
     return NextResponse.json({ ok: true, warning: `Unrecognized keys: ${unknownKeys.join(", ")}` });

@@ -6,10 +6,10 @@ import {
   setMemoryAssignments,
   getMemoryAssignments,
 } from "@/lib/claude-db";
-import db from "@/lib/db";
+import { dbGet, dbRun } from "@/lib/db";
 
-function requireAdmin(email: string): boolean {
-  const user = db.prepare("SELECT is_admin FROM users WHERE email = ?").get(email) as { is_admin: number } | undefined;
+async function requireAdmin(email: string): Promise<boolean> {
+  const user = await dbGet<{ is_admin: number }>("SELECT is_admin FROM users WHERE email = ?", [email]);
   return Boolean(user?.is_admin);
 }
 
@@ -20,7 +20,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const memories = getMemories();
+  const memories = await getMemories();
   return NextResponse.json({ memories });
 }
 
@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!requireAdmin(session.user.email)) {
+  if (!await requireAdmin(session.user.email)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -46,18 +46,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Missing title or content" }, { status: 400 });
   }
 
-  const row = db
-    .prepare(
-      "INSERT INTO memories (title, content, created_by, is_global) VALUES (?, ?, ?, ?) RETURNING id, title, content, is_global, created_by, created_at, updated_at"
-    )
-    .get(title.trim(), content, session.user.email, is_global ? 1 : 0) as {
-      id: string; title: string; content: string; is_global: number;
-      created_by: string; created_at: string; updated_at: string;
-    };
+  const row = await dbGet<{
+    id: string; title: string; content: string; is_global: number;
+    created_by: string; created_at: string; updated_at: string;
+  }>(
+    "INSERT INTO memories (title, content, created_by, is_global) VALUES (?, ?, ?, ?) RETURNING id, title, content, is_global, created_by, created_at, updated_at",
+    [title.trim(), content, session.user.email, is_global ? 1 : 0]
+  );
 
-  setMemoryAssignments(row.id, is_global, agent_ids);
+  if (!row) {
+    return NextResponse.json({ error: "Insert failed" }, { status: 500 });
+  }
 
-  const assigned_agent_ids = getMemoryAssignments(row.id);
+  await setMemoryAssignments(row.id, is_global, agent_ids);
+
+  const assigned_agent_ids = await getMemoryAssignments(row.id);
   const memory = { ...row, is_global: row.is_global === 1, assigned_agent_ids };
 
   return NextResponse.json({ memory }, { status: 201 });
@@ -69,7 +72,7 @@ export async function PUT(request: NextRequest) {
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!requireAdmin(session.user.email)) {
+  if (!await requireAdmin(session.user.email)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -85,35 +88,40 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
   }
 
-  const existing = db.prepare("SELECT id FROM memories WHERE id = ?").get(id) as { id: string } | undefined;
+  const existing = await dbGet<{ id: string }>("SELECT id FROM memories WHERE id = ?", [id]);
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
   if (title !== undefined && content !== undefined) {
-    db.prepare(
-      "UPDATE memories SET title = ?, content = ?, updated_at = datetime('now') WHERE id = ?"
-    ).run(title.trim(), content, id);
+    await dbRun(
+      "UPDATE memories SET title = ?, content = ?, updated_at = datetime('now') WHERE id = ?",
+      [title.trim(), content, id]
+    );
   } else if (title !== undefined) {
-    db.prepare("UPDATE memories SET title = ?, updated_at = datetime('now') WHERE id = ?").run(title.trim(), id);
+    await dbRun("UPDATE memories SET title = ?, updated_at = datetime('now') WHERE id = ?", [title.trim(), id]);
   } else if (content !== undefined) {
-    db.prepare("UPDATE memories SET content = ?, updated_at = datetime('now') WHERE id = ?").run(content, id);
+    await dbRun("UPDATE memories SET content = ?, updated_at = datetime('now') WHERE id = ?", [content, id]);
   }
 
   // Update assignment scope if provided
   if (is_global !== undefined || agent_ids !== undefined) {
-    const currentRow = db.prepare("SELECT is_global FROM memories WHERE id = ?").get(id) as { is_global: number };
-    const newIsGlobal = is_global !== undefined ? is_global : currentRow.is_global === 1;
-    const newAgentIds = agent_ids !== undefined ? agent_ids : getMemoryAssignments(id);
-    setMemoryAssignments(id, newIsGlobal, newAgentIds);
+    const currentRow = await dbGet<{ is_global: number }>("SELECT is_global FROM memories WHERE id = ?", [id]);
+    const newIsGlobal = is_global !== undefined ? is_global : currentRow!.is_global === 1;
+    const newAgentIds = agent_ids !== undefined ? agent_ids : await getMemoryAssignments(id);
+    await setMemoryAssignments(id, newIsGlobal, newAgentIds);
   }
 
-  const updated = db
-    .prepare("SELECT id, title, content, is_global, created_by, created_at, updated_at FROM memories WHERE id = ?")
-    .get(id) as { id: string; title: string; content: string; is_global: number; created_by: string; created_at: string; updated_at: string };
+  const updated = await dbGet<{
+    id: string; title: string; content: string; is_global: number;
+    created_by: string; created_at: string; updated_at: string;
+  }>(
+    "SELECT id, title, content, is_global, created_by, created_at, updated_at FROM memories WHERE id = ?",
+    [id]
+  );
 
-  const assigned_agent_ids = getMemoryAssignments(id);
-  const memory = { ...updated, is_global: updated.is_global === 1, assigned_agent_ids };
+  const assigned_agent_ids = await getMemoryAssignments(id);
+  const memory = { ...updated!, is_global: updated!.is_global === 1, assigned_agent_ids };
 
   return NextResponse.json({ memory });
 }
@@ -124,7 +132,7 @@ export async function DELETE(request: NextRequest) {
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!requireAdmin(session.user.email)) {
+  if (!await requireAdmin(session.user.email)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -134,7 +142,7 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
   }
 
-  const result = db.prepare("DELETE FROM memories WHERE id = ?").run(id);
+  const result = await dbRun("DELETE FROM memories WHERE id = ?", [id]);
   if (result.changes === 0) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }

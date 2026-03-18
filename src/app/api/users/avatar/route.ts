@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import db from "@/lib/db";
+import { dbRun } from "@/lib/db";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import crypto from "crypto";
@@ -78,9 +78,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    db.prepare("UPDATE users SET avatar_url = ? WHERE email = ?").run(avatarUrl, email);
+    await dbRun("UPDATE users SET avatar_url = ? WHERE email = ?", [avatarUrl, email]);
 
-    logActivity("user_avatar_changed", email);
+    await logActivity("user_avatar_changed", email);
 
     return NextResponse.json({ avatarUrl });
   } catch (error) {
