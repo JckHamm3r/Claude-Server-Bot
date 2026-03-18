@@ -454,7 +454,6 @@ export default function SetupPage() {
                           <>
                             <p className="text-body font-medium text-bot-red">Couldn&apos;t connect to Claude</p>
                             {testResult.error && <p className="text-caption text-bot-muted mt-0.5">{testResult.error}</p>}
-                            <p className="text-caption text-bot-muted mt-1">Check your API key in the previous step.</p>
                           </>
                         )}
                       </div>
