@@ -9,6 +9,9 @@ import {
   Trash2,
   Zap,
   ChevronsUpDown,
+  Pause,
+  Play,
+  Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ClaudePlan, ClaudePlanStep } from "@/lib/claude-db";
@@ -38,6 +41,10 @@ interface PlanStepListProps {
   onRollbackStop?: () => void;
   onRollbackContinue?: () => void;
   onDelete?: () => void;
+  onPause?: () => void;
+  onResumePaused?: () => void;
+  pausePending?: boolean;
+  onAddStep?: (afterStepOrder: number, summary: string, details: string) => void;
   executing: boolean;
   pausedStepId?: string | null;
   pausedCanRollback?: boolean;
@@ -52,6 +59,7 @@ const PLAN_STATUS_CONFIG: Record<
   drafting:  { label: "Drafting",  dot: "bg-bot-amber animate-pulse", bar: "bg-bot-amber/30" },
   reviewing: { label: "Reviewing", dot: "bg-blue-400",                bar: "bg-blue-400/30" },
   executing: { label: "Executing", dot: "bg-bot-accent animate-pulse", bar: "bg-bot-accent/40" },
+  paused:    { label: "Paused",    dot: "bg-bot-amber",               bar: "bg-bot-amber/30" },
   completed: { label: "Completed", dot: "bg-bot-green",               bar: "bg-bot-green/30" },
   failed:    { label: "Failed",    dot: "bg-bot-red",                 bar: "bg-bot-red/30" },
   cancelled: { label: "Cancelled", dot: "bg-bot-muted",               bar: "bg-bot-muted/20" },
@@ -65,7 +73,7 @@ function ProgressBar({ status, steps, plan }: { status: ClaudePlan["status"]; st
   const executing = steps.filter((s) => s.status === "executing").length;
   const pct = Math.round((done / total) * 100);
 
-  if (status !== "executing" && status !== "completed" && status !== "failed") return null;
+  if (status !== "executing" && status !== "paused" && status !== "completed" && status !== "failed") return null;
 
   return (
     <div className="mt-3">
@@ -117,6 +125,10 @@ export function PlanStepList({
   onRollbackStop,
   onRollbackContinue,
   onDelete,
+  onPause,
+  onResumePaused,
+  pausePending,
+  onAddStep,
   executing,
   pausedStepId,
   pausedCanRollback,
@@ -131,6 +143,14 @@ export function PlanStepList({
 
   const approvedCount = steps.filter((s) => s.status === "approved").length;
   const pendingCount  = steps.filter((s) => s.status === "pending").length;
+
+  const isPaused = plan.status === "paused";
+  const canAddSteps = (executing || isPaused || plan.status === "reviewing") && !!onAddStep;
+
+  // Add-step inline form state
+  const [addingAfterOrder, setAddingAfterOrder] = useState<number | null>(null);
+  const [addStepSummary, setAddStepSummary] = useState("");
+  const [addStepDetails, setAddStepDetails] = useState("");
 
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(() => {
     const initial = new Set<string>();
@@ -249,11 +269,40 @@ export function PlanStepList({
               </button>
             )}
 
-            {executing && (
+            {executing && !pausePending && (
               <div className="flex items-center gap-1.5 rounded-xl border border-bot-accent/20 bg-bot-accent/8 px-3 py-1.5">
                 <Loader2 className="h-3 w-3 animate-spin text-bot-accent" />
                 <span className="text-caption font-medium text-bot-accent">Running…</span>
               </div>
+            )}
+
+            {pausePending && (
+              <div className="flex items-center gap-1.5 rounded-xl border border-bot-amber/20 bg-bot-amber/8 px-3 py-1.5">
+                <Loader2 className="h-3 w-3 animate-spin text-bot-amber" />
+                <span className="text-caption font-medium text-bot-amber">Finishing current step…</span>
+              </div>
+            )}
+
+            {/* Pause button — during execution */}
+            {executing && !pausePending && onPause && (
+              <button
+                onClick={onPause}
+                className="flex items-center gap-1.5 rounded-xl border border-bot-amber/30 bg-bot-amber/10 px-3 py-1.5 text-caption font-semibold text-bot-amber hover:bg-bot-amber/20 hover:border-bot-amber/50 active:scale-[0.97] transition-all duration-150"
+              >
+                <Pause className="h-3.5 w-3.5" />
+                Pause
+              </button>
+            )}
+
+            {/* Resume button — when paused */}
+            {isPaused && onResumePaused && (
+              <button
+                onClick={onResumePaused}
+                className="flex items-center gap-1.5 rounded-xl gradient-accent px-4 py-1.5 text-caption font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.97] transition-all duration-200"
+              >
+                <Play className="h-3.5 w-3.5" />
+                Resume
+              </button>
             )}
 
             <div className="ml-auto flex items-center gap-1.5">
@@ -267,7 +316,7 @@ export function PlanStepList({
                   {allExpanded ? "Collapse All" : "Expand All"}
                 </button>
               )}
-              {(plan.status === "reviewing" || plan.status === "executing") && (
+              {(plan.status === "reviewing" || plan.status === "executing" || plan.status === "paused") && (
                 <button
                   onClick={onCancel}
                   className="flex items-center gap-1.5 rounded-xl border border-bot-border/50 px-3 py-1.5 text-caption text-bot-muted hover:border-bot-red/40 hover:text-bot-red transition-all duration-150"
@@ -341,6 +390,76 @@ export function PlanStepList({
                   toolActivity={stepToolActivity?.get(step.id)}
                   dependsOnLabels={dependsOnLabels}
                 />
+
+                {/* Inline add-step button/form — shown after non-terminal steps */}
+                {canAddSteps && !["executing"].includes(step.status) && (
+                  <>
+                    {addingAfterOrder === step.step_order ? (
+                      <div className="ml-12 mr-0 my-1.5 rounded-xl border border-bot-accent/30 bg-bot-surface/60 p-3 animate-fadeUp">
+                        <input
+                          value={addStepSummary}
+                          onChange={(e) => setAddStepSummary(e.target.value)}
+                          placeholder="Step summary"
+                          className="w-full rounded-lg border border-bot-border/50 bg-bot-elevated/60 px-3 py-1.5 text-caption text-bot-text placeholder:text-bot-muted/40 focus:border-bot-accent/50 focus:outline-none mb-2"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && addStepSummary.trim()) {
+                              onAddStep!(step.step_order, addStepSummary.trim(), addStepDetails.trim());
+                              setAddingAfterOrder(null);
+                              setAddStepSummary("");
+                              setAddStepDetails("");
+                            }
+                            if (e.key === "Escape") {
+                              setAddingAfterOrder(null);
+                              setAddStepSummary("");
+                              setAddStepDetails("");
+                            }
+                          }}
+                        />
+                        <textarea
+                          value={addStepDetails}
+                          onChange={(e) => setAddStepDetails(e.target.value)}
+                          rows={2}
+                          placeholder="Details (optional)"
+                          className="w-full resize-none rounded-lg border border-bot-border/50 bg-bot-elevated/60 px-3 py-1.5 text-caption text-bot-text placeholder:text-bot-muted/40 focus:border-bot-accent/50 focus:outline-none mb-2"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => {
+                              if (!addStepSummary.trim()) return;
+                              onAddStep!(step.step_order, addStepSummary.trim(), addStepDetails.trim());
+                              setAddingAfterOrder(null);
+                              setAddStepSummary("");
+                              setAddStepDetails("");
+                            }}
+                            disabled={!addStepSummary.trim()}
+                            className="rounded-lg gradient-accent px-3 py-1 text-caption font-semibold text-white disabled:opacity-40 transition-all"
+                          >
+                            Add Step
+                          </button>
+                          <button
+                            onClick={() => {
+                              setAddingAfterOrder(null);
+                              setAddStepSummary("");
+                              setAddStepDetails("");
+                            }}
+                            className="rounded-lg border border-bot-border/50 px-3 py-1 text-caption text-bot-muted hover:text-bot-text transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setAddingAfterOrder(step.step_order)}
+                        className="ml-12 my-0.5 flex items-center gap-1 rounded-lg px-2 py-0.5 text-[10px] text-bot-muted/40 hover:text-bot-accent/60 hover:bg-bot-accent/5 transition-all duration-150"
+                      >
+                        <Plus className="h-2.5 w-2.5" />
+                        Add step
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
             );
           })}

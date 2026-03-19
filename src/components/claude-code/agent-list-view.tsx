@@ -1,14 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Pencil, Trash2, Archive, History, Power, PowerOff, Bot, Zap, Brain } from "lucide-react";
+import { Plus, Pencil, Trash2, Archive, History, Power, PowerOff, Bot, Brain, Shield } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ClaudeAgent } from "@/lib/claude-db";
+import { AgentStatsRow, type AgentStats } from "./agent-stats-row";
 
 type StatusFilter = "all" | "active" | "disabled" | "archived";
 
 interface AgentListViewProps {
   agents: ClaudeAgent[];
+  agentStats?: Record<string, AgentStats>;
   onEdit: (agent: ClaudeAgent) => void;
   onDelete: (agentId: string) => void;
   onToggleStatus: (agent: ClaudeAgent) => void;
@@ -50,6 +52,7 @@ function ModelBadge({ model }: { model: string }) {
 
 export function AgentListView({
   agents,
+  agentStats = {},
   onEdit,
   onDelete,
   onToggleStatus,
@@ -146,6 +149,7 @@ export function AgentListView({
               <AgentCard
                 key={agent.id}
                 agent={agent}
+                stats={agentStats[agent.id]}
                 memoryCount={memoryCounts[agent.id]}
                 onEdit={onEdit}
                 onDelete={onDelete}
@@ -163,6 +167,7 @@ export function AgentListView({
 
 interface AgentCardProps {
   agent: ClaudeAgent;
+  stats?: AgentStats;
   memoryCount?: number;
   onEdit: (agent: ClaudeAgent) => void;
   onDelete: (agentId: string) => void;
@@ -171,21 +176,48 @@ interface AgentCardProps {
   onViewVersions: (agent: ClaudeAgent) => void;
 }
 
-function AgentCard({ agent, memoryCount, onEdit, onDelete, onToggleStatus, onArchive, onViewVersions }: AgentCardProps) {
+function AgentCard({ agent, stats, memoryCount, onEdit, onDelete, onToggleStatus, onArchive, onViewVersions }: AgentCardProps) {
   return (
     <div className="group relative flex flex-col rounded-2xl border border-bot-border/30 bg-bot-surface/60 backdrop-blur-sm p-5 transition-all duration-200 hover:border-bot-accent/30 hover:shadow-glow-sm hover:-translate-y-0.5">
       <div className="flex items-start justify-between mb-3">
         <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-bot-elevated/40 border border-bot-border/20 text-2xl">
           {agent.icon ?? "🤖"}
         </div>
-        <StatusBadge status={agent.status} />
+        <div className="flex items-center gap-1.5">
+          {!agent.skip_permissions && (
+            <span className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium bg-bot-amber/10 text-bot-amber border border-bot-amber/25" title="Sandboxed — restricted to allowed tools only">
+              <Shield className="h-2.5 w-2.5" />
+              Sandboxed
+            </span>
+          )}
+          <StatusBadge status={agent.status} />
+        </div>
       </div>
 
       <p className="text-body font-semibold text-bot-text mb-1">{agent.name}</p>
 
-      <p className="text-caption text-bot-muted/70 line-clamp-2 mb-3 flex-1">
+      <p className="text-caption text-bot-muted/70 line-clamp-2 mb-2 flex-1">
         {agent.description}
       </p>
+
+      {agent.trigger_phrases.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {agent.trigger_phrases.slice(0, 3).map((phrase) => (
+            <span key={phrase} className="rounded-full px-2 py-0.5 text-[9.5px] font-medium bg-bot-accent/8 border border-bot-accent/20 text-bot-accent/70">
+              {phrase}
+            </span>
+          ))}
+          {agent.trigger_phrases.length > 3 && (
+            <span className="rounded-full px-2 py-0.5 text-[9.5px] text-bot-muted/50 bg-bot-elevated/30 border border-bot-border/20">
+              +{agent.trigger_phrases.length - 3}
+            </span>
+          )}
+        </div>
+      )}
+
+      <div className="mb-3">
+        <AgentStatsRow stats={stats} />
+      </div>
 
       {memoryCount !== undefined && (
         <div className="flex items-center gap-1 mb-3">
@@ -198,15 +230,9 @@ function AgentCard({ agent, memoryCount, onEdit, onDelete, onToggleStatus, onArc
 
       <div className="flex items-center justify-between mt-auto">
         <ModelBadge model={agent.model} />
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1 text-[10px] text-bot-accent/60">
-            <Zap className="h-3 w-3" />
-            {agent.use_count}
-          </span>
-          <span className="text-[10px] text-bot-muted/50">
-            {new Date(agent.updated_at).toLocaleDateString()}
-          </span>
-        </div>
+        <span className="text-[10px] text-bot-muted/50">
+          {new Date(agent.updated_at).toLocaleDateString()}
+        </span>
       </div>
 
       <div className="absolute inset-x-0 bottom-0 flex items-center justify-end gap-1 rounded-b-2xl border-t border-bot-border/20 glass px-3 py-2 opacity-0 transition-all duration-200 group-hover:opacity-100">

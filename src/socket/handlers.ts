@@ -198,6 +198,7 @@ let metricsInterval: NodeJS.Timeout | undefined;
 let cleanupInterval: NodeJS.Timeout | undefined;
 
 const planResumeCallbacks = new Map<string, (action: PlanAction) => void>();
+const planQACallbacks = new Map<string, (answer: string | null) => void>();
 
 // Active PTY sessions
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -772,6 +773,7 @@ export function registerHandlers(io: Server) {
       userSessionCommands,
       metricsBuffer,
       planResumeCallbacks,
+      planQACallbacks,
       ptyProcesses,
       getSessionProvider,
       setSessionStatus,

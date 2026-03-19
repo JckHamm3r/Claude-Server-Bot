@@ -367,12 +367,14 @@ export function registerMessageHandlers(ctx: HandlerContext) {
               const parsed = JSON.parse(jsonMatch[0]) as { title?: string; content?: string };
               if (!parsed.title || !parsed.content) throw new Error("Missing title or content");
 
-              const memory = await dbGet<{ id: string; title: string; content: string; created_by: string; created_at: string; updated_at: string }>(
-                "INSERT INTO memories (title, content, created_by) VALUES (?, ?, ?) RETURNING id, title, content, created_by, created_at, updated_at",
-                [parsed.title.trim(), parsed.content.trim(), email]
-              );
-
-              emitLocal(`Saved to memory: **${memory?.title}**\n\n${memory?.content}`);
+              const { createSessionScopedMemory } = await import("../lib/claude-db");
+              const memory = await createSessionScopedMemory({
+                title: parsed.title.trim(),
+                content: parsed.content.trim(),
+                sourceSessionId: sessionId,
+                createdBy: email,
+              });
+              emitLocal(`Saved to memory: **${memory.title}**\n\n${memory.content}\n\n*Scoped to this session. Manage in Memory tab.*`);
             }
           } catch (err) {
             console.error("[/remember] Error:", err);

@@ -24,7 +24,10 @@ import {
   Tag,
   Users,
   Filter,
+  Search,
+  MessageSquare,
 } from "lucide-react";
+import { TriggerPhraseInput } from "./trigger-phrase-input";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -34,10 +37,12 @@ interface Memory {
   id: string;
   title: string;
   content: string;
+  tags: string[];
   created_by: string;
   created_at: string;
   updated_at: string;
   is_global: boolean;
+  source_session_id: string | null;
   assigned_agent_ids: string[];
 }
 
@@ -102,6 +107,14 @@ function MemoryItem({ memory, isAdmin, isExpanded, onToggle, onEdit, onDelete, a
         </span>
       );
     }
+    if (memory.source_session_id) {
+      return (
+        <span className="flex items-center gap-0.5 text-[10px] rounded-full px-1.5 py-0.5 bg-bot-accent/10 text-bot-accent border border-bot-accent/25">
+          <MessageSquare className="h-2.5 w-2.5" />
+          Session
+        </span>
+      );
+    }
     const ids = memory.assigned_agent_ids ?? [];
     if (ids.length === 0) {
       return (
@@ -155,6 +168,18 @@ function MemoryItem({ memory, isAdmin, isExpanded, onToggle, onEdit, onDelete, a
         <span className="flex-1 text-[13px] font-medium text-bot-text truncate leading-snug">
           {memory.title}
         </span>
+        {memory.tags?.length > 0 && (
+          <span className="hidden sm:flex items-center gap-1 shrink-0">
+            {memory.tags.slice(0, 3).map((tag) => (
+              <span key={tag} className="text-[9.5px] rounded px-1.5 py-0.5 bg-bot-elevated/40 border border-bot-border/20 text-bot-muted/60">
+                {tag}
+              </span>
+            ))}
+            {memory.tags.length > 3 && (
+              <span className="text-[9px] text-bot-muted/40">+{memory.tags.length - 3}</span>
+            )}
+          </span>
+        )}
         <span className="hidden sm:flex items-center gap-1 shrink-0">
           {scopeBadges()}
         </span>
@@ -217,7 +242,7 @@ function MemoryItem({ memory, isAdmin, isExpanded, onToggle, onEdit, onDelete, a
 
 interface MemoryEditModalProps {
   memory: Memory | null;
-  onSave: (title: string, content: string, isGlobal: boolean, agentIds: string[]) => void;
+  onSave: (title: string, content: string, isGlobal: boolean, agentIds: string[], tags: string[]) => void;
   onClose: () => void;
   saving: boolean;
   error: string | null;
@@ -229,6 +254,7 @@ function MemoryEditModal({ memory, onSave, onClose, saving, error, agents }: Mem
   const [content, setContent] = useState(memory?.content ?? "");
   const [isGlobal, setIsGlobal] = useState(memory?.is_global ?? true);
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>(memory?.assigned_agent_ids ?? []);
+  const [tags, setTags] = useState<string[]>(memory?.tags ?? []);
   const titleRef = useRef<HTMLInputElement>(null);
 
   // Refactor state
@@ -248,7 +274,7 @@ function MemoryEditModal({ memory, onSave, onClose, saving, error, agents }: Mem
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
-    onSave(title.trim(), content, isGlobal, isGlobal ? [] : selectedAgentIds);
+    onSave(title.trim(), content, isGlobal, isGlobal ? [] : selectedAgentIds, tags);
   };
 
   const handleRefactor = async () => {
@@ -324,6 +350,16 @@ function MemoryEditModal({ memory, onSave, onClose, saving, error, agents }: Mem
                 onChange={(e) => { setContent(e.target.value); setPreview(null); }}
                 placeholder="Memory content…"
                 className="min-h-[140px] w-full px-3 py-2.5 rounded-lg bg-bot-bg border border-bot-border/30 text-[12.5px] text-bot-text placeholder:text-bot-muted/40 focus:outline-none focus:border-bot-accent/50 focus:ring-1 focus:ring-bot-accent/20 transition-all resize-none font-mono leading-relaxed"
+              />
+            </div>
+
+            {/* Tags */}
+            <div className="px-5 pb-3">
+              <p className="text-[10.5px] uppercase tracking-wider text-bot-muted/50 font-semibold mb-2">Tags</p>
+              <TriggerPhraseInput
+                value={tags}
+                onChange={setTags}
+                placeholder="Add tags (press Enter)…"
               />
             </div>
 
@@ -630,8 +666,10 @@ export function MemoryTab() {
   const { data: session } = useSession();
   const isAdmin = Boolean((session?.user as { isAdmin?: boolean })?.isAdmin);
 
-  // Agent filter
+  // Filters
   const [agentFilter, setAgentFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [tagFilter, setTagFilter] = useState<string>("");
   const [agents, setAgents] = useState<AgentOption[]>([]);
 
   // Load agents via socket on mount
@@ -763,7 +801,7 @@ export function MemoryTab() {
 
   // ── Memory CRUD ───────────────────────────────────────────────────────────
 
-  const handleSaveMemory = useCallback(async (title: string, content: string, isGlobal: boolean, agentIds: string[]) => {
+  const handleSaveMemory = useCallback(async (title: string, content: string, isGlobal: boolean, agentIds: string[], memTags: string[]) => {
     setEditSaving(true);
     setEditError(null);
     try {
@@ -773,8 +811,8 @@ export function MemoryTab() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           isEdit
-            ? { id: editModal.memory!.id, title, content, is_global: isGlobal, agent_ids: agentIds }
-            : { title, content, is_global: isGlobal, agent_ids: agentIds }
+            ? { id: editModal.memory!.id, title, content, is_global: isGlobal, agent_ids: agentIds, tags: memTags }
+            : { title, content, is_global: isGlobal, agent_ids: agentIds, tags: memTags }
         ),
       });
       const data = await res.json() as { memory?: Memory; error?: string };
@@ -893,6 +931,17 @@ export function MemoryTab() {
               Memories are injected into sessions based on their scope (global or agent-specific).
             </p>
             <div className="flex items-center gap-1.5">
+              {/* Search input */}
+              <div className="relative flex items-center">
+                <Search className="absolute left-2 h-3 w-3 text-bot-muted/50 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Search…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-6 pr-3 py-1.5 rounded-lg text-[12px] bg-bot-bg border border-bot-border/25 text-bot-text placeholder:text-bot-muted/40 focus:outline-none focus:border-bot-accent/50 w-32 transition-all focus:w-48"
+                />
+              </div>
               {/* Filter dropdown */}
               <div className="relative flex items-center">
                 <Filter className="absolute left-2 h-3 w-3 text-bot-muted/50 pointer-events-none" />
@@ -911,6 +960,25 @@ export function MemoryTab() {
                   ))}
                 </select>
               </div>
+              {/* Tag filter — only show if any memories have tags */}
+              {(() => {
+                const allTags = [...new Set(memories.flatMap((m) => m.tags ?? []))];
+                return allTags.length > 0 ? (
+                  <div className="relative flex items-center">
+                    <Tag className="absolute left-2 h-3 w-3 text-bot-muted/50 pointer-events-none" />
+                    <select
+                      value={tagFilter}
+                      onChange={(e) => setTagFilter(e.target.value)}
+                      className="pl-6 pr-2 py-1.5 rounded-lg text-[12px] bg-bot-bg border border-bot-border/25 text-bot-muted hover:border-bot-border/40 focus:outline-none focus:border-bot-accent/50 transition-all appearance-none cursor-pointer"
+                    >
+                      <option value="">All tags</option>
+                      {allTags.map((tag) => (
+                        <option key={tag} value={tag}>{tag}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null;
+              })()}
               {isAdmin && (
                 <>
                   <button
@@ -981,10 +1049,18 @@ export function MemoryTab() {
                 )}
               </div>
             ) : (() => {
+              const sq = searchQuery.toLowerCase();
               const filteredMemories = memories.filter((m) => {
-                if (agentFilter === "all") return true;
-                if (agentFilter === "global") return m.is_global;
-                return m.is_global || (m.assigned_agent_ids ?? []).includes(agentFilter);
+                // Agent/scope filter
+                if (agentFilter !== "all") {
+                  if (agentFilter === "global" && !m.is_global) return false;
+                  if (agentFilter !== "global" && !m.is_global && !(m.assigned_agent_ids ?? []).includes(agentFilter)) return false;
+                }
+                // Tag filter
+                if (tagFilter && !(m.tags ?? []).includes(tagFilter)) return false;
+                // Search
+                if (sq && !m.title.toLowerCase().includes(sq) && !m.content.toLowerCase().includes(sq)) return false;
+                return true;
               });
               return filteredMemories.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-32 gap-2 text-center px-6">

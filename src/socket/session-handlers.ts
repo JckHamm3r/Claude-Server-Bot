@@ -26,6 +26,8 @@ import {
   listSessionParticipants,
   getUserGroupPermissions,
   getUserGroup,
+  getSessionMemories,
+  deleteSessionMemories,
 } from "../lib/claude-db";
 import { AVAILABLE_MODELS, DEFAULT_MODEL } from "../lib/models";
 import { isSDKAvailable } from "../lib/claude";
@@ -245,43 +247,72 @@ export function registerSessionHandlers(ctx: HandlerContext) {
     },
   );
 
+  /** Shared session cleanup logic used by both delete and confirm-delete flows. */
+  async function performSessionDelete(sessionId: string) {
+    // Notify participants and evict all sockets from the room
+    io.to(`session:${sessionId}`).emit("claude:session_deleted", { sessionId });
+    io.in(`session:${sessionId}`).socketsLeave(`session:${sessionId}`);
+    const sp = ctx.getSessionProvider(sessionId);
+    sp.offOutput(sessionId);
+    sp.closeSession(sessionId);
+    ctx.sessionStreamingContent.delete(sessionId);
+    ctx.sessionPendingUsage.delete(sessionId);
+    ctx.sessionCommandSubmitter.delete(sessionId);
+    ctx.sessionListeners.delete(sessionId);
+    ctx.sessionStartTimes.delete(sessionId);
+    ctx.sessionProviders.delete(sessionId);
+    ctx.sessionEventBuffers.delete(sessionId);
+    ctx.flushStreamingThrottle(sessionId);
+    clearAiPauseState(sessionId);
+
+    // Release all file locks held by this session
+    await releaseAllSessionLocks(sessionId).catch((err) => {
+      console.error("[file-lock] Error releasing session locks:", err);
+    });
+
+    // Cancel all queued operations for this session
+    cancelAllSessionQueuedOps(sessionId);
+
+    // Clean up upload files from disk
+    try {
+      const DATA_DIR = process.env.DATA_DIR ?? "./data";
+      const uploadDir = path.join(DATA_DIR, "uploads", sessionId);
+      if (fs.existsSync(uploadDir)) {
+        fs.rmSync(uploadDir, { recursive: true, force: true });
+      }
+    } catch { /* ignore cleanup errors */ }
+
+    await deleteSession(sessionId);
+  }
+
   socket.on("claude:delete_session", async ({ sessionId }: { sessionId: string }) => {
     try {
       if (!(await canModifySession(sessionId, email))) return;
-      // Notify participants and evict all sockets from the room
-      io.to(`session:${sessionId}`).emit("claude:session_deleted", { sessionId });
-      io.in(`session:${sessionId}`).socketsLeave(`session:${sessionId}`);
-      const sp = ctx.getSessionProvider(sessionId);
-      sp.offOutput(sessionId);
-      sp.closeSession(sessionId);
-      ctx.sessionStreamingContent.delete(sessionId);
-      ctx.sessionPendingUsage.delete(sessionId);
-      ctx.sessionCommandSubmitter.delete(sessionId);
-      ctx.sessionListeners.delete(sessionId);
-      ctx.sessionStartTimes.delete(sessionId);
-      ctx.sessionProviders.delete(sessionId);
-      ctx.sessionEventBuffers.delete(sessionId);
-      ctx.flushStreamingThrottle(sessionId);
-      clearAiPauseState(sessionId);
 
-      // Release all file locks held by this session
-      await releaseAllSessionLocks(sessionId).catch((err) => {
-        console.error("[file-lock] Error releasing session locks:", err);
-      });
+      // Check for session-scoped memories before deleting
+      const memories = await getSessionMemories(sessionId);
+      if (memories.length > 0) {
+        socket.emit("claude:session_delete_memory_impact", { sessionId, memories });
+        return;
+      }
 
-      // Cancel all queued operations for this session
-      cancelAllSessionQueuedOps(sessionId);
+      await performSessionDelete(sessionId);
+    } catch (err: unknown) {
+      console.error("[db] Failed to delete session:", err);
+    }
+    try {
+      const sessions = await listSessions(email);
+      socket.emit("claude:sessions", { sessions });
+    } catch {
+      socket.emit("claude:sessions", { sessions: [] });
+    }
+  });
 
-      // Clean up upload files from disk
-      try {
-        const DATA_DIR = process.env.DATA_DIR ?? "./data";
-        const uploadDir = path.join(DATA_DIR, "uploads", sessionId);
-        if (fs.existsSync(uploadDir)) {
-          fs.rmSync(uploadDir, { recursive: true, force: true });
-        }
-      } catch { /* ignore cleanup errors */ }
-
-      await deleteSession(sessionId);
+  socket.on("claude:confirm_session_delete", async ({ sessionId, deleteMemoryIds }: { sessionId: string; deleteMemoryIds: string[] }) => {
+    try {
+      if (!(await canModifySession(sessionId, email))) return;
+      await deleteSessionMemories(sessionId, deleteMemoryIds);
+      await performSessionDelete(sessionId);
     } catch (err: unknown) {
       console.error("[db] Failed to delete session:", err);
     }

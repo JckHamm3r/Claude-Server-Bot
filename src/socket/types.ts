@@ -3,6 +3,8 @@ import type { ClaudeCodeProvider, TokenUsage } from "../lib/claude/provider";
 import type { SessionStatus } from "../lib/claude-db";
 import type { SessionRoomManager } from "./session-room-manager";
 
+import type { PlanExecutionController } from "./plan-execution-controller";
+
 export type PlanAction = "retry" | "skip" | "cancel" | "rollback_stop" | "rollback_continue";
 
 export interface HandlerContext {
@@ -24,6 +26,9 @@ export interface HandlerContext {
   metricsBuffer: { session_count: number; command_count: number; agent_count: number; latencies: number[] };
   planResumeCallbacks: Map<string, (action: PlanAction) => void>;
   activePlanSessions?: Map<string, Set<string>>;
+  activePlanControllers?: Map<string, PlanExecutionController>;
+  /** Callbacks for Q&A phase — resolved when user answers or skips */
+  planQACallbacks: Map<string, (answer: string | null) => void>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ptyProcesses: Map<string, any>;
   // Helper functions

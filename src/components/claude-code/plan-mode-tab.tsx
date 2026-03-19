@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import type { ClaudePlan } from "@/lib/claude-db";
 import { PlanStepList } from "./plan-step-list";
 import type { ToolActivity } from "./plan-step-list";
+import { PlanQACard } from "./plan-qa-card";
 
 type PlanMap = Map<string, ClaudePlan>;
 
@@ -24,6 +25,7 @@ const PLAN_STATUS_DOT: Record<ClaudePlan["status"], string> = {
   drafting: "bg-bot-amber animate-pulse",
   reviewing: "bg-blue-400",
   executing: "bg-bot-accent animate-pulse",
+  paused: "bg-bot-amber",
   completed: "bg-bot-green",
   failed: "bg-bot-red",
   cancelled: "bg-bot-muted",
@@ -53,6 +55,15 @@ export function PlanModeTab() {
   const [stepToolActivity, setStepToolActivity] = useState<Map<string, ToolActivity[]>>(new Map());
   const [refineInput, setRefineInput] = useState("");
   const [showThinking, setShowThinking] = useState(false);
+  // Q&A state
+  const [qaState, setQaState] = useState<{
+    planId: string;
+    question: string;
+    options?: string[];
+    round: number;
+  } | null>(null);
+  // Manual pause state
+  const [pausePending, setPausePending] = useState(false);
 
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
   const progressRef = useRef<HTMLPreElement>(null);
@@ -130,6 +141,7 @@ export function PlanModeTab() {
     socket.on("claude:plan_generated", ({ plan }: { plan: ClaudePlan }) => {
       setGenerating(false);
       setGeneratingProgress("");
+      setQaState(null);
       upsertPlan(plan);
       setActivePlanId(plan.id);
     });
@@ -141,6 +153,7 @@ export function PlanModeTab() {
 
     socket.on("claude:plan_executing", ({ planId }: { planId: string }) => {
       setExecuting(true);
+      setPausePending(false);
       setPlans((prev) => {
         const p = prev.get(planId);
         if (!p) return prev;
@@ -153,6 +166,7 @@ export function PlanModeTab() {
     socket.on("claude:plan_completed", ({ plan }: { plan: ClaudePlan }) => {
       setExecuting(false);
       setPausedStepId(null);
+      setPausePending(false);
       upsertPlan(plan);
       hydrateToolActivity([plan]);
     });
@@ -165,6 +179,31 @@ export function PlanModeTab() {
         setPausedCanRollback(canRollback ?? false);
       },
     );
+
+    // Manual pause events
+    socket.on("claude:plan_pausing", () => {
+      setPausePending(true);
+    });
+
+    socket.on("claude:plan_paused_manual", ({ planId }: { planId: string }) => {
+      setExecuting(false);
+      setPausePending(false);
+      setPlans((prev) => {
+        const p = prev.get(planId);
+        if (!p) return prev;
+        const next = new Map(prev);
+        next.set(planId, { ...p, status: "paused" });
+        return next;
+      });
+    });
+
+    // Q&A events
+    socket.on("claude:plan_questions", ({ planId, question, options, round }: {
+      planId: string; question: string; options?: string[]; round: number;
+    }) => {
+      setGenerating(false);
+      setQaState({ planId, question, options, round });
+    });
 
     socket.on(
       "claude:step_executing",
@@ -337,17 +376,12 @@ export function PlanModeTab() {
       socket.off("claude:step_tool_activity");
       socket.off("claude:step_usage");
       socket.off("claude:plan_deleted");
+      socket.off("claude:plan_pausing");
+      socket.off("claude:plan_paused_manual");
+      socket.off("claude:plan_questions");
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    const socket = socketRef.current;
-    if (!socket) return;
-    const handler = ({ plan }: { plan: ClaudePlan }) => { upsertPlan(plan); };
-    socket.on("claude:plan_updated", handler);
-    return () => { socket.off("claude:plan_updated", handler); };
-  }, [activePlanId, upsertPlan]);
 
   useEffect(() => {
     if (progressRef.current) {
@@ -455,6 +489,40 @@ export function PlanModeTab() {
     if (!activePlanId) return;
     emit("claude:delete_plan", { planId: activePlanId });
   }, [activePlanId, emit]);
+
+  // ── Pause / Resume ──
+  const handlePause = useCallback(() => {
+    if (!activePlanId) return;
+    setPausePending(true);
+    emit("claude:pause_plan", { planId: activePlanId });
+  }, [activePlanId, emit]);
+
+  const handleResumePaused = useCallback(() => {
+    if (!activePlanId) return;
+    setExecuting(true);
+    emit("claude:resume_plan", { planId: activePlanId });
+  }, [activePlanId, emit]);
+
+  // ── Hot-add step ──
+  const handleAddStep = useCallback((afterStepOrder: number, summary: string, details: string) => {
+    if (!activePlanId) return;
+    emit("claude:add_plan_step", { planId: activePlanId, summary, details, afterStepOrder });
+  }, [activePlanId, emit]);
+
+  // ── Q&A ──
+  const handleAnswerQuestion = useCallback((answer: string) => {
+    if (!qaState) return;
+    setGenerating(true);
+    emit("claude:answer_questions", { planId: qaState.planId, answer });
+    setQaState(null);
+  }, [qaState, emit]);
+
+  const handleSkipQuestions = useCallback(() => {
+    if (!qaState) return;
+    setGenerating(true);
+    emit("claude:skip_questions", { planId: qaState.planId });
+    setQaState(null);
+  }, [qaState, emit]);
 
   const planList = Array.from(plans.values()).sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
@@ -622,8 +690,22 @@ export function PlanModeTab() {
                 )}
               </div>
 
+              {/* Q&A Card */}
+              {qaState && (
+                <div className="mt-4">
+                  <PlanQACard
+                    question={qaState.question}
+                    options={qaState.options}
+                    round={qaState.round}
+                    onAnswer={handleAnswerQuestion}
+                    onSkip={handleSkipQuestions}
+                    disabled={generating}
+                  />
+                </div>
+              )}
+
               {/* Example prompts */}
-              {!generating && (
+              {!generating && !qaState && (
                 <div className="mt-4 flex flex-wrap justify-center gap-2 animate-fadeUp" style={{ animationDelay: "0.1s" }}>
                   {[
                     "Add user authentication",
@@ -665,6 +747,10 @@ export function PlanModeTab() {
                 stepProgress={stepProgress}
                 stepToolActivity={stepToolActivity}
                 onDelete={handleDeletePlan}
+                onPause={handlePause}
+                onResumePaused={handleResumePaused}
+                pausePending={pausePending}
+                onAddStep={handleAddStep}
               />
 
               {/* Thinking block during refine */}

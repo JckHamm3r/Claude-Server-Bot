@@ -1,5 +1,5 @@
 import { getClaudeProvider } from "./claude";
-import { getActiveAgents, incrementAgentUseCount, getMemoriesForTarget } from "./claude-db";
+import { getActiveAgents, recordAgentInvocation, getMemoriesForTarget } from "./claude-db";
 import { registerSubAgent, updateSubAgentStatus } from "./sub-agent-registry";
 import { randomUUID } from "crypto";
 
@@ -46,8 +46,6 @@ export async function runSubAgent(opts: SubAgentOptions): Promise<SubAgentResult
     };
   }
 
-  await incrementAgentUseCount(agent.id);
-
   const provider = getClaudeProvider();
   const subAgentId = randomUUID();
   const subSessionId = `sub-agent-${subAgentId}`;
@@ -56,7 +54,7 @@ export async function runSubAgent(opts: SubAgentOptions): Promise<SubAgentResult
   registerSubAgent(opts.parentSessionId, subAgentId, agent.name, agent.icon ?? null, opts.task);
 
   const basePromptParts = [
-    `You are "${agent.name}": ${agent.description}`,
+    `You are "${agent.name}": ${agent.system_prompt ?? agent.description}`,
     ``,
     `Execute the task you are given completely and thoroughly. Return a clear, comprehensive result.`,
     `If you encounter any errors or cannot complete part of the task, explain exactly what went wrong.`,
@@ -79,7 +77,7 @@ export async function runSubAgent(opts: SubAgentOptions): Promise<SubAgentResult
   provider.createSession(subSessionId, {
     model: agent.model,
     systemPrompt,
-    skipPermissions: opts.skipPermissions,
+    skipPermissions: agent.skip_permissions,
     userEmail: opts.userEmail,
     maxTurns: SUB_AGENT_MAX_TURNS,
     delegationDepth: opts.delegationDepth + 1,
@@ -88,7 +86,7 @@ export async function runSubAgent(opts: SubAgentOptions): Promise<SubAgentResult
   });
 
   // Apply the agent's allowed tools (if not in skip-permissions mode)
-  if (!opts.skipPermissions && agent.allowed_tools.length > 0) {
+  if (!agent.skip_permissions && agent.allowed_tools.length > 0) {
     for (const toolName of agent.allowed_tools) {
       provider.allowTool(subSessionId, toolName, "session");
     }
@@ -117,9 +115,11 @@ export async function runSubAgent(opts: SubAgentOptions): Promise<SubAgentResult
 
         if (hasError && !finalText) {
           updateSubAgentStatus(opts.parentSessionId, subAgentId, "error", errorMsg);
+          void recordAgentInvocation(agent.id, false, costUsd);
           resolve({ success: false, result: "", costUsd, error: errorMsg });
         } else {
           updateSubAgentStatus(opts.parentSessionId, subAgentId, "complete");
+          void recordAgentInvocation(agent.id, true, costUsd);
           resolve({
             success: true,
             result: finalText,

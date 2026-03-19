@@ -156,8 +156,8 @@ export async function POST(request: NextRequest) {
     const results: MemoryRow[] = [];
     for (const m of parsedMemories) {
       const row = await get<MemoryRow>(
-        "INSERT INTO memories (title, content, created_by) VALUES (?, ?, ?) RETURNING id, title, content, created_by, created_at, updated_at",
-        [m.title, m.content, email]
+        "INSERT INTO memories (title, content, created_by, tags) VALUES (?, ?, ?, ?) RETURNING id, title, content, created_by, created_at, updated_at",
+        [m.title, m.content, email, '[]']
       );
       if (row) results.push(row);
     }

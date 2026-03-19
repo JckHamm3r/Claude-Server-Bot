@@ -385,15 +385,31 @@ export interface ClaudeAgent {
   id: string;
   name: string;
   description: string;
+  system_prompt: string | null;
   icon: string | null;
   model: string;
   allowed_tools: string[];
+  skip_permissions: boolean;
+  trigger_phrases: string[];
   status: "active" | "disabled" | "archived";
   current_version: number;
   use_count: number;
+  last_invoked_at: string | null;
+  total_invocations: number;
+  successful_invocations: number;
+  total_cost_usd: number;
   created_by: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface AgentStats {
+  agentId: string;
+  total_invocations: number;
+  successful_invocations: number;
+  success_rate: number;
+  total_cost_usd: number;
+  last_invoked_at: string | null;
 }
 
 export interface ClaudeAgentVersion {
@@ -411,12 +427,19 @@ function rowToAgent(row: Record<string, unknown>): ClaudeAgent {
     id: row.id as string,
     name: row.name as string,
     description: row.description as string,
+    system_prompt: (row.system_prompt as string | null) ?? null,
     icon: row.icon as string | null,
     model: row.model as string,
     allowed_tools: safeJsonParse(row.allowed_tools, [] as string[]),
+    skip_permissions: row.skip_permissions !== undefined ? Boolean(row.skip_permissions) : true,
+    trigger_phrases: safeJsonParse(row.trigger_phrases, [] as string[]),
     status: row.status as "active" | "disabled" | "archived",
     current_version: row.current_version as number,
     use_count: (row.use_count as number) ?? 0,
+    last_invoked_at: (row.last_invoked_at as string | null) ?? null,
+    total_invocations: (row.total_invocations as number) ?? 0,
+    successful_invocations: (row.successful_invocations as number) ?? 0,
+    total_cost_usd: (row.total_cost_usd as number) ?? 0,
     created_by: row.created_by as string,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
@@ -456,20 +479,31 @@ export async function getAgent(id: string): Promise<ClaudeAgent | null> {
 }
 
 export async function createAgent(
-  data: { name: string; description: string; icon?: string; model: string; allowed_tools: string[] },
+  data: {
+    name: string; description: string; system_prompt?: string; icon?: string;
+    model: string; allowed_tools: string[]; skip_permissions?: boolean; trigger_phrases?: string[];
+  },
   createdBy: string,
 ): Promise<ClaudeAgent> {
   const id = randomUUID();
   const versionId = randomUUID();
+  const skipPerms = data.skip_permissions !== false ? 1 : 0;
+  const triggerPhrases = JSON.stringify(data.trigger_phrases ?? []);
   await dbTransaction(async ({ run }) => {
     await run(`
-      INSERT INTO agents (id, name, description, icon, model, allowed_tools, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `, [id, data.name, data.description, data.icon ?? null, data.model, JSON.stringify(data.allowed_tools), createdBy]);
+      INSERT INTO agents (id, name, description, system_prompt, icon, model, allowed_tools, skip_permissions, trigger_phrases, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [id, data.name, data.description, data.system_prompt ?? null, data.icon ?? null, data.model, JSON.stringify(data.allowed_tools), skipPerms, triggerPhrases, createdBy]);
+    const snapshot = {
+      name: data.name, description: data.description, system_prompt: data.system_prompt ?? null,
+      icon: data.icon ?? null, model: data.model, allowed_tools: data.allowed_tools,
+      skip_permissions: skipPerms === 1, trigger_phrases: data.trigger_phrases ?? [],
+      status: 'active', current_version: 1,
+    };
     await run(`
       INSERT INTO agent_versions (id, agent_id, version_number, config_snapshot, change_description, created_by)
       VALUES (?, ?, 1, ?, 'Initial version', ?)
-    `, [versionId, id, JSON.stringify({ name: data.name, description: data.description, icon: data.icon ?? null, model: data.model, allowed_tools: data.allowed_tools, status: 'active', current_version: 1 }), createdBy]);
+    `, [versionId, id, JSON.stringify(snapshot), createdBy]);
   });
   const row = await dbGet<Record<string, unknown>>("SELECT * FROM agents WHERE id = ?", [id]);
   return rowToAgent(row!);
@@ -477,7 +511,11 @@ export async function createAgent(
 
 export async function updateAgent(
   id: string,
-  data: Partial<{ name: string; description: string; icon: string; model: string; allowed_tools: string[]; status: string }>,
+  data: Partial<{
+    name: string; description: string; system_prompt: string | null; icon: string;
+    model: string; allowed_tools: string[]; skip_permissions: boolean;
+    trigger_phrases: string[]; status: string;
+  }>,
   updatedBy: string,
   changeDescription?: string,
 ): Promise<ClaudeAgent> {
@@ -485,9 +523,12 @@ export async function updateAgent(
   const values: unknown[] = [];
   if (data.name !== undefined) { fields.push("name = ?"); values.push(data.name); }
   if (data.description !== undefined) { fields.push("description = ?"); values.push(data.description); }
+  if (data.system_prompt !== undefined) { fields.push("system_prompt = ?"); values.push(data.system_prompt); }
   if (data.icon !== undefined) { fields.push("icon = ?"); values.push(data.icon); }
   if (data.model !== undefined) { fields.push("model = ?"); values.push(data.model); }
   if (data.allowed_tools !== undefined) { fields.push("allowed_tools = ?"); values.push(JSON.stringify(data.allowed_tools)); }
+  if (data.skip_permissions !== undefined) { fields.push("skip_permissions = ?"); values.push(data.skip_permissions ? 1 : 0); }
+  if (data.trigger_phrases !== undefined) { fields.push("trigger_phrases = ?"); values.push(JSON.stringify(data.trigger_phrases)); }
   if (data.status !== undefined) { fields.push("status = ?"); values.push(data.status); }
   fields.push("updated_at = datetime('now')");
   fields.push("current_version = current_version + 1");
@@ -501,7 +542,12 @@ export async function updateAgent(
     await run(`
       INSERT INTO agent_versions (id, agent_id, version_number, config_snapshot, change_description, created_by)
       VALUES (?, ?, ?, ?, ?, ?)
-    `, [versionId, id, updated.current_version, JSON.stringify({ name: updated.name, description: updated.description, icon: updated.icon, model: updated.model, allowed_tools: updated.allowed_tools, status: updated.status, current_version: updated.current_version }), changeDescription ?? null, updatedBy]);
+    `, [versionId, id, updated.current_version, JSON.stringify({
+      name: updated.name, description: updated.description, system_prompt: updated.system_prompt,
+      icon: updated.icon, model: updated.model, allowed_tools: updated.allowed_tools,
+      skip_permissions: updated.skip_permissions, trigger_phrases: updated.trigger_phrases,
+      status: updated.status, current_version: updated.current_version,
+    }), changeDescription ?? null, updatedBy]);
     return updated;
   });
   return agent;
@@ -513,6 +559,82 @@ export async function deleteAgent(id: string): Promise<void> {
 
 export async function incrementAgentUseCount(id: string): Promise<void> {
   await dbRun("UPDATE agents SET use_count = use_count + 1 WHERE id = ?", [id]);
+}
+
+export async function recordAgentInvocation(id: string, success: boolean, costUsd: number): Promise<void> {
+  await dbRun(`
+    UPDATE agents SET
+      use_count = use_count + 1,
+      total_invocations = total_invocations + 1,
+      successful_invocations = successful_invocations + ?,
+      total_cost_usd = total_cost_usd + ?,
+      last_invoked_at = datetime('now')
+    WHERE id = ?
+  `, [success ? 1 : 0, costUsd, id]);
+}
+
+export async function getAgentStats(agentId: string): Promise<AgentStats | null> {
+  const row = await dbGet<Record<string, unknown>>(
+    "SELECT id, total_invocations, successful_invocations, total_cost_usd, last_invoked_at FROM agents WHERE id = ?",
+    [agentId]
+  );
+  if (!row) return null;
+  const total = (row.total_invocations as number) ?? 0;
+  const successful = (row.successful_invocations as number) ?? 0;
+  return {
+    agentId,
+    total_invocations: total,
+    successful_invocations: successful,
+    success_rate: total > 0 ? successful / total : 0,
+    total_cost_usd: (row.total_cost_usd as number) ?? 0,
+    last_invoked_at: (row.last_invoked_at as string | null) ?? null,
+  };
+}
+
+export interface AgentDeleteImpact {
+  agentId: string;
+  orphanedMemories: Memory[];
+  sharedMemoryCount: number;
+}
+
+export async function checkAgentDeleteImpact(agentId: string): Promise<AgentDeleteImpact> {
+  const orphanedRows = await dbAll<MemoryRow>(`
+    SELECT m.id, m.title, m.content, m.is_global, m.tags, m.source_session_id,
+           m.created_by, m.created_at, m.updated_at
+    FROM memories m
+    JOIN memory_agent_assignments maa ON maa.memory_id = m.id
+    WHERE maa.agent_id = ?
+      AND m.is_global = 0
+      AND (SELECT COUNT(*) FROM memory_agent_assignments WHERE memory_id = m.id AND agent_id != ?) = 0
+  `, [agentId, agentId]);
+
+  const sharedRow = await dbGet<{ count: number }>(`
+    SELECT COUNT(*) as count
+    FROM memory_agent_assignments maa
+    JOIN memories m ON m.id = maa.memory_id
+    WHERE maa.agent_id = ?
+      AND m.is_global = 0
+      AND (SELECT COUNT(*) FROM memory_agent_assignments WHERE memory_id = m.id AND agent_id != ?) > 0
+  `, [agentId, agentId]);
+
+  const orphaned = await Promise.all(orphanedRows.map(hydrateMemo));
+  return { agentId, orphanedMemories: orphaned, sharedMemoryCount: sharedRow?.count ?? 0 };
+}
+
+export async function deleteAgentWithMemoryHandling(agentId: string, deleteOrphanedMemoryIds: string[]): Promise<void> {
+  await dbTransaction(async ({ run }) => {
+    // Delete only memories that are actually assigned to this agent (validate against injection)
+    for (const memId of deleteOrphanedMemoryIds) {
+      await run(
+        "DELETE FROM memories WHERE id = ? AND id IN (SELECT memory_id FROM memory_agent_assignments WHERE agent_id = ?)",
+        [memId, agentId]
+      );
+    }
+    // Remove all assignment rows for this agent (shared memories just lose this assignment)
+    await run("DELETE FROM memory_agent_assignments WHERE agent_id = ?", [agentId]);
+    // Delete the agent (cascades to agent_versions)
+    await run("DELETE FROM agents WHERE id = ?", [agentId]);
+  });
 }
 
 export async function getAgentVersions(agentId: string): Promise<ClaudeAgentVersion[]> {
@@ -529,7 +651,7 @@ export interface ClaudePlan {
   id: string;
   session_id: string;
   goal: string;
-  status: "drafting" | "reviewing" | "executing" | "completed" | "failed" | "cancelled";
+  status: "drafting" | "reviewing" | "executing" | "paused" | "completed" | "failed" | "cancelled";
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -1237,7 +1359,9 @@ export interface Memory {
   id: string;
   title: string;
   content: string;
+  tags: string[];
   is_global: boolean;
+  source_session_id: string | null;
   assigned_agent_ids: string[];
   created_by: string;
   created_at: string;
@@ -1246,7 +1370,10 @@ export interface Memory {
 
 export const MAIN_SESSION_TARGET = "__main_session__";
 
-type MemoryRow = Omit<Memory, "is_global" | "assigned_agent_ids"> & { is_global: number };
+type MemoryRow = Omit<Memory, "is_global" | "assigned_agent_ids" | "tags"> & {
+  is_global: number;
+  tags: string | null;
+};
 
 async function hydrateMemo(row: MemoryRow): Promise<Memory> {
   const assignments = await dbAll<{ agent_id: string }>(
@@ -1254,19 +1381,25 @@ async function hydrateMemo(row: MemoryRow): Promise<Memory> {
     [row.id]
   );
   const ids = assignments.map((r) => r.agent_id);
-  return { ...row, is_global: row.is_global === 1, assigned_agent_ids: ids };
+  return {
+    ...row,
+    is_global: row.is_global === 1,
+    tags: safeJsonParse(row.tags, [] as string[]),
+    source_session_id: (row as Record<string, unknown>).source_session_id as string | null ?? null,
+    assigned_agent_ids: ids,
+  };
 }
 
 export async function getMemories(): Promise<Memory[]> {
   const rows = await dbAll<MemoryRow>(
-    "SELECT id, title, content, is_global, created_by, created_at, updated_at FROM memories ORDER BY created_at ASC"
+    "SELECT id, title, content, tags, is_global, source_session_id, created_by, created_at, updated_at FROM memories ORDER BY created_at ASC"
   );
   return Promise.all(rows.map(hydrateMemo));
 }
 
 export async function getMemoriesForTarget(targetId: string): Promise<Memory[]> {
   const rows = await dbAll<MemoryRow>(`
-    SELECT id, title, content, is_global, created_by, created_at, updated_at
+    SELECT id, title, content, tags, is_global, source_session_id, created_by, created_at, updated_at
     FROM memories
     WHERE is_global = 1
        OR id IN (SELECT memory_id FROM memory_agent_assignments WHERE agent_id = ?)
@@ -1297,13 +1430,46 @@ export async function getMemoryAssignments(memoryId: string): Promise<string[]> 
 
 export async function getAgentMemories(agentId: string): Promise<Memory[]> {
   const rows = await dbAll<MemoryRow>(`
-    SELECT m.id, m.title, m.content, m.is_global, m.created_by, m.created_at, m.updated_at
+    SELECT m.id, m.title, m.content, m.tags, m.is_global, m.source_session_id,
+           m.created_by, m.created_at, m.updated_at
     FROM memories m
     JOIN memory_agent_assignments maa ON maa.memory_id = m.id
     WHERE maa.agent_id = ? AND m.is_global = 0
     ORDER BY m.created_at ASC
   `, [agentId]);
   return Promise.all(rows.map(hydrateMemo));
+}
+
+export async function createSessionScopedMemory(data: {
+  title: string; content: string; sourceSessionId: string; createdBy: string; tags?: string[];
+}): Promise<Memory> {
+  const row = await dbGet<MemoryRow>(
+    `INSERT INTO memories (title, content, created_by, is_global, source_session_id, tags)
+     VALUES (?, ?, ?, 0, ?, ?)
+     RETURNING id, title, content, is_global, source_session_id, tags, created_by, created_at, updated_at`,
+    [data.title, data.content, data.createdBy, data.sourceSessionId, JSON.stringify(data.tags ?? [])]
+  );
+  await dbRun(
+    "INSERT OR IGNORE INTO memory_agent_assignments (memory_id, agent_id) VALUES (?, ?)",
+    [row!.id, MAIN_SESSION_TARGET]
+  );
+  return hydrateMemo(row!);
+}
+
+export async function getSessionMemories(sessionId: string): Promise<Memory[]> {
+  const rows = await dbAll<MemoryRow>(
+    `SELECT id, title, content, tags, is_global, source_session_id,
+            created_by, created_at, updated_at
+     FROM memories WHERE source_session_id = ? ORDER BY created_at ASC`,
+    [sessionId]
+  );
+  return Promise.all(rows.map(hydrateMemo));
+}
+
+export async function deleteSessionMemories(sessionId: string, memoryIdsToDelete: string[]): Promise<void> {
+  for (const memId of memoryIdsToDelete) {
+    await dbRun("DELETE FROM memories WHERE id = ? AND source_session_id = ?", [memId, sessionId]);
+  }
 }
 
 // ==================== FILE LOCKS ====================

@@ -15,7 +15,13 @@ export async function buildAgentToolBlock(): Promise<string> {
   const baseUrl = getSubAgentBaseUrl();
 
   const agentList = agents
-    .map((a) => `- **${a.name}** ${a.icon ? `(${a.icon})` : ""}: ${a.description}`.trim())
+    .map((a) => {
+      const phrases = a.trigger_phrases.length > 0
+        ? `\n  Trigger phrases: ${a.trigger_phrases.map(p => `"${p}"`).join(", ")}`
+        : "";
+      const permNote = !a.skip_permissions ? " [sandboxed]" : "";
+      return `- **${a.name}**${a.icon ? ` (${a.icon})` : ""}${permNote}: ${a.description}${phrases}`.trim();
+    })
     .join("\n");
 
   return `
@@ -40,14 +46,14 @@ Body (JSON):
   "context": "<optional: any background context the agent needs>",
   "parentSessionId": "<your current session ID>",
   "userEmail": "<the user's email address>",
-  "skipPermissions": true,
+  "skipPermissions": "<use the agent's configured permission mode>",
   "depth": 0
 }
 
 The response will be JSON: { "success": true/false, "result": "...", "error": "..." }
 
 WebFetch example call:
-WebFetch(url="${baseUrl}", method="POST", headers={"Content-Type": "application/json", "X-Internal-Secret": "${secret}"}, body=JSON.stringify({agentName: "AgentName", task: "task description", parentSessionId: "sessionId", userEmail: "email", skipPermissions: true, depth: 0}))
+WebFetch(url="${baseUrl}", method="POST", headers={"Content-Type": "application/json", "X-Internal-Secret": "${secret}"}, body=JSON.stringify({agentName: "AgentName", task: "task description", parentSessionId: "sessionId", userEmail: "email", depth: 0}))
 
 ## How to list agents dynamically
 

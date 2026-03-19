@@ -5,6 +5,7 @@ export type ActivityEventType =
   | "user_logout"
   | "command_executed"
   | "agent_created"
+  | "agent_deleted"
   | "agent_executed"
   | "plan_created"
   | "plan_executed"

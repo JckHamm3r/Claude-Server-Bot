@@ -132,8 +132,8 @@ export async function POST(request: NextRequest) {
   }
 
   const memory = await dbGet<MemoryRow>(
-    "INSERT INTO memories (title, content, created_by) VALUES (?, ?, ?) RETURNING id, title, content, created_by, created_at, updated_at",
-    [parsed.title, parsed.content, session.user.email]
+    "INSERT INTO memories (title, content, created_by, tags) VALUES (?, ?, ?, ?) RETURNING id, title, content, created_by, created_at, updated_at",
+    [parsed.title, parsed.content, session.user.email, '[]']
   );
 
   return NextResponse.json({ memory }, { status: 201 });

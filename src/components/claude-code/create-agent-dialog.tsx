@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X, Loader2, Sparkles, SlidersHorizontal, Brain, ChevronDown, ChevronRight } from "lucide-react";
+import { X, Sparkles, SlidersHorizontal, Brain, ChevronDown, ChevronRight, Shield, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getSocket } from "@/lib/socket";
 import type { ClaudeAgent } from "@/lib/claude-db";
 import { motion } from "framer-motion";
 
 import { ModelSelector } from "@/components/claude-code/model-selector";
+import { TriggerPhraseInput } from "./trigger-phrase-input";
+import { AgentBuilderChat } from "./agent-builder-chat";
 
 const AVAILABLE_TOOLS = ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "WebSearch", "Agent"];
 
@@ -17,8 +19,11 @@ interface AgentFormData {
   icon: string;
   name: string;
   description: string;
+  system_prompt: string;
   model: string;
   allowed_tools: string[];
+  skip_permissions: boolean;
+  trigger_phrases: string[];
 }
 
 interface Memory {
@@ -49,14 +54,15 @@ export function CreateAgentDialog({
   globalMemoryCount = 0,
 }: CreateAgentDialogProps) {
   const [activeTab, setActiveTab] = useState<Tab>(isEditing ? "manual" : "generate");
-  const [generatePrompt, setGeneratePrompt] = useState("");
-  const [isGenerating, setIsGenerating] = useState(false);
   const [form, setForm] = useState<AgentFormData>({
     icon: initialData?.icon ?? "",
     name: initialData?.name ?? "",
     description: initialData?.description ?? "",
+    system_prompt: initialData?.system_prompt ?? "",
     model: initialData?.model ?? "claude-sonnet-4-6",
     allowed_tools: initialData?.allowed_tools ?? [],
+    skip_permissions: initialData?.skip_permissions ?? true,
+    trigger_phrases: initialData?.trigger_phrases ?? [],
   });
   const [agentMemories, setAgentMemories] = useState<Memory[]>([]);
   const [memoriesOpen, setMemoriesOpen] = useState(false);
@@ -66,33 +72,12 @@ export function CreateAgentDialog({
     socketRef.current = getSocket();
     const socket = socketRef.current;
 
-    const handleGenerated = ({ config }: { config: Partial<AgentFormData> }) => {
-      setIsGenerating(false);
-      if (config) {
-        setForm((prev) => ({
-          icon: config.icon ?? prev.icon,
-          name: config.name ?? prev.name,
-          description: config.description ?? prev.description,
-          model: config.model ?? prev.model,
-          allowed_tools: config.allowed_tools ?? prev.allowed_tools,
-        }));
-        setActiveTab("manual");
-      }
-    };
-
-    const handleError = ({ message }: { message: string }) => {
-      setIsGenerating(false);
-      console.error("[create-agent] generation error:", message);
-    };
-
     const handleAgentMemories = ({ agentId, memories }: { agentId: string; memories: Memory[] }) => {
       if (initialData?.id && agentId === initialData.id) {
         setAgentMemories(memories.filter((m) => !m.is_global));
       }
     };
 
-    socket.on("claude:agent_generated", handleGenerated);
-    socket.on("claude:error", handleError);
     socket.on("claude:agent_memories", handleAgentMemories);
 
     if (isEditing && initialData?.id) {
@@ -100,17 +85,9 @@ export function CreateAgentDialog({
     }
 
     return () => {
-      socket.off("claude:agent_generated", handleGenerated);
-      socket.off("claude:error", handleError);
       socket.off("claude:agent_memories", handleAgentMemories);
     };
   }, [isEditing, initialData?.id]);
-
-  function handleGenerate() {
-    if (!generatePrompt.trim() || isGenerating) return;
-    setIsGenerating(true);
-    socketRef.current?.emit("claude:generate_agent", { description: generatePrompt.trim() });
-  }
 
   function handleToolToggle(tool: string) {
     setForm((prev) => ({
@@ -136,7 +113,7 @@ export function CreateAgentDialog({
         initial={{ opacity: 0, scale: 0.95, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ duration: 0.2, ease: "easeOut" }}
-        className="relative w-full max-w-lg glass-heavy rounded-2xl shadow-float"
+        className="relative w-full max-w-2xl glass-heavy rounded-2xl shadow-float"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-bot-border/30 px-6 py-4">
@@ -168,45 +145,25 @@ export function CreateAgentDialog({
           </div>
         )}
 
-        <div className="px-6 py-5">
+        <div className="px-6 py-5 max-h-[75vh] overflow-y-auto">
           {activeTab === "generate" && !isEditing && (
-            <div className="flex flex-col gap-4">
-              <p className="text-caption text-bot-muted">
-                Describe what you want the agent to do and Claude will generate a configuration.
-              </p>
-              <textarea
-                value={generatePrompt}
-                onChange={(e) => setGeneratePrompt(e.target.value)}
-                placeholder="e.g. An agent that analyzes TypeScript code for potential bugs and suggests improvements..."
-                rows={5}
-                className="w-full resize-none rounded-xl border border-bot-border/40 bg-bot-elevated/40 px-4 py-3 text-body text-bot-text placeholder:text-bot-muted/50 outline-none focus:border-bot-accent/50 focus:shadow-glow-sm transition-all duration-200"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleGenerate();
-                }}
-              />
-              <button
-                onClick={handleGenerate}
-                disabled={!generatePrompt.trim() || isGenerating}
-                className="flex items-center justify-center gap-2 rounded-xl gradient-accent px-4 py-3 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
-              >
-                {isGenerating ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Generating...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="h-4 w-4" />
-                    Generate Agent
-                  </>
-                )}
-              </button>
-              {isGenerating && (
-                <p className="text-caption text-bot-muted text-center">
-                  Claude is crafting your agent configuration...
-                </p>
-              )}
-            </div>
+            <AgentBuilderChat
+              onApply={(config) => {
+                setForm((prev) => ({
+                  ...prev,
+                  icon: config.icon ?? prev.icon,
+                  name: config.name ?? prev.name,
+                  description: config.description ?? prev.description,
+                  system_prompt: config.system_prompt ?? prev.system_prompt,
+                  model: config.model ?? prev.model,
+                  allowed_tools: config.allowed_tools ?? prev.allowed_tools,
+                  skip_permissions: config.skip_permissions ?? prev.skip_permissions,
+                  trigger_phrases: config.trigger_phrases ?? prev.trigger_phrases,
+                }));
+                setActiveTab("manual");
+              }}
+              onClose={onClose}
+            />
           )}
 
           {(activeTab === "manual" || isEditing) && (
@@ -242,14 +199,29 @@ export function CreateAgentDialog({
               <div className="flex flex-col gap-1.5">
                 <label className="text-caption font-medium text-bot-muted">
                   Description <span className="text-bot-red">*</span>
+                  <span className="ml-1 text-[10px] text-bot-muted/50 font-normal">(1-2 sentences for the agent list)</span>
                 </label>
                 <textarea
                   value={form.description}
                   onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
                   placeholder="Describe what this agent does..."
                   required
-                  rows={3}
+                  rows={2}
                   className="w-full resize-none rounded-xl border border-bot-border/40 bg-bot-elevated/40 px-4 py-3 text-body text-bot-text placeholder:text-bot-muted/50 outline-none focus:border-bot-accent/50 focus:shadow-glow-sm transition-all duration-200"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-caption font-medium text-bot-muted">
+                  System Prompt
+                  <span className="ml-1 text-[10px] text-bot-muted/50 font-normal">(detailed behavioral instructions)</span>
+                </label>
+                <textarea
+                  value={form.system_prompt}
+                  onChange={(e) => setForm((p) => ({ ...p, system_prompt: e.target.value }))}
+                  placeholder="Full instructions for the agent: personality, constraints, domain knowledge, step-by-step workflows..."
+                  rows={5}
+                  className="w-full resize-none rounded-xl border border-bot-border/40 bg-bot-elevated/40 px-4 py-3 text-body text-bot-text placeholder:text-bot-muted/50 outline-none focus:border-bot-accent/50 focus:shadow-glow-sm transition-all duration-200 font-mono text-[12px]"
                 />
               </div>
 
@@ -285,6 +257,44 @@ export function CreateAgentDialog({
                     );
                   })}
                 </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-caption font-medium text-bot-muted">Permission Mode</label>
+                <button
+                  type="button"
+                  onClick={() => setForm((p) => ({ ...p, skip_permissions: !p.skip_permissions }))}
+                  className={cn(
+                    "flex items-center gap-2 w-full px-4 py-2.5 rounded-xl border text-body font-medium transition-all duration-200",
+                    form.skip_permissions
+                      ? "bg-bot-elevated/40 border-bot-border/40 text-bot-muted hover:border-bot-border/60"
+                      : "gradient-accent text-white border-transparent shadow-glow-sm",
+                  )}
+                >
+                  {form.skip_permissions ? (
+                    <Shield className="h-4 w-4 shrink-0" />
+                  ) : (
+                    <ShieldCheck className="h-4 w-4 shrink-0" />
+                  )}
+                  {form.skip_permissions ? "Full Tool Access (Sandbox Off)" : "Restricted Mode (Sandbox On)"}
+                </button>
+                <p className="text-[10.5px] text-bot-muted/50">
+                  {form.skip_permissions
+                    ? "Agent can use any tool. Allowed Tools list is advisory."
+                    : "Agent is restricted to the Allowed Tools above."}
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-caption font-medium text-bot-muted">
+                  Trigger Phrases
+                  <span className="ml-1 text-[10px] text-bot-muted/50 font-normal">(helps route tasks to this agent)</span>
+                </label>
+                <TriggerPhraseInput
+                  value={form.trigger_phrases}
+                  onChange={(phrases) => setForm((p) => ({ ...p, trigger_phrases: phrases }))}
+                  placeholder="e.g. &quot;review this code&quot;, &quot;analyze performance&quot;…"
+                />
               </div>
 
               {isEditing && (

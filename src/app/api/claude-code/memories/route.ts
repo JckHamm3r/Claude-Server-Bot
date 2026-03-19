@@ -34,24 +34,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: { title: string; content: string; is_global?: boolean; agent_ids?: string[] };
+  let body: { title: string; content: string; is_global?: boolean; agent_ids?: string[]; tags?: string[] };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { title, content, is_global = true, agent_ids = [] } = body;
+  const { title, content, is_global = true, agent_ids = [], tags } = body;
   if (!title?.trim() || typeof content !== "string") {
     return NextResponse.json({ error: "Missing title or content" }, { status: 400 });
   }
 
   const row = await dbGet<{
-    id: string; title: string; content: string; is_global: number;
-    created_by: string; created_at: string; updated_at: string;
+    id: string; title: string; content: string; is_global: number; tags: string | null;
+    source_session_id: string | null; created_by: string; created_at: string; updated_at: string;
   }>(
-    "INSERT INTO memories (title, content, created_by, is_global) VALUES (?, ?, ?, ?) RETURNING id, title, content, is_global, created_by, created_at, updated_at",
-    [title.trim(), content, session.user.email, is_global ? 1 : 0]
+    "INSERT INTO memories (title, content, created_by, is_global, tags) VALUES (?, ?, ?, ?, ?) RETURNING id, title, content, is_global, tags, source_session_id, created_by, created_at, updated_at",
+    [title.trim(), content, session.user.email, is_global ? 1 : 0, JSON.stringify(tags ?? [])]
   );
 
   if (!row) {
@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
   await setMemoryAssignments(row.id, is_global, agent_ids);
 
   const assigned_agent_ids = await getMemoryAssignments(row.id);
-  const memory = { ...row, is_global: row.is_global === 1, assigned_agent_ids };
+  const memory = { ...row, is_global: row.is_global === 1, tags: JSON.parse(row.tags ?? '[]'), assigned_agent_ids };
 
   return NextResponse.json({ memory }, { status: 201 });
 }
@@ -76,14 +76,14 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: { id: string; title?: string; content?: string; is_global?: boolean; agent_ids?: string[] };
+  let body: { id: string; title?: string; content?: string; is_global?: boolean; agent_ids?: string[]; tags?: string[] };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { id, title, content, is_global, agent_ids } = body;
+  const { id, title, content, is_global, agent_ids, tags } = body;
   if (!id) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
   }
@@ -104,6 +104,10 @@ export async function PUT(request: NextRequest) {
     await dbRun("UPDATE memories SET content = ?, updated_at = datetime('now') WHERE id = ?", [content, id]);
   }
 
+  if (tags !== undefined) {
+    await dbRun("UPDATE memories SET tags = ?, updated_at = datetime('now') WHERE id = ?", [JSON.stringify(tags), id]);
+  }
+
   // Update assignment scope if provided
   if (is_global !== undefined || agent_ids !== undefined) {
     const currentRow = await dbGet<{ is_global: number }>("SELECT is_global FROM memories WHERE id = ?", [id]);
@@ -113,15 +117,15 @@ export async function PUT(request: NextRequest) {
   }
 
   const updated = await dbGet<{
-    id: string; title: string; content: string; is_global: number;
-    created_by: string; created_at: string; updated_at: string;
+    id: string; title: string; content: string; is_global: number; tags: string | null;
+    source_session_id: string | null; created_by: string; created_at: string; updated_at: string;
   }>(
-    "SELECT id, title, content, is_global, created_by, created_at, updated_at FROM memories WHERE id = ?",
+    "SELECT id, title, content, is_global, tags, source_session_id, created_by, created_at, updated_at FROM memories WHERE id = ?",
     [id]
   );
 
   const assigned_agent_ids = await getMemoryAssignments(id);
-  const memory = { ...updated!, is_global: updated!.is_global === 1, assigned_agent_ids };
+  const memory = { ...updated!, is_global: updated!.is_global === 1, tags: JSON.parse((updated as Record<string, unknown>).tags as string ?? '[]'), assigned_agent_ids };
 
   return NextResponse.json({ memory });
 }

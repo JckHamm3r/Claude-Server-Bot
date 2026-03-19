@@ -600,6 +600,27 @@ const migrations: Record<number, () => Promise<void>> = {
     `);
     console.log("[db] Migration 13: add performance indexes");
   },
+  14: async () => {
+    // Plan mode: "paused" status support (SQLite CHECK is cosmetic; TypeScript union is authoritative)
+    // No table recreate needed — SQLite doesn't enforce CHECK on existing columns after ALTER.
+    console.log("[db] Migration 14: plan paused status (schema-only, TS union updated)");
+  },
+  15: async () => {
+    await addColumnSafe("agents", "system_prompt", "TEXT");
+    await addColumnSafe("agents", "skip_permissions", "INTEGER NOT NULL DEFAULT 1");
+    await addColumnSafe("agents", "trigger_phrases", "TEXT NOT NULL DEFAULT '[]'");
+    await addColumnSafe("agents", "last_invoked_at", "TEXT");
+    await addColumnSafe("agents", "total_invocations", "INTEGER NOT NULL DEFAULT 0");
+    await addColumnSafe("agents", "successful_invocations", "INTEGER NOT NULL DEFAULT 0");
+    await addColumnSafe("agents", "total_cost_usd", "REAL NOT NULL DEFAULT 0");
+    console.log("[db] Migration 15: agent system_prompt, skip_permissions, trigger_phrases, stats");
+  },
+  16: async () => {
+    await addColumnSafe("memories", "tags", "TEXT NOT NULL DEFAULT '[]'");
+    await addColumnSafe("memories", "source_session_id", "TEXT");
+    await dbExec("CREATE INDEX IF NOT EXISTS idx_memories_source_session ON memories(source_session_id)");
+    console.log("[db] Migration 16: memory tags, source_session_id");
+  },
 };
 
 // ── initDb: run once at server startup ───────────────────────────────────────
