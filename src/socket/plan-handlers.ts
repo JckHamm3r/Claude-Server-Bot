@@ -433,7 +433,11 @@ Return only the JSON object, no markdown, no explanation.`;
         const plan = await createPlan(sessionId, goal, email);
         await logActivity("plan_created", email, { planId: plan.id, goal });
         const planSessionId = "plan-gen-" + plan.id;
-        provider.createSession(planSessionId, { skipPermissions: true });
+        provider.createSession(planSessionId, {
+          skipPermissions: true,
+          systemPrompt: "You are a software planning assistant. Output ONLY valid JSON arrays — no markdown, no commentary.",
+          useRawSystemPrompt: true,
+        });
 
         const prompt = `You are helping plan a multi-step development task for a software project.
 
@@ -890,7 +894,11 @@ Be specific. Each step should be atomic and independently executable. Max 50 ste
         await updatePlanStatus(planId, "drafting");
 
         const refineSessionId = `plan-refine-${planId}-${Date.now()}`;
-        provider.createSession(refineSessionId, { skipPermissions: true });
+        provider.createSession(refineSessionId, {
+          skipPermissions: true,
+          systemPrompt: "You are a software planning assistant. Output ONLY valid JSON arrays — no markdown, no commentary.",
+          useRawSystemPrompt: true,
+        });
 
         const prompt = `You are helping refine a multi-step development plan.
 

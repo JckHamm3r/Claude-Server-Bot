@@ -62,6 +62,8 @@ export interface ClaudeCodeProvider {
   createSession(sessionId: string, opts?: {
     skipPermissions?: boolean;
     systemPrompt?: string;
+    /** When true, systemPrompt is sent as a plain string (no SDK claude_code preset) — use for lightweight JSON-only tasks */
+    useRawSystemPrompt?: boolean;
     model?: string;
     claudeSessionId?: string;
     userEmail?: string;

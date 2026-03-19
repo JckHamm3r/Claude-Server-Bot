@@ -64,6 +64,37 @@ export function PlanModeTab() {
     socketRef.current?.emit(event, data);
   }, []);
 
+  /** Reconstruct stepToolActivity from persisted step.result for completed/failed steps */
+  const hydrateToolActivity = useCallback((plans: ClaudePlan[]) => {
+    setStepToolActivity((prev) => {
+      let changed = false;
+      const next = new Map(prev);
+      for (const plan of plans) {
+        for (const step of plan.steps ?? []) {
+          if (!step.result || next.has(step.id)) continue;
+          try {
+            const parsed = JSON.parse(step.result);
+            if (Array.isArray(parsed.toolCalls) && parsed.toolCalls.length > 0) {
+              next.set(
+                step.id,
+                parsed.toolCalls.map((tc: { tool: string; input?: string; status?: string; exitCode?: number }, i: number) => ({
+                  toolCallId: `${step.id}-restored-${i}`,
+                  toolName: tc.tool,
+                  toolInput: tc.input,
+                  toolResult: undefined,
+                  toolStatus: tc.status === "error" ? "error" as const : "done" as const,
+                  exitCode: tc.exitCode,
+                })),
+              );
+              changed = true;
+            }
+          } catch { /* non-JSON result, skip */ }
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, []);
+
   const upsertPlan = useCallback((plan: ClaudePlan) => {
     setPlans((prev) => {
       const next = new Map(prev);
@@ -92,6 +123,7 @@ export function PlanModeTab() {
           for (const p of incoming) next.set(p.id, p);
           return next;
         });
+        hydrateToolActivity(incoming);
       },
     );
 
@@ -104,6 +136,7 @@ export function PlanModeTab() {
 
     socket.on("claude:plan_updated", ({ plan }: { plan: ClaudePlan }) => {
       upsertPlan(plan);
+      hydrateToolActivity([plan]);
     });
 
     socket.on("claude:plan_executing", ({ planId }: { planId: string }) => {
@@ -121,6 +154,7 @@ export function PlanModeTab() {
       setExecuting(false);
       setPausedStepId(null);
       upsertPlan(plan);
+      hydrateToolActivity([plan]);
     });
 
     socket.on(

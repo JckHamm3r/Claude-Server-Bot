@@ -34,6 +34,8 @@ interface SDKSessionState {
   running: boolean;
   model?: string;
   systemPrompt?: string;
+  /** When true, systemPrompt is sent as a plain string (no SDK claude_code preset) */
+  useRawSystemPrompt: boolean;
   skipPermissions: boolean;
   claudeSessionId: string | null;
   lastActivity: number;
@@ -157,6 +159,7 @@ function getOrCreate(sessionId: string, userEmail = ""): SDKSessionState {
     sessions.set(sessionId, {
       emitter: new EventEmitter(),
       running: false,
+      useRawSystemPrompt: false,
       skipPermissions: false,
       claudeSessionId: null,
       lastActivity: Date.now(),
@@ -372,11 +375,15 @@ async function startStreamingSession(
   };
 
   if (state.systemPrompt) {
-    options.systemPrompt = {
-      type: "preset",
-      preset: "claude_code",
-      append: state.systemPrompt,
-    };
+    if (state.useRawSystemPrompt) {
+      options.systemPrompt = state.systemPrompt;
+    } else {
+      options.systemPrompt = {
+        type: "preset",
+        preset: "claude_code",
+        append: state.systemPrompt,
+      };
+    }
   }
 
   // Resume from a previous SDK session if available
@@ -1052,6 +1059,7 @@ export const sdkProvider: ClaudeCodeProvider = {
     const state = getOrCreate(sessionId, opts.userEmail);
     state.skipPermissions = opts.skipPermissions ?? false;
     if (opts.systemPrompt) state.systemPrompt = opts.systemPrompt;
+    if (opts.useRawSystemPrompt !== undefined) state.useRawSystemPrompt = opts.useRawSystemPrompt;
     if (opts.model) state.model = opts.model;
     if (opts.maxTurns) state.maxTurns = opts.maxTurns;
     if (opts.claudeSessionId && !state.claudeSessionId) {

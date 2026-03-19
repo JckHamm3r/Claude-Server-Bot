@@ -272,25 +272,29 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
       : claudeSection;
   }
 
-  // Append saved memories from the database so Claude has access to
-  // project-level knowledge items curated by admins.
-  const memories = await getMemoriesForTarget(MAIN_SESSION_TARGET);
-  if (memories.length > 0) {
-    const memoriesText = memories
-      .map((m) => `### ${m.title}\n${m.content}`)
-      .join("\n\n");
-    const memoriesSection = `<memories>\nThe following are important memory items for this project. Treat them as ground truth.\n\n${memoriesText}\n</memories>`;
-    systemPrompt = systemPrompt
-      ? systemPrompt + "\n\n" + memoriesSection
-      : memoriesSection;
-  }
+  // Skip memories and context-index for plan_execution — steps get their
+  // instructions from the step prompt; including these per-step wastes tokens.
+  if (interfaceType !== "plan_execution") {
+    // Append saved memories from the database so Claude has access to
+    // project-level knowledge items curated by admins.
+    const memories = await getMemoriesForTarget(MAIN_SESSION_TARGET);
+    if (memories.length > 0) {
+      const memoriesText = memories
+        .map((m) => `### ${m.title}\n${m.content}`)
+        .join("\n\n");
+      const memoriesSection = `<memories>\nThe following are important memory items for this project. Treat them as ground truth.\n\n${memoriesText}\n</memories>`;
+      systemPrompt = systemPrompt
+        ? systemPrompt + "\n\n" + memoriesSection
+        : memoriesSection;
+    }
 
-  // Append .context/_index.md (or bootstrap instruction) so the agent
-  // always knows what persistent context is available.
-  const contextSection = readContextIndex();
-  systemPrompt = systemPrompt
-    ? systemPrompt + "\n\n" + contextSection
-    : contextSection;
+    // Append .context/_index.md (or bootstrap instruction) so the agent
+    // always knows what persistent context is available.
+    const contextSection = readContextIndex();
+    systemPrompt = systemPrompt
+      ? systemPrompt + "\n\n" + contextSection
+      : contextSection;
+  }
 
   // Inject per-session context journal (if the session has one from a previous interaction).
   // Also inject the instruction for the AI to maintain it via update_session_context tool.

@@ -110,7 +110,7 @@ export function PlanStepCard({
   dependsOnLabels,
 }: PlanStepCardProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [resultOpen, setResultOpen]   = useState(false);
+  const [resultOpen, setResultOpen]   = useState(step.status === "completed");
   const [progressOpen, setProgressOpen] = useState(true);
   const [editing, setEditing]         = useState(false);
   const [editSummary, setEditSummary] = useState(step.summary);
