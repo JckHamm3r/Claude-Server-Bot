@@ -300,6 +300,12 @@ export function PlanStepList({
 
           {steps.map((step: ClaudePlanStep, idx: number) => {
             const progress = stepProgress?.get(step.id);
+            const dependsOnLabels = step.depends_on
+                    ?.map((depId) => {
+                      const depStep = steps.find((s) => s.id === depId);
+                      return depStep ? `Step ${steps.indexOf(depStep) + 1}` : null;
+                    })
+                    .filter(Boolean) as string[] | undefined;
             return (
               <div key={step.id} className="flex flex-col">
                 <PlanStepCard
@@ -333,6 +339,7 @@ export function PlanStepList({
                   canRollback={pausedStepId === step.id ? pausedCanRollback : false}
                   stepProgress={progress}
                   toolActivity={stepToolActivity?.get(step.id)}
+                  dependsOnLabels={dependsOnLabels}
                 />
               </div>
             );

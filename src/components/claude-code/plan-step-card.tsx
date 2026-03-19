@@ -39,6 +39,7 @@ interface PlanStepCardProps {
   canRollback?: boolean;
   stepProgress?: string;
   toolActivity?: ToolActivity[];
+  dependsOnLabels?: string[];
 }
 
 // Step number badge styles per status
@@ -106,6 +107,7 @@ export function PlanStepCard({
   canRollback,
   stepProgress,
   toolActivity,
+  dependsOnLabels,
 }: PlanStepCardProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [resultOpen, setResultOpen]   = useState(false);
@@ -200,6 +202,18 @@ export function PlanStepCard({
                 {step.summary}
               </p>
             )}
+            {dependsOnLabels && dependsOnLabels.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {dependsOnLabels.map((label) => (
+                      <span
+                        key={label}
+                        className="rounded-full bg-bot-elevated/80 px-2 py-0.5 text-[9px] font-medium text-bot-muted/60"
+                      >
+                        After {label}
+                      </span>
+                    ))}
+                  </div>
+                )}
           </div>
 
           <span className={cn(
