@@ -276,7 +276,6 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
         personality: personality ?? "professional",
         personality_custom: personalityCustom,
       });
-      chat.emit("claude:set_active_session", { sessionId: id });
       if (name) {
         chat.emit("claude:rename_session", { sessionId: id, name });
       }
@@ -323,7 +322,6 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
         provider_type: "sdk",
         personality: "professional",
       });
-      chat.emit("claude:set_active_session", { sessionId: id });
       chat.emit("claude:rename_session", { sessionId: id, name: sessionName });
       try { localStorage.setItem(ACTIVE_SESSION_KEY, id); } catch { /* ignore */ }
       // Send the prefilled message after a short delay to allow session init
