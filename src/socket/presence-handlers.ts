@@ -72,11 +72,11 @@ export function registerPresenceHandlers(ctx: HandlerContext) {
       });
     }
 
-    // Clean up rate-limit command counts for this user
-    for (const [key] of ctx.userSessionCommands) {
-      if (key === email) {
-        ctx.userSessionCommands.delete(key);
-      }
+    // Clean up rate-limit command counts only if no other connections exist for this user
+    const otherConnectionExists = Array.from(ctx.connectedUsers.entries())
+      .some(([sid, info]) => sid !== socket.id && info.email === email);
+    if (!otherConnectionExists) {
+      ctx.userSessionCommands.delete(email);
     }
 
     ctx.roomManager.disconnect();

@@ -3,14 +3,14 @@ import { execFileSync } from "child_process";
 
 export interface ServiceWatchState {
   interval: NodeJS.Timeout | null;
-  subscriberCount: number;
+  subscribers: Set<string>;
   // unit name -> { active, sub }
   lastKnown: Map<string, { active: string; sub: string }>;
 }
 
 const watchState: ServiceWatchState = {
   interval: null,
-  subscriberCount: 0,
+  subscribers: new Set(),
   lastKnown: new Map(),
 };
 
@@ -43,7 +43,7 @@ export function startServiceWatcher(io: Server) {
 
   watchState.interval = setInterval(() => {
     // Only poll if there are subscribers
-    if (watchState.subscriberCount <= 0) return;
+    if (watchState.subscribers.size === 0) return;
 
     const current = getUnitStates();
 
@@ -92,7 +92,7 @@ export function registerServiceWatcherHandlers(io: Server) {
   io.on("connection", (socket) => {
     socket.on("system:subscribe_services", () => {
       socket.join("system:services");
-      watchState.subscriberCount++;
+      watchState.subscribers.add(socket.id);
 
       // Send current summary immediately
       const totalFailed = Array.from(watchState.lastKnown.values()).filter(
@@ -103,18 +103,11 @@ export function registerServiceWatcherHandlers(io: Server) {
 
     socket.on("system:unsubscribe_services", () => {
       socket.leave("system:services");
-      watchState.subscriberCount = Math.max(0, watchState.subscriberCount - 1);
+      watchState.subscribers.delete(socket.id);
     });
 
     socket.on("disconnect", () => {
-      // Room membership is auto-cleaned by Socket.IO on disconnect,
-      // but we need to decrement our counter
-      if ((socket.rooms ?? new Set()).size === 0) {
-        // Already cleaned up
-      }
-      // Decrement if they were subscribed (conservative — might double count
-      // but subscriberCount is just used to skip polling when nobody is watching)
-      watchState.subscriberCount = Math.max(0, watchState.subscriberCount - 1);
+      watchState.subscribers.delete(socket.id);
     });
   });
 }

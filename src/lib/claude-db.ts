@@ -237,12 +237,14 @@ export async function getSessionTokenUsage(sessionId: string): Promise<SessionTo
 }
 
 export async function getGlobalTokenUsage(opts?: { since?: string; userId?: string }): Promise<SessionTokenUsage> {
-  let query = "SELECT m.session_id, m.metadata FROM messages m";
-  const conditions: string[] = ["m.sender_type = 'claude'"];
+  // Push aggregation to SQL instead of loading every message into memory.
+  // The last claude message per session has the cumulative usage for that session.
+  const conditions: string[] = ["m.sender_type = 'claude'", "json_extract(m.metadata, '$.usage') IS NOT NULL"];
   const params: unknown[] = [];
+  let joinClause = "";
 
   if (opts?.userId) {
-    query += " JOIN sessions s ON m.session_id = s.id";
+    joinClause = " JOIN sessions s ON m.session_id = s.id";
     conditions.push("s.created_by = ?");
     params.push(opts.userId);
   }
@@ -251,34 +253,35 @@ export async function getGlobalTokenUsage(opts?: { since?: string; userId?: stri
     params.push(opts.since);
   }
 
-  query += " WHERE " + conditions.join(" AND ") + " ORDER BY m.timestamp ASC";
-  const rows = await dbAll<{ session_id: string; metadata: string }>(query, params as string[]);
+  const whereClause = " WHERE " + conditions.join(" AND ");
 
-  const perSession = new Map<string, { input: number; output: number; cost: number }>();
-  let count = 0;
-  for (const row of rows) {
-    try {
-      const meta = JSON.parse(row.metadata);
-      if (meta.usage) {
-        perSession.set(row.session_id, {
-          input: meta.usage.input_tokens ?? 0,
-          output: meta.usage.output_tokens ?? 0,
-          cost: meta.usage.cost_usd ?? 0,
-        });
-        count++;
-      }
-    } catch { /* skip */ }
-  }
+  // Count all messages with usage data
+  const countRow = await dbGet<{ cnt: number }>(
+    `SELECT COUNT(*) as cnt FROM messages m${joinClause}${whereClause}`,
+    params as string[]
+  );
 
-  let totalInput = 0;
-  let totalOutput = 0;
-  let totalCost = 0;
-  for (const usage of perSession.values()) {
-    totalInput += usage.input;
-    totalOutput += usage.output;
-    totalCost += usage.cost;
-  }
-  return { total_input_tokens: totalInput, total_output_tokens: totalOutput, total_cost_usd: totalCost, message_count: count };
+  // Sum usage from the latest message per session (last message has cumulative usage)
+  const sumRow = await dbGet<{ total_input: number; total_output: number; total_cost: number }>(
+    `SELECT
+      COALESCE(SUM(json_extract(sub.metadata, '$.usage.input_tokens')), 0) as total_input,
+      COALESCE(SUM(json_extract(sub.metadata, '$.usage.output_tokens')), 0) as total_output,
+      COALESCE(SUM(json_extract(sub.metadata, '$.usage.cost_usd')), 0) as total_cost
+    FROM (
+      SELECT m.session_id, m.metadata,
+        ROW_NUMBER() OVER (PARTITION BY m.session_id ORDER BY m.timestamp DESC) as rn
+      FROM messages m${joinClause}${whereClause}
+    ) sub
+    WHERE sub.rn = 1`,
+    params as string[]
+  );
+
+  return {
+    total_input_tokens: sumRow?.total_input ?? 0,
+    total_output_tokens: sumRow?.total_output ?? 0,
+    total_cost_usd: sumRow?.total_cost ?? 0,
+    message_count: countRow?.cnt ?? 0,
+  };
 }
 
 // ==================== SESSION TEMPLATES ====================
@@ -489,13 +492,18 @@ export async function updateAgent(
   fields.push("updated_at = datetime('now')");
   fields.push("current_version = current_version + 1");
   values.push(id);
-  await dbRun(`UPDATE agents SET ${fields.join(", ")} WHERE id = ?`, values as string[]);
-  const agent = rowToAgent((await dbGet<Record<string, unknown>>("SELECT * FROM agents WHERE id = ?", [id]))!);
-  const versionId = randomUUID();
-  await dbRun(`
-    INSERT INTO agent_versions (id, agent_id, version_number, config_snapshot, change_description, created_by)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `, [versionId, id, agent.current_version, JSON.stringify({ name: agent.name, description: agent.description, icon: agent.icon, model: agent.model, allowed_tools: agent.allowed_tools, status: agent.status, current_version: agent.current_version }), changeDescription ?? null, updatedBy]);
+  // Wrap in transaction to prevent concurrent updates from producing duplicate version numbers
+  const agent = await dbTransaction(async ({ run, get }) => {
+    await run(`UPDATE agents SET ${fields.join(", ")} WHERE id = ?`, values as string[]);
+    const row = await get<Record<string, unknown>>("SELECT * FROM agents WHERE id = ?", [id]);
+    const updated = rowToAgent(row!);
+    const versionId = randomUUID();
+    await run(`
+      INSERT INTO agent_versions (id, agent_id, version_number, config_snapshot, change_description, created_by)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `, [versionId, id, updated.current_version, JSON.stringify({ name: updated.name, description: updated.description, icon: updated.icon, model: updated.model, allowed_tools: updated.allowed_tools, status: updated.status, current_version: updated.current_version }), changeDescription ?? null, updatedBy]);
+    return updated;
+  });
   return agent;
 }
 
@@ -1369,21 +1377,25 @@ export async function removeSessionLocks(sessionId: string): Promise<void> {
 }
 
 export async function removeStaleLocks(timeoutMinutes: number): Promise<FileLock[]> {
-  const staleLocks = await dbAll<FileLock>(
-    `SELECT file_path, session_id, user_email, tool_name, tool_call_id, locked_at 
-     FROM file_locks 
-     WHERE datetime(locked_at) < datetime('now', '-' || ? || ' minutes')`,
-    [timeoutMinutes]
-  );
-
-  if (staleLocks.length > 0) {
-    await dbRun(
-      `DELETE FROM file_locks WHERE datetime(locked_at) < datetime('now', '-' || ? || ' minutes')`,
+  // Atomic select-then-delete inside a transaction to avoid TOCTOU race
+  // where a new lock could be acquired between SELECT and DELETE.
+  return dbTransaction(async ({ all, run }) => {
+    const staleLocks = await all<FileLock>(
+      `SELECT file_path, session_id, user_email, tool_name, tool_call_id, locked_at
+       FROM file_locks
+       WHERE datetime(locked_at) < datetime('now', '-' || ? || ' minutes')`,
       [timeoutMinutes]
     );
-  }
 
-  return staleLocks;
+    if (staleLocks.length > 0) {
+      await run(
+        `DELETE FROM file_locks WHERE datetime(locked_at) < datetime('now', '-' || ? || ' minutes')`,
+        [timeoutMinutes]
+      );
+    }
+
+    return staleLocks;
+  });
 }
 
 // ==================== FILE OPERATION QUEUE ====================

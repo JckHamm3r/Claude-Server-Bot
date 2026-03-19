@@ -75,7 +75,7 @@ Per-user preferences for each event type and channel.
 - **Identity** — Name, avatar image, tagline (stored in `bot_settings`)
 - **Personality presets** — professional, friendly, technical, concise, creative, or custom free-text
 - **Theme** — CSS variables for colors (bot-bg, bot-text, bot-accent, etc.)
-- System prompt composition order: security prompt → template prompt → personality prefix → identity + server context
+- System prompt composition order: security → template → identity + personality → transformers → role → project CLAUDE.md → memories → context-index → session-journal → agent-tools
 
 ## Admin Settings
 

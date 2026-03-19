@@ -14,11 +14,11 @@ Octoby AI platform: Next.js 14 App Router + custom Socket.IO server + SQLite. Po
 ## Key Rules
 
 - `@/*` maps to `./src/*`
-- All Claude AI interactions go through Socket.IO, not REST
+- All Claude AI interactions go through Socket.IO, not REST. Exception: lightweight utility calls (session naming, memory import/refactor, AI job builder) use direct Haiku REST calls for simplicity — these bypass guard rails, sandbox, and budget tracking by design.
 - SDK provider uses streaming input mode — one long-lived `query()` per session with messages fed via AsyncGenerator. Do not call `query()` per message.
 - `persistSession: false` and `settingSources: []` — we manage persistence in SQLite. CLAUDE.md from `CLAUDE_PROJECT_ROOT` is read and appended to the system prompt manually.
 - Personality is set per-session at creation time (in the New Session dialog), not in global settings; "Command Sandbox" toggle lives only in Security > Command Sandbox sub-tab
-- System prompt composition order: security → template → identity + personality → project CLAUDE.md
+- System prompt composition order: security → template → identity + personality → transformers → role → project CLAUDE.md → memories → context-index → session-journal → agent-tools
 
 ## Detailed Docs (read on demand — not auto-ingested)
 

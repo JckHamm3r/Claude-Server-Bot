@@ -61,6 +61,9 @@ interface SDKSessionState {
   // Group permissions (loaded at session creation)
   groupPermissions?: import("../claude-db").GroupPermissions | null;
   groupPermissionsLoaded: Promise<void>;
+  // Track the lock queue handler so we can remove it eagerly on suspend/close
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  queueExecutingHandler: ((event: any) => void) | null;
 }
 
 const sessions = new Map<string, SDKSessionState>();
@@ -95,6 +98,11 @@ function cleanupSession(state: SDKSessionState): void {
   if (state.activeQuery) {
     try { state.activeQuery.close(); } catch { /* ignore */ }
     state.activeQuery = null;
+  }
+  // Eagerly remove queue handler to prevent accumulation on lockEventEmitter
+  if (state.queueExecutingHandler) {
+    lockEventEmitter.off("queue_executing", state.queueExecutingHandler);
+    state.queueExecutingHandler = null;
   }
   state.emitter.removeAllListeners();
 }
@@ -171,6 +179,7 @@ function getOrCreate(sessionId: string, userEmail = ""): SDKSessionState {
       parentSessionId: null,
       onSubAgentCost: null,
       groupPermissionsLoaded: Promise.resolve(),
+      queueExecutingHandler: null,
     });
   }
   const state = sessions.get(sessionId)!;
@@ -555,6 +564,11 @@ async function startStreamingSession(
   state.messageQueue = [];
   state.messageReady = null;
 
+  // Remove any previous queue handler before registering a new one (prevents accumulation)
+  if (state.queueExecutingHandler) {
+    lockEventEmitter.off("queue_executing", state.queueExecutingHandler);
+  }
+
   // Set up listener for queued operations becoming ready
   const queueExecutingHandler = (event: {
     queueId: string;
@@ -571,6 +585,7 @@ async function startStreamingSession(
       }
     }
   };
+  state.queueExecutingHandler = queueExecutingHandler;
   lockEventEmitter.on("queue_executing", queueExecutingHandler);
 
   // Start output processing in background
@@ -580,6 +595,9 @@ async function startStreamingSession(
     state.emitter.emit("output", { type: "done" } as ParsedOutput);
   }).finally(() => {
     lockEventEmitter.off("queue_executing", queueExecutingHandler);
+    if (state.queueExecutingHandler === queueExecutingHandler) {
+      state.queueExecutingHandler = null;
+    }
   });
 }
 

@@ -74,6 +74,21 @@ SQLite at `./data/claude-bot.db` with WAL mode. Schema auto-migrates on startup 
 | `inapp_notifications` | In-app notification store |
 | `login_attempts` | Login attempt tracking for IP protection |
 | `blocked_ips` | Blocked IP addresses |
+| `memories` | Project-level knowledge items (title, content, is_global, created_by) |
+| `memory_agent_assignments` | Maps memories to agents (memory_id, agent_id) |
+| `file_locks` | File locking for concurrent edit safety (file_path, session_id, user_email, tool_call_id) |
+| `file_operation_queue` | Queued file operations waiting for lock release |
+| `terminal_sessions` | PTY terminal sessions (user_email, tmux_session_name, cwd, scrollback_json) |
+| `terminal_bookmarks` | Terminal scrollback bookmarks (terminal_session_id, line_index, label) |
+| `terminal_shares` | Terminal session sharing (terminal_session_id, owner_email, invited_email) |
+| `jobs` | Scheduled task definitions (name, script_path, schedule, working_dir, env_vars) |
+| `job_runs` | Job execution history (job_id, status, started_at, output) |
+| `user_groups` | User permission groups (name, description) |
+| `group_permissions` | Per-group permission rules (group_id, permission_type, value) |
+| `security_groups` | IP-based security groups (name, allowed_ips) |
+| `user_security_groups` | Maps users to security groups (user_email, security_group_id) |
+| `secret_metadata` | Secret/env-var metadata (key, type, description) |
+| `api_request_counts` | API request tracking for abuse detection |
 
 ## Path Alias
 
