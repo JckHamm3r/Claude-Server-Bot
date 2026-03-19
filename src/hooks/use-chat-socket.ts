@@ -282,8 +282,8 @@ export function useChatSocket({
       streamingMsgIdRef.current = null;
       turnDoneRef.current = false;
       lastUserMsgRef.current = content;
-      const msg: ChatMessage = {
-        id: crypto.randomUUID(),
+      const clientMsgId = crypto.randomUUID();
+      const msg: ChatMessage = { id: clientMsgId,
         sender_type: "admin",
         content,
         timestamp: new Date().toISOString(),
@@ -293,7 +293,7 @@ export function useChatSocket({
       setIsRunning(true);
       setRunStartTime(Date.now());
       setHasError(false);
-      emit("claude:message", { sessionId, content, attachments });
+      emit("claude:message", { sessionId, content, attachments, clientMsgId });
     },
     [emit],
   );
@@ -312,14 +312,14 @@ export function useChatSocket({
     // When AI is paused, flush queued messages as chat-only (no AI response expected)
     if (aiPausedRef.current) {
       for (const content of pendingQueueRef.current) {
-        const msg: ChatMessage = {
-          id: crypto.randomUUID(),
+        const clientMsgId = crypto.randomUUID();
+        const msg: ChatMessage = { id: clientMsgId,
           sender_type: "admin",
           content,
           timestamp: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, msg]);
-        socketRef.current?.emit("claude:message", { sessionId, content });
+        socketRef.current?.emit("claude:message", { sessionId, content, clientMsgId });
       }
       syncQueue([]);
       return;
@@ -340,11 +340,28 @@ export function useChatSocket({
   const resetSessionState = useCallback(() => {
     streamingMsgIdRef.current = null;
     turnDoneRef.current = false;
+    lastUserMsgRef.current = "";
+    autoCompactFiredRef.current = false;
+    isCompactingRef.current = false;
+    aiPausedRef.current = false;
+    watchdogChecksRef.current = 0;
     setMessages([]);
+    setIsRunning(false);
     setCurrentActivity(null);
     setCommandRunner(null);
     setTypingUsers([]);
+    setPendingInteractions(new Map());
     syncQueue([]);
+    // Clear edit recovery timer
+    if (editRecoveryTimerRef.current) {
+      clearTimeout(editRecoveryTimerRef.current);
+      editRecoveryTimerRef.current = null;
+    }
+    // Clear typing timers
+    for (const timer of typingTimersRef.current.values()) {
+      clearTimeout(timer);
+    }
+    typingTimersRef.current.clear();
   }, [syncQueue]);
 
   // ── Watchdog ───────────────────────────────────────────────────────────
@@ -413,6 +430,7 @@ export function useChatSocket({
         setLoadingMessages(true);
         socket.emit("claude:get_messages", { sessionId: session.id });
         socket.emit("claude:get_session_state", { sessionId: session.id });
+        socket.emit("claude:get_chat_state", { sessionId: session.id });
       }
     };
 
@@ -498,12 +516,25 @@ export function useChatSocket({
       if (onSessionRemovedRef.current) onSessionRemovedRef.current(sessionId);
     });
 
+    socket.on("claude:session_deleted", ({ sessionId }: { sessionId: string }) => {
+      // Session was deleted — remove from sidebar and deactivate if open
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      if (activeSessionRef.current?.id === sessionId) {
+        activeSessionRef.current = null;
+        resetSessionState();
+        setIsRunning(false);
+      }
+      if (onSessionRemovedRef.current) onSessionRemovedRef.current(sessionId);
+    });
+
     socket.on("claude:presence_update", ({ presence }: { presence: PresenceUser[] }) => {
       setPresenceUsers(presence);
     });
 
-    socket.on("claude:typing", ({ email: typingEmail, typing, firstName, lastName, avatarUrl }: 
-      { email: string; typing: boolean; firstName?: string; lastName?: string; avatarUrl?: string | null }) => {
+    socket.on("claude:typing", ({ sessionId, email: typingEmail, typing, firstName, lastName, avatarUrl }:
+      { sessionId?: string; email: string; typing: boolean; firstName?: string; lastName?: string; avatarUrl?: string | null }) => {
+      // Ignore typing indicators from other sessions (defense-in-depth)
+      if (sessionId && sessionId !== activeSessionRef.current?.id) return;
       const timers = typingTimersRef.current;
       if (typing) {
         setTypingUsers((prev) => {
@@ -583,12 +614,13 @@ export function useChatSocket({
     socket.on(
       "claude:session_ready",
       ({ sessionId: readySessionId, running, status }: { sessionId: string; running?: boolean; status?: string }) => {
-        setIsRunning(!!running);
         if (status) {
           setSessions((prev) =>
             prev.map((s) => (s.id === readySessionId ? { ...s, status: status as ClaudeSession["status"] } : s)),
           );
         }
+        if (activeSessionRef.current?.id !== readySessionId) return;
+        setIsRunning(!!running);
       },
     );
 
@@ -1029,10 +1061,12 @@ export function useChatSocket({
       setMessages((prev) => [...prev, msg]);
     });
 
-    socket.on("claude:chat_toggled", ({ sessionId, paused, pausedBy }: { sessionId: string; paused: boolean; pausedBy: string | null }) => {
+    socket.on("claude:chat_toggled", ({ sessionId, paused, pausedBy, isSync }: { sessionId: string; paused: boolean; pausedBy: string | null; isSync?: boolean }) => {
       if (activeSessionRef.current?.id !== sessionId) return;
       setAiPaused(paused);
       setAiPausedBy(pausedBy);
+      // State sync (from get_chat_state) — update state silently, no chat message
+      if (isSync) return;
 
       const label = pausedBy ? pausedBy.split("@")[0] : "Someone";
       const content = paused
@@ -1048,9 +1082,23 @@ export function useChatSocket({
       setMessages((prev) => [...prev, msg]);
     });
 
-    socket.on("claude:chat_broadcast", ({ sessionId, message, fromSocketId }: { sessionId: string; message: ChatMessage; fromSocketId: string }) => {
+    socket.on("claude:user_message", ({ sessionId, message, fromSocketId, clientMsgId }: { sessionId: string; message: ChatMessage; fromSocketId: string; clientMsgId?: string }) => {
       if (activeSessionRef.current?.id !== sessionId) return;
-      if (fromSocketId === socket.id) return;
+      if (fromSocketId === socket.id) {
+        // Replace the optimistic local message with the server-persisted version
+        if (clientMsgId) {
+          setMessages((prev) => {
+            const idx = prev.findIndex((m) => m.id === clientMsgId);
+            if (idx !== -1) {
+              const updated = [...prev];
+              updated[idx] = message;
+              return updated;
+            }
+            return prev;
+          });
+        }
+        return;
+      }
       setMessages((prev) => [...prev, message]);
     });
 
@@ -1103,10 +1151,11 @@ export function useChatSocket({
       socket.off("claude:compact_done");
       socket.off("security:warn");
       socket.off("claude:chat_toggled");
-      socket.off("claude:chat_broadcast");
+      socket.off("claude:user_message");
       socket.off("claude:session_status");
       socket.off("claude:session_renamed");
       socket.off("claude:session_removed");
+      socket.off("claude:session_deleted");
       socket.off("claude:session_invited");
       socket.off("claude:sub_agent_status");
       socket.off("claude:session_rebuilt");
@@ -1119,6 +1168,7 @@ export function useChatSocket({
   // ── Active session change ──────────────────────────────────────────────
   useEffect(() => {
     if (!activeSession || !connected) return;
+    activeSessionRef.current = activeSession;
     setSessionModel(activeSession.model ?? DEFAULT_MODEL);
     setSessionUsage(null);
     setBudgetLimits(null);
@@ -1129,7 +1179,9 @@ export function useChatSocket({
     setAiPaused(false);
     setAiPausedBy(null);
     emit("claude:get_chat_state", { sessionId: activeSession.id });
+    emit("claude:get_session_state", { sessionId: activeSession.id });
     if (!freshSessionsRef.current.has(activeSession.id)) {
+      setLoadingMessages(true);
       emit("claude:get_messages", { sessionId: activeSession.id });
       emit("claude:get_usage", { sessionId: activeSession.id });
     }
@@ -1170,15 +1222,15 @@ export function useChatSocket({
       // When AI is paused, add message locally and send to server for
       // persistence/broadcast but do NOT set isRunning (no AI response expected).
       if (aiPausedRef.current) {
-        const msg: ChatMessage = {
-          id: crypto.randomUUID(),
+        const clientMsgId = crypto.randomUUID();
+        const msg: ChatMessage = { id: clientMsgId,
           sender_type: "admin",
           content,
           timestamp: new Date().toISOString(),
           metadata: attachments?.length ? { attachments } : undefined,
         };
         setMessages((prev) => [...prev, msg]);
-        emit("claude:message", { sessionId: activeSession.id, content, attachments });
+        emit("claude:message", { sessionId: activeSession.id, content, attachments, clientMsgId });
         return;
       }
 
