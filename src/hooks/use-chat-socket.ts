@@ -843,6 +843,10 @@ export function useChatSocket({
         setMessages((prev) => {
           const refId = streamingMsgIdRef.current;
           let idx = refId ? prev.findIndex((m) => m.id === refId) : -1;
+          // Dedup: if an identical text message already exists (e.g. reconnect replay),
+          // update in place. Only match exact content — never prefix-match, as that
+          // causes genuinely distinct sequential text messages to overwrite each other
+          // (e.g. auto-delegation routing notification replaced by agent result).
           if (idx < 0 && parsed.type === "text" && parsed.content) {
             const incoming = parsed.content;
             for (let i = prev.length - 1; i >= 0; i--) {
@@ -853,7 +857,7 @@ export function useChatSocket({
                 (m.parsed?.type === "streaming" || m.parsed?.type === "text") &&
                 m.content
               ) {
-                if (m.content === incoming || incoming.startsWith(m.content)) {
+                if (m.content === incoming) {
                   idx = i;
                   break;
                 }
