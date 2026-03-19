@@ -1,6 +1,6 @@
 import { getClaudeProvider } from "./claude";
 import { getActiveAgents, recordAgentInvocation, getMemoriesForTarget } from "./claude-db";
-import { registerSubAgent, updateSubAgentStatus } from "./sub-agent-registry";
+import { registerSubAgent, updateSubAgentStatus, addSubAgentActivity, updateSubAgentActivity } from "./sub-agent-registry";
 import { randomUUID } from "crypto";
 
 export const MAX_DELEGATION_DEPTH = 4;
@@ -99,6 +99,17 @@ export async function runSubAgent(opts: SubAgentOptions): Promise<SubAgentResult
     let errorMsg = "";
 
     provider.onOutput(subSessionId, (parsed) => {
+      if (parsed.type === "tool_call" && parsed.toolName && parsed.toolCallId) {
+        addSubAgentActivity(opts.parentSessionId, subAgentId, parsed.toolName, parsed.toolCallId);
+      } else if (parsed.type === "tool_result" && parsed.toolCallId) {
+        updateSubAgentActivity(
+          opts.parentSessionId,
+          subAgentId,
+          parsed.toolCallId,
+          parsed.toolStatus === "error" ? "error" : "done",
+        );
+      }
+
       if (parsed.type === "text" && parsed.content) {
         finalText = parsed.content;
       } else if (parsed.type === "streaming" && parsed.content) {

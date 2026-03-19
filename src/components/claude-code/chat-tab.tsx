@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
-import { Users, MessageCircleOff, MessageCircle, UserPlus, X } from "lucide-react";
+import { Users, MessageCircleOff, MessageCircle, UserPlus, X, ChevronRight } from "lucide-react";
+import { SubAgentDrawer } from "./sub-agent-drawer";
 import type { ClaudeSession } from "@/lib/claude-db";
 import { DEFAULT_MODEL, AVAILABLE_MODELS, getModelLabel } from "@/lib/models";
 import { apiUrl } from "@/lib/utils";
@@ -60,6 +61,7 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(isWidget);
   const [autoAccept, setAutoAccept] = useState(false);
   const [loadingSessions, setLoadingSessions] = useState(true);
+  const [drawerAgentId, setDrawerAgentId] = useState<string | null>(null);
   const pendingRestoreRef = useRef<string | null>(null);
 
   // Read saved active session ID on mount
@@ -788,20 +790,27 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
         {chat.activeSubAgents.length > 0 && activeSession && (
           <div className="border-b border-bot-border bg-bot-surface/60 px-4 py-2 flex flex-col gap-1">
             {chat.activeSubAgents.map((agent) => (
-              <div key={agent.id} className="flex items-center gap-2 text-caption">
+              <button
+                key={agent.id}
+                className="flex items-center gap-2 text-caption w-full text-left group hover:bg-bot-elevated/30 rounded px-1 -mx-1 py-0.5 transition-colors"
+                onClick={() => setDrawerAgentId(agent.id)}
+              >
                 <span className="text-sm">{agent.agentIcon ?? "🤖"}</span>
                 {agent.status === "running" ? (
                   <>
                     <span className="h-1.5 w-1.5 rounded-full bg-bot-accent animate-pulse flex-shrink-0" />
-                    <span className="text-bot-muted">
+                    <span className="text-bot-muted truncate">
                       Using agent: <span className="font-medium text-bot-text">{agent.agentName}</span>
-                      <span className="text-bot-muted/70"> — working…</span>
+                      <span className="text-bot-muted/70">
+                        {" — "}
+                        {agent.currentActivity ?? "working…"}
+                      </span>
                     </span>
                   </>
                 ) : agent.status === "error" ? (
                   <>
                     <span className="h-1.5 w-1.5 rounded-full bg-bot-red flex-shrink-0" />
-                    <span className="text-bot-red">
+                    <span className="text-bot-red truncate">
                       Agent: <span className="font-medium">{agent.agentName}</span> — failed
                       {agent.error && <span className="text-bot-red/70"> ({agent.error.slice(0, 80)})</span>}
                     </span>
@@ -809,15 +818,23 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
                 ) : (
                   <>
                     <span className="h-1.5 w-1.5 rounded-full bg-bot-green flex-shrink-0" />
-                    <span className="text-bot-muted">
+                    <span className="text-bot-muted truncate">
                       Agent: <span className="font-medium text-bot-text">{agent.agentName}</span>
                       <span className="text-bot-green"> ✓ complete</span>
                     </span>
                   </>
                 )}
-              </div>
+                <ChevronRight className="h-3 w-3 text-bot-muted/50 group-hover:text-bot-muted ml-auto flex-shrink-0" />
+              </button>
             ))}
           </div>
+        )}
+
+        {drawerAgentId && (
+          <SubAgentDrawer
+            agent={chat.activeSubAgents.find((a) => a.id === drawerAgentId) ?? null}
+            onClose={() => setDrawerAgentId(null)}
+          />
         )}
 
         {!activeSession ? (

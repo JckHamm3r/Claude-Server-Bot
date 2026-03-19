@@ -9,6 +9,7 @@ import { AgentVersionHistory } from "./agent-version-history";
 import { AgentDeleteDialog } from "./agent-delete-dialog";
 import type { AgentStats } from "./agent-stats-row";
 import type { Memory } from "@/lib/claude-db";
+import { apiUrl } from "@/lib/utils";
 
 interface AgentFormData {
   icon: string;
@@ -45,7 +46,7 @@ export function AgentsTab() {
 
   const fetchMemoryCounts = useCallback(async (agentList: ClaudeAgent[]) => {
     try {
-      const res = await fetch("/api/claude-code/memories");
+      const res = await fetch(apiUrl("/api/claude-code/memories"));
       if (!res.ok) return;
       const data: Memory[] = await res.json();
       const globalCount = data.filter((m) => m.is_global).length;

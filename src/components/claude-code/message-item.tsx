@@ -553,13 +553,25 @@ export const MessageItem = memo(function MessageItem({
     );
   }
 
+  const agentIcon = message.metadata?.agentIcon as string | null | undefined;
+  const agentName = message.metadata?.agentName as string | undefined;
+
   return (
     <div className="flex gap-2.5 py-1 group">
       <div className="mt-1 h-8 w-8 shrink-0 rounded-full overflow-hidden ring-1 ring-bot-border/30">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={botAvatarUrl || apiUrl("/avatars/waiting.png")} alt="Octoby" className="h-full w-full object-cover" />
+        {agentIcon ? (
+          <div className="h-full w-full flex items-center justify-center bg-bot-elevated/60 text-lg" title={agentName}>
+            {agentIcon}
+          </div>
+        ) : (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src={botAvatarUrl || apiUrl("/avatars/waiting.png")} alt="Octoby" className="h-full w-full object-cover" />
+        )}
       </div>
       <div className="min-w-0 flex-1 max-w-[90%]">
+        {agentName && (
+          <span className="text-[10px] font-semibold text-bot-accent/70 ml-1 mb-0.5 block">{agentName}</span>
+        )}
         <div className="rounded-2xl rounded-bl-sm glass px-4 py-3 text-body text-bot-text shadow-elevated">
           <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={sharedMarkdownComponents}>
             {displayContent}

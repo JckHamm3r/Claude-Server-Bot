@@ -347,6 +347,8 @@ export function registerHandlers(io: Server) {
         task: e.task,
         status: e.status,
         error: e.error,
+        currentActivity: e.currentActivity,
+        activityLog: e.activityLog,
       })),
     });
   });

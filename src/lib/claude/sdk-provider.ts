@@ -406,6 +406,11 @@ async function startStreamingSession(
       toolInput: Record<string, unknown>,
       callOpts: { signal: AbortSignal; toolUseID: string },
     ) => {
+      // Auto-approve internal delegation MCP tools (no user prompt needed)
+      if (toolName.startsWith("mcp__octoby-delegation__")) {
+        return { behavior: "allow" as const, updatedInput: toolInput };
+      }
+
       // Intercept update_session_context — virtual tool for per-session context journal
       if (toolName === "update_session_context") {
         const input = toolInput as { context?: string };

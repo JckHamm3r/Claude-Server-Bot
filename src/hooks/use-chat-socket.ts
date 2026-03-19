@@ -130,6 +130,8 @@ export interface UseChatSocketReturn {
     task: string;
     status: "running" | "complete" | "error";
     error?: string;
+    currentActivity?: string;
+    activityLog?: { toolName: string; toolCallId: string; status: "running" | "done" | "error" }[];
   }[];
 
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
@@ -201,6 +203,8 @@ export function useChatSocket({
     task: string;
     status: "running" | "complete" | "error";
     error?: string;
+    currentActivity?: string;
+    activityLog?: { toolName: string; toolCallId: string; status: "running" | "done" | "error" }[];
   }[]>([]);
 
   // ── Refs ───────────────────────────────────────────────────────────────
@@ -633,7 +637,7 @@ export function useChatSocket({
 
     socket.on(
       "claude:output",
-      ({ sessionId, parsed }: { sessionId: string; parsed: ParsedOutput }) => {
+      ({ sessionId, parsed, metadata }: { sessionId: string; parsed: ParsedOutput; metadata?: Record<string, unknown> }) => {
         if (!activeSessionRef.current || activeSessionRef.current.id !== sessionId) return;
 
         // Any output from the server means the session is alive — reset watchdog
@@ -870,6 +874,7 @@ export function useChatSocket({
             parsed,
             content: parsed.content ?? parsed.message ?? "",
             timestamp: new Date().toISOString(),
+            ...(metadata && Object.keys(metadata).length > 0 ? { metadata } : {}),
           };
           streamingMsgIdRef.current = null;
           if (idx >= 0) {

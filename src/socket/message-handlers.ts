@@ -17,6 +17,7 @@ import {
   getUserSettings,
   getUserGroupPermissions,
   getUserGroup,
+  getActiveAgents,
 } from "../lib/claude-db";
 import { dbGet } from "../lib/db";
 import { logActivity } from "../lib/activity-log";
@@ -258,6 +259,10 @@ export function registerMessageHandlers(ctx: HandlerContext) {
             io.to(`session:${sessionId}`).emit("claude:command_started", { sessionId, submittedBy: email });
             await ctx.setSessionStatus(sessionId, "running");
 
+            // Look up agent for icon metadata
+            const allAgents = await getActiveAgents();
+            const matchedAgent = allAgents.find((a) => a.name.toLowerCase() === agentName.toLowerCase());
+
             let agentResult: string;
             try {
               const session = await getSession(sessionId);
@@ -283,6 +288,7 @@ export function registerMessageHandlers(ctx: HandlerContext) {
               sessionId,
               parsed: { type: "text", content: agentResult },
               submittedBy: email,
+              metadata: { agentName, agentIcon: matchedAgent?.icon ?? null },
             });
             io.to(`session:${sessionId}`).emit("claude:output", {
               sessionId,
@@ -357,6 +363,7 @@ export function registerMessageHandlers(ctx: HandlerContext) {
                   sessionId,
                   parsed: { type: "text", content: agentResult },
                   submittedBy: email,
+                  metadata: { agentName: agent.name, agentIcon: agent.icon ?? null },
                 });
                 io.to(`session:${sessionId}`).emit("claude:output", {
                   sessionId,
