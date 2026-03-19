@@ -38,6 +38,10 @@ export function getAiPauseState(sessionId: string): { paused: boolean; pausedAt:
   return aiPausedSessions.get(sessionId) ?? { paused: false, pausedAt: null, pausedBy: null };
 }
 
+export function clearAiPauseState(sessionId: string): void {
+  aiPausedSessions.delete(sessionId);
+}
+
 interface BudgetResult {
   exceeded: boolean;
   warning: boolean;
@@ -139,8 +143,10 @@ export function registerMessageHandlers(ctx: HandlerContext) {
 
   socket.on(
     "claude:message",
-    async ({ sessionId, content, attachments }: { sessionId: string; content: string; attachments?: string[] }) => {
+    async ({ sessionId, content, attachments, clientMsgId }: { sessionId: string; content: string; attachments?: string[]; clientMsgId?: string }) => {
       try {
+        let savedUserMessage: Awaited<ReturnType<typeof saveMessage>> | undefined;
+
         if (typeof content !== "string" || (!content.trim() && (!attachments || attachments.length === 0))) {
           socket.emit("claude:error", { sessionId, message: "Message content is required" });
           return;
@@ -242,46 +248,50 @@ export function registerMessageHandlers(ctx: HandlerContext) {
           }
 
           if (agentName && agentTask) {
-
-          await saveMessage(sessionId, "admin", content, email, "chat");
-          ctx.sessionCommandSubmitter.set(sessionId, email);
-          io.to(`session:${sessionId}`).emit("claude:command_started", { sessionId, submittedBy: email });
-          await ctx.setSessionStatus(sessionId, "running");
-
-          let agentResult: string;
-          try {
-            const session = await getSession(sessionId);
-            const result = await runSubAgent({
-              agentName,
-              task: agentTask,
-              parentSessionId: sessionId,
-              userEmail: email,
-              skipPermissions: session?.skip_permissions ?? false,
-              delegationDepth: 0,
+            const savedUserMessage = await saveMessage(sessionId, "admin", content, email, "chat");
+            io.to(`session:${sessionId}`).emit("claude:user_message", {
+              sessionId,
+              message: savedUserMessage,
+              fromSocketId: socket.id,
             });
+            ctx.sessionCommandSubmitter.set(sessionId, email);
+            io.to(`session:${sessionId}`).emit("claude:command_started", { sessionId, submittedBy: email });
+            await ctx.setSessionStatus(sessionId, "running");
 
-            if (result.success) {
-              agentResult = `**Agent: ${agentName}**\n\n${result.result}`;
-            } else {
-              agentResult = `**Agent: ${agentName} — Error**\n\n${result.error ?? "Unknown error"}`;
+            let agentResult: string;
+            try {
+              const session = await getSession(sessionId);
+              const result = await runSubAgent({
+                agentName,
+                task: agentTask,
+                parentSessionId: sessionId,
+                userEmail: email,
+                skipPermissions: session?.skip_permissions ?? false,
+                delegationDepth: 0,
+              });
+
+              if (result.success) {
+                agentResult = `**Agent: ${agentName}**\n\n${result.result}`;
+              } else {
+                agentResult = `**Agent: ${agentName} — Error**\n\n${result.error ?? "Unknown error"}`;
+              }
+            } catch (err) {
+              agentResult = `**Agent: ${agentName} — Error**\n\n${String(err)}`;
             }
-          } catch (err) {
-            agentResult = `**Agent: ${agentName} — Error**\n\n${String(err)}`;
-          }
 
-          io.to(`session:${sessionId}`).emit("claude:output", {
-            sessionId,
-            parsed: { type: "text", content: agentResult },
-            submittedBy: email,
-          });
-          io.to(`session:${sessionId}`).emit("claude:output", {
-            sessionId,
-            parsed: { type: "done" },
-            submittedBy: email,
-          });
-          await ctx.setSessionStatus(sessionId, "idle");
-          io.to(`session:${sessionId}`).emit("claude:command_done", { sessionId });
-          return;
+            io.to(`session:${sessionId}`).emit("claude:output", {
+              sessionId,
+              parsed: { type: "text", content: agentResult },
+              submittedBy: email,
+            });
+            io.to(`session:${sessionId}`).emit("claude:output", {
+              sessionId,
+              parsed: { type: "done" },
+              submittedBy: email,
+            });
+            await ctx.setSessionStatus(sessionId, "idle");
+            io.to(`session:${sessionId}`).emit("claude:command_done", { sessionId });
+            return;
           }
           // If agentName/task could not be parsed, fall through to normal message handling
         }
@@ -315,7 +325,13 @@ export function registerMessageHandlers(ctx: HandlerContext) {
             return;
           }
 
-          await saveMessage(sessionId, "admin", content, email, "chat");
+          const savedUserMessage = await saveMessage(sessionId, "admin", content, email, "chat");
+          io.to(`session:${sessionId}`).emit("claude:user_message", {
+            sessionId,
+            message: savedUserMessage,
+            fromSocketId: socket.id,
+            clientMsgId,
+          });
           await ctx.setSessionStatus(sessionId, "running");
           io.to(`session:${sessionId}`).emit("claude:command_started", { sessionId, submittedBy: email });
 
@@ -408,37 +424,39 @@ export function registerMessageHandlers(ctx: HandlerContext) {
             // Store image attachment metadata for rendering
             if (imageMetadata.length > 0) {
               const existingMeta = attachments?.length ? { attachments, imageAttachments: imageMetadata } : { imageAttachments: imageMetadata };
-              await saveMessage(sessionId, "admin", content, email, "chat", existingMeta);
+              savedUserMessage = await saveMessage(sessionId, "admin", content, email, "chat", existingMeta);
             } else {
               const msgMetadata = attachments?.length ? { attachments } : undefined;
-              await saveMessage(sessionId, "admin", content, email, "chat", msgMetadata);
+              savedUserMessage = await saveMessage(sessionId, "admin", content, email, "chat", msgMetadata);
             }
           } catch (err) {
             console.error("[upload] Error processing attachments:", err);
             const msgMetadata = attachments?.length ? { attachments } : undefined;
-            await saveMessage(sessionId, "admin", content, email, "chat", msgMetadata);
+            savedUserMessage = await saveMessage(sessionId, "admin", content, email, "chat", msgMetadata);
           }
         } else {
-          await saveMessage(sessionId, "admin", content, email, "chat");
+          savedUserMessage = await saveMessage(sessionId, "admin", content, email, "chat");
         }
 
         // Emit lifecycle event for hook transformers
         try {
           transformerEvents.emit("message:sent", { sessionId, content, senderId: email });
         } catch { /* hook errors must not affect message flow */ }
-        // Broadcast it to other participants so everyone sees it in real time.
+
+        if (!savedUserMessage) {
+          throw new Error("Failed to persist user message");
+        }
+
+        // Broadcast the persisted user message so every participant sees the
+        // same message ID, timestamp, and attachments without needing a reload.
+        io.to(`session:${sessionId}`).emit("claude:user_message", {
+          sessionId,
+          message: savedUserMessage,
+          fromSocketId: socket.id,
+          clientMsgId,
+        });
+
         if (isAiPaused(sessionId)) {
-          io.to(`session:${sessionId}`).emit("claude:chat_broadcast", {
-            sessionId,
-            message: {
-              id: crypto.randomUUID(),
-              sender_type: "admin",
-              sender_id: email,
-              content,
-              timestamp: new Date().toISOString(),
-            },
-            fromSocketId: socket.id,
-          });
           return;
         }
 
@@ -590,7 +608,7 @@ export function registerMessageHandlers(ctx: HandlerContext) {
         await ctx.setSessionStatus(sessionId, "running");
         sessionProvider.sendMessage(sessionId, editPrefix + newContent);
       } catch (err) {
-        socket.emit("claude:error", { message: String(err) });
+        socket.emit("claude:error", { sessionId, message: String(err) });
       }
     },
   );
@@ -606,7 +624,7 @@ export function registerMessageHandlers(ctx: HandlerContext) {
         await deleteMessage(messageId);
         io.to(`session:${sessionId}`).emit("claude:message_deleted", { sessionId, messageId });
       } catch (err) {
-        socket.emit("claude:error", { message: String(err) });
+        socket.emit("claude:error", { sessionId, message: String(err) });
       }
     },
   );
@@ -679,6 +697,7 @@ export function registerMessageHandlers(ctx: HandlerContext) {
         sessionId,
         paused: state.paused,
         pausedBy: state.pausedBy,
+        isSync: true,
       });
     },
   );
