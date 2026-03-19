@@ -1,6 +1,7 @@
 import type { Server, Socket } from "socket.io";
 import type { ClaudeCodeProvider, TokenUsage } from "../lib/claude/provider";
 import type { SessionStatus } from "../lib/claude-db";
+import type { SessionRoomManager } from "./session-room-manager";
 
 export type PlanAction = "retry" | "skip" | "cancel" | "rollback_stop" | "rollback_continue";
 
@@ -39,4 +40,6 @@ export interface HandlerContext {
     messageType?: "chat" | "system" | "error",
     metadata?: Record<string, unknown>,
   ) => Promise<boolean>;
+  roomManager: SessionRoomManager;
+  flushStreamingThrottle: (sessionId: string) => void;
 }
