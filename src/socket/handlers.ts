@@ -18,6 +18,7 @@ import { classifyCommand, isSandboxEnabled } from "../lib/command-sandbox";
 import { cleanupExpiredBlocks, syncFail2BanBans } from "../lib/ip-protection";
 import { dbGet, dbRun, dbPragma } from "../lib/db";
 import type { HandlerContext, PlanAction } from "./types";
+import { SessionRoomManager } from "./session-room-manager";
 import { registerSessionHandlers } from "./session-handlers";
 import { registerMessageHandlers } from "./message-handlers";
 import { registerSecurityHandlers } from "./security-handlers";
@@ -436,7 +437,7 @@ export function registerHandlers(io: Server) {
   async function setSessionStatus(sessionId: string, status: SessionStatus) {
     try {
       await updateSessionStatus(sessionId, status);
-      io.emit("claude:session_status", { sessionId, status });
+      io.to(`session:${sessionId}`).emit("claude:session_status", { sessionId, status });
     } catch (err) {
       console.error("[status] Failed to update session status:", err);
     }
@@ -749,6 +750,7 @@ export function registerHandlers(io: Server) {
     const email = await getEmailFromSocket(socket);
     const isAdmin = await isAdminSocket(socket);
 
+    const roomManager = new SessionRoomManager(socket, connectedUsers, () => broadcastPresence(io));
     connectedUsers.set(socket.id, { email, activeSession: null });
     broadcastPresence(io);
 
@@ -778,6 +780,8 @@ export function registerHandlers(io: Server) {
       checkRateLimit,
       incrementSessionCommands,
       retrySaveMessage,
+      roomManager,
+      flushStreamingThrottle,
     };
 
     // Register all sub-handlers
