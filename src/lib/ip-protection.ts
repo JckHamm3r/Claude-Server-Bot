@@ -201,7 +201,7 @@ export function getIPProtectionSettings() {
 export function getApiAbuseSettings() {
   return {
     enabled: getAppSettingSync("api_abuse_protection_enabled", "true") === "true",
-    maxRequests: parseInt(getAppSettingSync("api_abuse_max_requests", "1500"), 10),
+    maxRequests: parseInt(getAppSettingSync("api_abuse_max_requests", "300"), 10),
     windowSeconds: parseInt(getAppSettingSync("api_abuse_window_seconds", "60"), 10),
     blockMinutes: parseInt(getAppSettingSync("api_abuse_block_minutes", "30"), 10),
   };

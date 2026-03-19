@@ -220,34 +220,39 @@ app.prepare().then(async () => {
       return;
     }
 
-    // API abuse detection & IP block check for authenticated API routes.
-    // Skip counting for Next.js internal RSC/prefetch requests and GET-only
-    // reads, which inflate the counter during normal SPA navigation.
-    const isNextInternal = req.headers["rsc"] === "1" || req.headers["next-router-prefetch"] === "1";
-    // Debug: log API hits to diagnose rate-limit triggers (remove when no longer needed)
-    if (url.startsWith(widgetBasePath + "/api/") && process.env.DEBUG_API_HITS === "1") {
-      const shortUrl = url.slice(widgetBasePath.length);
-      console.log(`[api-hit] ${req.method} ${shortUrl}${isNextInternal ? " [rsc]" : ""}`);
-    }
-    if (url.startsWith(widgetBasePath + "/api/") && !url.startsWith(widgetBasePath + "/api/auth") && !isNextInternal) {
+    // API abuse detection & IP block check.
+    // Authenticated users (valid session cookie) are exempt — they're already
+    // rate-limited by the per-session socket-layer limiter. The API abuse
+    // counter only targets unauthenticated traffic (scanners, brute-force).
+    if (url.startsWith(widgetBasePath + "/api/") && !url.startsWith(widgetBasePath + "/api/auth")) {
       try {
         const ip = extractIP(req.headers as Record<string, string | string[] | undefined>, (req.socket as { remoteAddress?: string }).remoteAddress);
-        // Check if already blocked
+        const cookieStr = req.headers.cookie ?? "";
+        const isAuthenticated = cookieStr.includes(widgetCookieName + "=");
+
+        // Enforce existing IP blocks — but let authenticated users through
+        // api_abuse blocks (caused by their own normal usage)
         const ipSettings = getIPProtectionSettings();
         if (ipSettings.enabled) {
           const block = await isIPBlocked(ip);
           if (block.blocked) {
-            res.writeHead(429, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: `IP blocked: ${block.reason ?? "Too many requests"}` }));
-            return;
+            const isAbuseBlock = block.reason?.includes("API abuse");
+            if (!(isAbuseBlock && isAuthenticated)) {
+              res.writeHead(429, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: `IP blocked: ${block.reason ?? "Too many requests"}` }));
+              return;
+            }
           }
         }
-        // Check API abuse threshold
-        const abuseResult = await checkAndRecordApiRequest(ip);
-        if (abuseResult.blocked) {
-          res.writeHead(429, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Too many requests — IP temporarily blocked" }));
-          return;
+
+        // Only count unauthenticated requests toward the abuse threshold
+        if (!isAuthenticated) {
+          const abuseResult = await checkAndRecordApiRequest(ip);
+          if (abuseResult.blocked) {
+            res.writeHead(429, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Too many requests — IP temporarily blocked" }));
+            return;
+          }
         }
       } catch { /* ignore abuse check errors */ }
     }
