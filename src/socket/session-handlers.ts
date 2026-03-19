@@ -145,7 +145,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         ctx.ensureSessionListener(sessionId);
 
         const currentlyRunning = sessionProvider.isRunning(sessionId);
-        socket.emit("claude:session_ready", { sessionId, running: currentlyRunning, status: currentlyRunning ? "running" : "idle" });
+        socket.emit("claude:session_ready", { sessionId, running: currentlyRunning, status: currentlyRunning ? "running" : "idle", model: sessionModel });
       } catch (err) {
         socket.emit("claude:error", { sessionId, message: String(err) });
       }
@@ -409,6 +409,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         sessionId,
         running: sessionProvider.isRunning(sessionId),
         status: sessionProvider.isRunning(sessionId) ? "running" : "idle",
+        model: dbSession.model,
       });
     },
   );

@@ -163,12 +163,12 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
     };
   }, [chat.activeSessionRef]);
 
-  // Sync activeSession when the sessions list changes (e.g. server-side rename)
+  // Sync activeSession when the sessions list changes (e.g. server-side rename, model change)
   useEffect(() => {
     if (!activeSession) return;
     const fresh = sessions.find((s) => s.id === activeSession.id);
-    if (fresh && fresh.name !== activeSession.name) {
-      const updated = { ...activeSession, name: fresh.name };
+    if (fresh && (fresh.name !== activeSession.name || fresh.model !== activeSession.model || fresh.status !== activeSession.status)) {
+      const updated = { ...activeSession, name: fresh.name, model: fresh.model, status: fresh.status };
       chat.activeSessionRef.current = updated;
       setActiveSession(updated);
     }

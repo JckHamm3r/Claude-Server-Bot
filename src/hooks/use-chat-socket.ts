@@ -613,13 +613,20 @@ export function useChatSocket({
 
     socket.on(
       "claude:session_ready",
-      ({ sessionId: readySessionId, running, status }: { sessionId: string; running?: boolean; status?: string }) => {
-        if (status) {
+      ({ sessionId: readySessionId, running, status, model }: { sessionId: string; running?: boolean; status?: string; model?: string }) => {
+        if (status || model) {
           setSessions((prev) =>
-            prev.map((s) => (s.id === readySessionId ? { ...s, status: status as ClaudeSession["status"] } : s)),
+            prev.map((s) => {
+              if (s.id !== readySessionId) return s;
+              const updates: Partial<ClaudeSession> = {};
+              if (status) updates.status = status as ClaudeSession["status"];
+              if (model) updates.model = model;
+              return { ...s, ...updates };
+            }),
           );
         }
         if (activeSessionRef.current?.id !== readySessionId) return;
+        if (model) setSessionModel(model);
         setIsRunning(!!running);
       },
     );
@@ -940,6 +947,10 @@ export function useChatSocket({
     });
 
     socket.on("claude:model_changed", ({ sessionId, model }: { sessionId: string; model: string }) => {
+      // Update the sessions array so the model persists across session switches
+      setSessions((prev) =>
+        prev.map((s) => (s.id === sessionId ? { ...s, model } : s)),
+      );
       if (activeSessionRef.current?.id === sessionId) {
         setSessionModel(model);
       }
