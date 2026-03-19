@@ -1,5 +1,6 @@
 import type { HandlerContext, PlanAction } from "./types";
 import {
+  type ClaudePlanStep,
   listAgents,
   createAgent,
   updateAgent,
@@ -468,7 +469,7 @@ Be specific. Each step should be atomic and independently executable. Max 50 ste
               await updatePlanStatus(plan.id, "reviewing");
 
               // First pass: create all steps to get their IDs
-              const createdSteps = [];
+              const createdSteps: ClaudePlanStep[] = [];
               for (let i = 0; i < cappedSteps.length; i++) {
                 const created = await addPlanStep(plan.id, {
                   step_order: i + 1,
@@ -661,73 +662,110 @@ Be specific. Each step should be atomic and independently executable. Max 50 ste
 
       const systemPrompt = await buildSystemPrompt({ interfaceType: "plan_execution" });
 
-      let stepIdx = 0;
-      while (stepIdx < approvedSteps.length) {
-        const step = approvedSteps[stepIdx];
+      const MAX_PARALLEL = 3;
+      const completedIds = new Set<string>();
+      const runningIds = new Set<string>();
+      const skippedIds = new Set<string>();
+      let cancelled = false;
 
+      // Validate dependency graph — fall back to sequential if cycles found
+      const hasDeps = approvedSteps.some((s) => s.depends_on && s.depends_on.length > 0);
+      const isAcyclic = hasDeps ? validateDependencyGraph(approvedSteps) : true;
+      if (hasDeps && !isAcyclic) {
+        socket.emit("claude:step_progress", {
+          planId, stepId: approvedSteps[0].id,
+          type: "progress",
+          message: "Warning: Circular dependencies detected. Running steps sequentially.",
+        });
+        for (const s of approvedSteps) {
+          (s as { depends_on: null }).depends_on = null;
+        }
+      }
+
+      while (!cancelled) {
         const freshPlan = await getPlan(planId);
         if (!freshPlan) break;
 
-        await updatePlanStep(step.id, { status: "executing", executed_at: new Date().toISOString() });
-        socket.emit("claude:step_executing", { planId, stepId: step.id });
-
-        const { result, error } = await executeStep(
-          ctx, freshPlan, step, stepIdx, approvedSteps.length, systemPrompt,
-        );
-
-        if (result.usage) {
-          await updatePlanStep(step.id, {
-            input_tokens: result.usage.input_tokens,
-            output_tokens: result.usage.output_tokens,
-            cost_usd: result.usage.cost_usd,
-          });
-          await incrementPlanCost(planId, result.usage.input_tokens, result.usage.output_tokens, result.usage.cost_usd);
+        const dbSteps = freshPlan.steps ?? [];
+        for (const s of dbSteps) {
+          if (s.status === "completed") completedIds.add(s.id);
         }
 
-        if (error) {
-          await updatePlanStep(step.id, {
-            status: "failed",
-            result: JSON.stringify(result),
-            error,
-          });
-          socket.emit("claude:step_failed", { planId, stepId: step.id, error });
-          socket.emit("claude:plan_paused", { planId, stepId: step.id, error, canRollback });
-
-          const updatedPlan = await getPlan(planId);
-          socket.emit("claude:plan_updated", { plan: updatedPlan });
-
-          const action = await new Promise<PlanAction>((resolve) => {
-            ctx.planResumeCallbacks.set(planId, resolve);
-          });
-          ctx.planResumeCallbacks.delete(planId);
-
-          if (action === "cancel") {
-            planExecutionCounts.set(email, (planExecutionCounts.get(email) ?? 1) - 1);
-            planOwners.delete(planId);
-            await updatePlanStatus(planId, "failed");
-            const failedPlan = await getPlan(planId);
-            socket.emit("claude:plan_updated", { plan: failedPlan });
-            dispatchNotification("plan_failed", email, "Plan failed", "Plan execution failed and was stopped.").catch(() => {});
-            return;
-          }
-
-          if (action === "retry") continue;
-          stepIdx++;
+        const ready = getReadySteps(approvedSteps, completedIds, runningIds);
+        if (ready.length === 0 && runningIds.size === 0) break;
+        if (ready.length === 0) {
+          await new Promise((r) => setTimeout(r, 500));
           continue;
         }
 
-        await updatePlanStep(step.id, {
-          status: "completed",
-          result: JSON.stringify(result),
-        });
-        socket.emit("claude:step_completed", {
-          planId, stepId: step.id, result: JSON.stringify(result),
+        const toLaunch = ready.slice(0, MAX_PARALLEL - runningIds.size);
+
+        const promises = toLaunch.map(async (step) => {
+          const stepIdx = approvedSteps.findIndex((s) => s.id === step.id);
+          runningIds.add(step.id);
+
+          await updatePlanStep(step.id, { status: "executing", executed_at: new Date().toISOString() });
+          socket.emit("claude:step_executing", { planId, stepId: step.id });
+
+          const { result, error } = await executeStep(
+            ctx, freshPlan, approvedSteps[stepIdx], stepIdx, approvedSteps.length, systemPrompt,
+          );
+
+          runningIds.delete(step.id);
+
+          if (result.usage) {
+            await updatePlanStep(step.id, {
+              input_tokens: result.usage.input_tokens,
+              output_tokens: result.usage.output_tokens,
+              cost_usd: result.usage.cost_usd,
+            });
+            await incrementPlanCost(planId, result.usage.input_tokens, result.usage.output_tokens, result.usage.cost_usd);
+          }
+
+          return { step, result, error };
         });
 
-        const updatedPlan = await getPlan(planId);
-        socket.emit("claude:plan_updated", { plan: updatedPlan });
+        const results = await Promise.all(promises);
 
-        stepIdx++;
+        for (const { step, result, error } of results) {
+          if (error) {
+            await updatePlanStep(step.id, { status: "failed", result: JSON.stringify(result), error });
+            socket.emit("claude:step_failed", { planId, stepId: step.id, error });
+            socket.emit("claude:plan_paused", { planId, stepId: step.id, error, canRollback });
+
+            const updatedPlan = await getPlan(planId);
+            socket.emit("claude:plan_updated", { plan: updatedPlan });
+
+            const action = await new Promise<PlanAction>((resolve) => {
+              ctx.planResumeCallbacks.set(planId, resolve);
+            });
+            ctx.planResumeCallbacks.delete(planId);
+
+            if (action === "cancel") { cancelled = true; break; }
+            if (action === "retry") {
+              await updatePlanStep(step.id, { status: "approved" });
+            } else {
+              skippedIds.add(step.id);
+              completedIds.add(step.id);
+            }
+          } else {
+            completedIds.add(step.id);
+            await updatePlanStep(step.id, { status: "completed", result: JSON.stringify(result) });
+            socket.emit("claude:step_completed", { planId, stepId: step.id, result: JSON.stringify(result) });
+            const updatedPlan = await getPlan(planId);
+            socket.emit("claude:plan_updated", { plan: updatedPlan });
+          }
+        }
+
+        if (cancelled) {
+          planExecutionCounts.set(email, (planExecutionCounts.get(email) ?? 1) - 1);
+          planOwners.delete(planId);
+          await updatePlanStatus(planId, "failed");
+          const failedPlan = await getPlan(planId);
+          socket.emit("claude:plan_updated", { plan: failedPlan });
+          dispatchNotification("plan_failed", email, "Plan failed", "Plan execution failed and was stopped.").catch(() => {});
+          return;
+        }
       }
 
       planExecutionCounts.set(email, (planExecutionCounts.get(email) ?? 1) - 1);
