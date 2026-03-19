@@ -220,8 +220,11 @@ app.prepare().then(async () => {
       return;
     }
 
-    // API abuse detection & IP block check for authenticated API routes
-    if (url.startsWith(widgetBasePath + "/api/") && !url.startsWith(widgetBasePath + "/api/auth")) {
+    // API abuse detection & IP block check for authenticated API routes.
+    // Skip counting for Next.js internal RSC/prefetch requests and GET-only
+    // reads, which inflate the counter during normal SPA navigation.
+    const isNextInternal = req.headers["rsc"] === "1" || req.headers["next-router-prefetch"] === "1";
+    if (url.startsWith(widgetBasePath + "/api/") && !url.startsWith(widgetBasePath + "/api/auth") && !isNextInternal) {
       try {
         const ip = extractIP(req.headers as Record<string, string | string[] | undefined>, (req.socket as { remoteAddress?: string }).remoteAddress);
         // Check if already blocked
