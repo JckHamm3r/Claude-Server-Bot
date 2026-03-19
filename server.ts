@@ -224,6 +224,11 @@ app.prepare().then(async () => {
     // Skip counting for Next.js internal RSC/prefetch requests and GET-only
     // reads, which inflate the counter during normal SPA navigation.
     const isNextInternal = req.headers["rsc"] === "1" || req.headers["next-router-prefetch"] === "1";
+    // Debug: log API hits to diagnose rate-limit triggers (remove when no longer needed)
+    if (url.startsWith(widgetBasePath + "/api/") && process.env.DEBUG_API_HITS === "1") {
+      const shortUrl = url.slice(widgetBasePath.length);
+      console.log(`[api-hit] ${req.method} ${shortUrl}${isNextInternal ? " [rsc]" : ""}`);
+    }
     if (url.startsWith(widgetBasePath + "/api/") && !url.startsWith(widgetBasePath + "/api/auth") && !isNextInternal) {
       try {
         const ip = extractIP(req.headers as Record<string, string | string[] | undefined>, (req.socket as { remoteAddress?: string }).remoteAddress);
