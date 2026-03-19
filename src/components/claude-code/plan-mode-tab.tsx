@@ -76,12 +76,13 @@ export function PlanModeTab() {
     socketRef.current = getSocket();
     const socket = socketRef.current;
 
-    socket.on("connect", () => {
+    const handleConnect = () => {
       setConnected(true);
       socket.emit("claude:list_plans", { sessionId });
-    });
-
-    socket.on("disconnect", () => setConnected(false));
+    };
+    const handleDisconnect = () => setConnected(false);
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
 
     socket.on(
       "claude:plans",
@@ -269,12 +270,13 @@ export function PlanModeTab() {
       setActivePlanId((prev) => (prev === planId ? null : prev));
     });
 
-    socket.on("claude:error", ({ message }: { message: string }) => {
+    const handleError = ({ message }: { message: string }) => {
       setGenerating(false);
       setExecuting(false);
       setGeneratingProgress("");
       setPlanError(message);
-    });
+    };
+    socket.on("claude:error", handleError);
 
     if (socket.connected) {
       setConnected(true);
@@ -282,8 +284,11 @@ export function PlanModeTab() {
     }
 
     return () => {
-      socket.off("connect");
-      socket.off("disconnect");
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("claude:error", handleError);
+      // Plan-specific events are only registered by this component,
+      // so removing all listeners is safe here.
       socket.off("claude:plans");
       socket.off("claude:plan_generated");
       socket.off("claude:plan_updated");
@@ -298,7 +303,6 @@ export function PlanModeTab() {
       socket.off("claude:step_tool_activity");
       socket.off("claude:step_usage");
       socket.off("claude:plan_deleted");
-      socket.off("claude:error");
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -307,7 +311,6 @@ export function PlanModeTab() {
     const socket = socketRef.current;
     if (!socket) return;
     const handler = ({ plan }: { plan: ClaudePlan }) => { upsertPlan(plan); };
-    socket.off("claude:plan_updated");
     socket.on("claude:plan_updated", handler);
     return () => { socket.off("claude:plan_updated", handler); };
   }, [activePlanId, upsertPlan]);

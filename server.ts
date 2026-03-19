@@ -309,7 +309,10 @@ app.prepare().then(async () => {
     path: socketPath,
     cors: {
       origin: (incoming: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
-        if (!incoming || !botOrigin || incoming === botOrigin) cb(null, true);
+        // Allow same-origin requests (no Origin header) or matching origin.
+        // When botOrigin is empty (misconfigured NEXTAUTH_URL), reject cross-origin
+        // instead of allowing all origins.
+        if (!incoming || (botOrigin && incoming === botOrigin)) cb(null, true);
         else cb(new Error("Origin not allowed"));
       },
       credentials: true,

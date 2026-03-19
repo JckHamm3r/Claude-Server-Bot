@@ -21,7 +21,7 @@ export async function middleware(request: NextRequest) {
     pathname === "/api/bot-identity" ||
     pathname === "/api/health/ping" ||
     pathname === "/api/users/password/force-change" ||
-    pathname.includes("/api/internal/sub-agent")
+    pathname === "/api/internal/sub-agent"
   ) {
     return NextResponse.next();
   }
@@ -48,13 +48,17 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(loginUrl);
     }
 
-    // Enforce per-user IP allowlist on every request (refreshed every 5 min via JWT)
+    // Enforce per-user IP allowlist on every request (refreshed every 5 min via JWT).
+    // Only trust proxy headers (x-real-ip, x-forwarded-for) when TRUSTED_PROXY=true,
+    // matching the behavior of extractIP() in ip-protection.ts.
     const allowedIps = token.allowedIps as string[] | undefined;
     if (allowedIps && allowedIps.length > 0) {
-      const clientIP =
-        request.headers.get("x-real-ip") ??
-        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-        "";
+      const trustProxy = process.env.TRUSTED_PROXY === "true";
+      const clientIP = trustProxy
+        ? (request.headers.get("x-real-ip") ??
+           request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+           "")
+        : "";
       if (clientIP && !isIPInAllowList(clientIP, allowedIps)) {
         const loginUrl = new URL(`${basePath}/login`, origin);
         loginUrl.searchParams.set("error", "ip_restricted");

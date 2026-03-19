@@ -36,9 +36,11 @@ export async function POST(req: NextRequest) {
       }
 
       const buffer = Buffer.from(await file.arrayBuffer());
-      
+
       const hash = crypto.createHash("md5").update(email).digest("hex");
-      const ext = file.name.split(".").pop() || "png";
+      const ALLOWED_EXTS = new Set(["jpg", "jpeg", "png", "gif", "webp"]);
+      const rawExt = (file.name.split(".").pop() || "png").toLowerCase();
+      const ext = ALLOWED_EXTS.has(rawExt) ? rawExt : "png";
       const filename = `user-${hash}.${ext}`;
       
       const avatarsDir = join(process.cwd(), "public", "avatars");

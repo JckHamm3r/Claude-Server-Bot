@@ -3,18 +3,6 @@ import { runSubAgent, MAX_DELEGATION_DEPTH } from "@/lib/sub-agent-runner";
 import { getActiveAgents } from "@/lib/claude-db";
 import { getOrCreateInternalSecret } from "@/lib/agent-tool-injector";
 
-function isLocalRequest(req: NextRequest): boolean {
-  // Allow requests from localhost only
-  const forwarded = req.headers.get("x-forwarded-for");
-  if (forwarded) {
-    // If there's a forwarded-for header with non-local IP, reject
-    const firstIp = forwarded.split(",")[0].trim();
-    if (firstIp !== "127.0.0.1" && firstIp !== "::1") return false;
-  }
-  const host = req.headers.get("host") ?? "";
-  return host.startsWith("localhost:") || host === "localhost" || host.startsWith("127.0.0.1:");
-}
-
 function validateSecret(req: NextRequest): boolean {
   const secret = getOrCreateInternalSecret();
   const provided = req.headers.get("x-internal-secret");
@@ -23,7 +11,7 @@ function validateSecret(req: NextRequest): boolean {
 
 // GET — list active agents
 export async function GET(req: NextRequest) {
-  if (!isLocalRequest(req) || !validateSecret(req)) {
+  if (!validateSecret(req)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -39,7 +27,7 @@ export async function GET(req: NextRequest) {
 
 // POST — run a sub-agent delegation
 export async function POST(req: NextRequest) {
-  if (!isLocalRequest(req) || !validateSecret(req)) {
+  if (!validateSecret(req)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

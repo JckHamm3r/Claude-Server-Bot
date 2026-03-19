@@ -1,4 +1,4 @@
-import { exec, execSync } from "child_process";
+import { execFileSync, execFile } from "child_process";
 import { promisify } from "util";
 import type { HandlerContext } from "./types";
 import {
@@ -26,7 +26,7 @@ import {
 } from "../lib/terminal-db";
 import { dbAll, dbGet } from "../lib/db";
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 const PROJECT_ROOT = process.env.CLAUDE_PROJECT_ROOT ?? process.cwd();
 
 // ── In-memory state ────────────────────────────────────────────────────────
@@ -53,7 +53,7 @@ const SCROLLBACK_FLUSH_MS = 30_000; // flush to DB every 30s
 
 function tmuxSessionExists(tmuxName: string): boolean {
   try {
-    execSync(`tmux has-session -t ${tmuxName} 2>/dev/null`);
+    execFileSync("tmux", ["has-session", "-t", tmuxName], { stdio: ["ignore", "pipe", "pipe"] });
     return true;
   } catch {
     return false;
@@ -62,7 +62,7 @@ function tmuxSessionExists(tmuxName: string): boolean {
 
 async function createTmuxSession(tmuxName: string, cwd: string): Promise<void> {
   const startDir = cwd || PROJECT_ROOT;
-  await execAsync(`tmux new-session -d -s ${tmuxName} -x 220 -y 50 -c ${JSON.stringify(startDir)}`);
+  await execFileAsync("tmux", ["new-session", "-d", "-s", tmuxName, "-x", "220", "-y", "50", "-c", startDir]);
 }
 
 async function ensureTmuxSession(session: TerminalSession): Promise<void> {
@@ -169,7 +169,7 @@ export async function cleanupIdleTerminalSessions() {
       // Kill tmux session if alive
       if (tmuxSessionExists(session.tmux_session_name)) {
         try {
-          execSync(`tmux kill-session -t ${session.tmux_session_name}`);
+          execFileSync("tmux", ["kill-session", "-t", session.tmux_session_name], { stdio: "pipe" });
         } catch { /* ignore */ }
       }
       // Flush scrollback then clear PTY ref
@@ -391,7 +391,7 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
 
     // Kill tmux session
     if (tmuxSessionExists(session.tmux_session_name)) {
-      try { execSync(`tmux kill-session -t ${session.tmux_session_name}`); } catch { /* ignore */ }
+      try { execFileSync("tmux", ["kill-session", "-t", session.tmux_session_name], { stdio: "pipe" }); } catch { /* ignore */ }
     }
 
     // Kill PTY if live
@@ -547,7 +547,7 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
       }
 
       try {
-        const { stdout } = await execAsync(`cat ${histFile} 2>/dev/null | tail -n 1000`);
+        const { stdout } = await execFileAsync("tail", ["-n", "1000", histFile]);
         // Parse zsh extended history (: timestamp:elapsed;command) or plain bash history
         shellHistory = stdout
           .split("\n")
@@ -559,7 +559,7 @@ export function registerTerminalHandlers(ctx: HandlerContext) {
       let tmuxHistory: string[] = [];
       if (tmuxName && tmuxSessionExists(tmuxName)) {
         try {
-          const { stdout } = await execAsync(`tmux capture-pane -t ${tmuxName} -p -S -${MAX_SCROLLBACK_LINES}`);
+          const { stdout } = await execFileAsync("tmux", ["capture-pane", "-t", tmuxName, "-p", "-S", `-${MAX_SCROLLBACK_LINES}`]);
           tmuxHistory = stdout.split("\n").filter(l => l.trim().length > 0);
         } catch { /* ignore */ }
       }

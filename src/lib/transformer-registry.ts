@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import type { TransformerManifest, TransformerRecord, GitLogEntry } from "@/lib/transformer-types";
 
 const TRANSFORMERS_DIR = path.join(process.cwd(), "data", "transformers");
@@ -33,8 +33,8 @@ function readConfigValues(dirPath: string): Record<string, string | number | boo
 
 function getGitLog(dirPath: string): GitLogEntry[] {
   try {
-    const raw = execSync(
-      'git log --pretty=format:"%H|%h|%s|%ai" -- .',
+    const raw = execFileSync(
+      "git", ["log", "--pretty=format:%H|%h|%s|%ai", "--", "."],
       { cwd: dirPath, stdio: ["pipe", "pipe", "pipe"] }
     ).toString().trim();
     if (!raw) return [];
@@ -49,7 +49,7 @@ function getGitLog(dirPath: string): GitLogEntry[] {
 
 function isGitRepo(dirPath: string): boolean {
   try {
-    execSync("git rev-parse --is-inside-work-tree", { cwd: dirPath, stdio: "pipe" });
+    execFileSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd: dirPath, stdio: "pipe" });
     return true;
   } catch {
     return false;
@@ -57,15 +57,15 @@ function isGitRepo(dirPath: string): boolean {
 }
 
 function initGitRepo(dirPath: string) {
-  execSync("git init", { cwd: dirPath, stdio: "pipe" });
-  execSync("git add -A", { cwd: dirPath, stdio: "pipe" });
-  execSync('git commit -m "Initial transformer"', { cwd: dirPath, stdio: "pipe" });
+  execFileSync("git", ["init"], { cwd: dirPath, stdio: "pipe" });
+  execFileSync("git", ["add", "-A"], { cwd: dirPath, stdio: "pipe" });
+  execFileSync("git", ["commit", "-m", "Initial transformer"], { cwd: dirPath, stdio: "pipe" });
 }
 
 function gitCommit(dirPath: string, message: string) {
   try {
-    execSync("git add -A", { cwd: dirPath, stdio: "pipe" });
-    execSync(`git commit -m "${message.replace(/"/g, '\\"')}"`, { cwd: dirPath, stdio: "pipe" });
+    execFileSync("git", ["add", "-A"], { cwd: dirPath, stdio: "pipe" });
+    execFileSync("git", ["commit", "-m", message], { cwd: dirPath, stdio: "pipe" });
   } catch {
     // Nothing to commit or git not available — ignore
   }
@@ -189,10 +189,11 @@ class TransformerRegistry {
   }
 
   gitRollback(id: string, hash: string): void {
+    if (!/^[0-9a-f]+$/i.test(hash)) throw new Error("Invalid git hash");
     const dirPath = path.join(TRANSFORMERS_DIR, id);
     if (!fs.existsSync(dirPath)) throw new Error(`Transformer "${id}" not found`);
     if (!isGitRepo(dirPath)) throw new Error(`Transformer "${id}" has no git history`);
-    execSync(`git checkout ${hash} -- .`, { cwd: dirPath, stdio: "pipe" });
+    execFileSync("git", ["checkout", hash, "--", "."], { cwd: dirPath, stdio: "pipe" });
     gitCommit(dirPath, `Rollback to ${hash}`);
   }
 }

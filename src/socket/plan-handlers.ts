@@ -1,4 +1,4 @@
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import type { HandlerContext, PlanAction } from "./types";
 import {
   type ClaudePlanStep,
@@ -31,6 +31,10 @@ import { validateDependencyGraph, getReadySteps } from "../lib/plan-scheduler";
 
 function sanitizePromptInput(input: string, maxLen = 2000): string {
   return input.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').slice(0, maxLen);
+}
+
+function isValidPlanId(id: string): boolean {
+  return /^[0-9a-f-]+$/i.test(id) && id.length <= 64;
 }
 
 interface StepResult {
@@ -653,9 +657,11 @@ Be specific. Each step should be atomic and independently executable. Max 50 ste
       let canRollback = false;
       const projectRoot = process.env.CLAUDE_PROJECT_ROOT ?? process.cwd();
       try {
-        execSync("git rev-parse --is-inside-work-tree", { cwd: projectRoot, stdio: "pipe" });
-        execSync(`git tag -f plan-checkpoint-${planId}`, { cwd: projectRoot, stdio: "pipe" });
-        canRollback = true;
+        execFileSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd: projectRoot, stdio: "pipe" });
+        if (isValidPlanId(planId)) {
+          execFileSync("git", ["tag", "-f", `plan-checkpoint-${planId}`], { cwd: projectRoot, stdio: "pipe" });
+          canRollback = true;
+        }
       } catch { /* not a git repo — rollback unavailable */ }
 
       socket.emit("claude:plan_executing", { planId, canRollback });
@@ -794,18 +800,22 @@ Be specific. Each step should be atomic and independently executable. Max 50 ste
 
   socket.on("claude:rollback_stop", async ({ planId }: { planId: string }) => {
     try {
+      if (!isValidPlanId(planId)) {
+        socket.emit("claude:error", { message: "Invalid plan ID" });
+        return;
+      }
       const projectRoot = process.env.CLAUDE_PROJECT_ROOT ?? process.cwd();
       // Discard uncommitted changes
-      execSync("git checkout -- .", { cwd: projectRoot, stdio: "pipe" });
+      execFileSync("git", ["checkout", "--", "."], { cwd: projectRoot, stdio: "pipe" });
 
       // Reset any commits made during execution
       try {
-        execSync(`git reset --mixed plan-checkpoint-${planId}`, { cwd: projectRoot, stdio: "pipe" });
+        execFileSync("git", ["reset", "--mixed", `plan-checkpoint-${planId}`], { cwd: projectRoot, stdio: "pipe" });
       } catch { /* no commits to reset */ }
 
       // Clean up tag
       try {
-        execSync(`git tag -d plan-checkpoint-${planId}`, { cwd: projectRoot, stdio: "pipe" });
+        execFileSync("git", ["tag", "-d", `plan-checkpoint-${planId}`], { cwd: projectRoot, stdio: "pipe" });
       } catch { /* tag already deleted */ }
 
       // Mark steps as rolled back
@@ -827,7 +837,7 @@ Be specific. Each step should be atomic and independently executable. Max 50 ste
     try {
       const projectRoot = process.env.CLAUDE_PROJECT_ROOT ?? process.cwd();
       // Discard uncommitted changes (current step only — best effort)
-      execSync("git checkout -- .", { cwd: projectRoot, stdio: "pipe" });
+      execFileSync("git", ["checkout", "--", "."], { cwd: projectRoot, stdio: "pipe" });
 
       const cb = ctx.planResumeCallbacks.get(planId);
       if (cb) cb("skip");
@@ -854,7 +864,7 @@ Be specific. Each step should be atomic and independently executable. Max 50 ste
         await updatePlanStatus(planId, "cancelled");
         const plan = await getPlan(planId);
         socket.emit("claude:plan_updated", { plan });
-        planExecutionCounts.set(email, (planExecutionCounts.get(email) ?? 1) - 1);
+        planExecutionCounts.set(email, Math.max(0, (planExecutionCounts.get(email) ?? 1) - 1));
         planOwners.delete(planId);
       }
     } catch (err) {

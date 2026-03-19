@@ -26,8 +26,10 @@ export async function GET() {
     "SELECT key, value FROM app_settings ORDER BY key ASC"
   );
 
+  const SENSITIVE_KEYS = new Set(["anthropic_api_key"]);
   const settings: Record<string, string> = {};
   for (const row of rows) {
+    if (SENSITIVE_KEYS.has(row.key)) continue;
     settings[row.key] = row.value;
   }
 

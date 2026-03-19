@@ -60,6 +60,7 @@ interface SDKSessionState {
   onSubAgentCost: ((costUsd: number) => void) | null;
   // Group permissions (loaded at session creation)
   groupPermissions?: import("../claude-db").GroupPermissions | null;
+  groupPermissionsLoaded: Promise<void>;
 }
 
 const sessions = new Map<string, SDKSessionState>();
@@ -105,6 +106,11 @@ function clearTimers(state: SDKSessionState): void {
 
 function endStream(state: SDKSessionState): void {
   state.streamEnded = true;
+  // Drain any pending queued messages so their promises settle
+  for (const queued of state.messageQueue) {
+    queued.resolve();
+  }
+  state.messageQueue = [];
   if (state.messageReady) {
     state.messageReady();
     state.messageReady = null;
@@ -164,6 +170,7 @@ function getOrCreate(sessionId: string, userEmail = ""): SDKSessionState {
       delegationDepth: 0,
       parentSessionId: null,
       onSubAgentCost: null,
+      groupPermissionsLoaded: Promise.resolve(),
     });
   }
   const state = sessions.get(sessionId)!;
@@ -311,9 +318,13 @@ async function startStreamingSession(
   sessionId: string,
 ): Promise<void> {
   if (state.streamActive) return;
+  // Set eagerly to prevent duplicate stream starts during the awaits below.
+  // Reset to false in every early-return error path.
+  state.streamActive = true;
 
   const apiKey = await getApiKey();
   if (!apiKey) {
+    state.streamActive = false;
     state.emitter.emit("output", {
       type: "error",
       message: "No API key configured. Set ANTHROPIC_API_KEY or add one in Settings.",
@@ -331,6 +342,7 @@ async function startStreamingSession(
     const sdk = await import("@anthropic-ai/claude-agent-sdk");
     queryFn = sdk.query;
   } catch {
+    state.streamActive = false;
     state.emitter.emit("output", {
       type: "error",
       message: "Claude Agent SDK not installed. Run: npm install @anthropic-ai/claude-agent-sdk",
@@ -464,6 +476,8 @@ async function startStreamingSession(
       }
 
       // Continue with existing permission logic...
+      // Ensure group permissions are loaded before checking
+      await state.groupPermissionsLoaded;
       // Apply group-level security checks before asking for user approval
       if (state.groupPermissions && !state.skipPermissions) {
         // Check guard rails with group permissions (directory/filetype restrictions)
@@ -537,7 +551,6 @@ async function startStreamingSession(
   };
   delete options.env.CLAUDECODE;
 
-  state.streamActive = true;
   state.streamEnded = false;
   state.messageQueue = [];
   state.messageReady = null;
@@ -1030,10 +1043,11 @@ export const sdkProvider: ClaudeCodeProvider = {
     if (opts.parentSessionId) state.parentSessionId = opts.parentSessionId;
     if (opts.onSubAgentCost) state.onSubAgentCost = opts.onSubAgentCost;
 
-    // Load group permissions for this user (skip for admins — they bypass group restrictions)
+    // Load group permissions for this user (skip for admins — they bypass group restrictions).
+    // Store the promise so canUseTool can await it before the first check.
     if (opts.userEmail && !opts.skipPermissions) {
       const email = opts.userEmail;
-      void (async () => {
+      state.groupPermissionsLoaded = (async () => {
         try {
           if (!(await isUserAdmin(email))) {
             state.groupPermissions = await getUserGroupPermissions(email);

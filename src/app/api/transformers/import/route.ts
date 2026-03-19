@@ -38,7 +38,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "File must be a .tar.gz archive" }, { status: 400 });
     }
 
-    const { execSync } = await import("child_process");
+    // Reject archives larger than 10MB
+    if (file.size > 10 * 1024 * 1024) {
+      return NextResponse.json({ error: "Archive must be smaller than 10MB" }, { status: 400 });
+    }
+
+    const { execFileSync } = await import("child_process");
     const { tmpdir } = await import("os");
     const tmpFile = path.join(tmpdir(), `transformer-import-${Date.now()}.tar.gz`);
     const tmpExtractDir = path.join(tmpdir(), `transformer-extract-${Date.now()}`);
@@ -50,13 +55,23 @@ export async function POST(request: NextRequest) {
     // Extract to temp dir
     fs.mkdirSync(tmpExtractDir, { recursive: true });
     try {
-      execSync(`tar -xzf "${tmpFile}" -C "${tmpExtractDir}"`, { stdio: "pipe" });
+      execFileSync("tar", ["-xzf", tmpFile, "-C", tmpExtractDir], { stdio: "pipe" });
     } catch {
       fs.unlinkSync(tmpFile);
       fs.rmSync(tmpExtractDir, { recursive: true, force: true });
       return NextResponse.json({ error: "Failed to extract archive" }, { status: 400 });
     }
     fs.unlinkSync(tmpFile);
+
+    // Verify no extracted path escapes the temp directory (tar can contain ../ or absolute paths)
+    const allExtracted = fs.readdirSync(tmpExtractDir, { recursive: true }) as string[];
+    for (const entry of allExtracted) {
+      const resolved = path.resolve(tmpExtractDir, String(entry));
+      if (!resolved.startsWith(tmpExtractDir + path.sep) && resolved !== tmpExtractDir) {
+        fs.rmSync(tmpExtractDir, { recursive: true, force: true });
+        return NextResponse.json({ error: "Archive contains path traversal" }, { status: 400 });
+      }
+    }
 
     // Find the transformer directory (should be the only top-level dir)
     const entries = fs.readdirSync(tmpExtractDir);

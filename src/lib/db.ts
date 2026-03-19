@@ -589,6 +589,17 @@ const migrations: Record<number, () => Promise<void>> = {
     await addColumnSafe("plan_steps", "depends_on", "TEXT");
     console.log("[db] Migration 12: plan mode cost tracking + dependency columns");
   },
+  13: async () => {
+    // Performance indexes for commonly queried paths
+    await dbExec(`
+      CREATE INDEX IF NOT EXISTS idx_messages_session_ts ON messages(session_id, timestamp);
+      CREATE INDEX IF NOT EXISTS idx_plans_session ON plans(session_id);
+      CREATE INDEX IF NOT EXISTS idx_plan_steps_plan ON plan_steps(plan_id);
+      CREATE INDEX IF NOT EXISTS idx_activity_log_ts ON activity_log(timestamp DESC);
+      CREATE INDEX IF NOT EXISTS idx_activity_log_user ON activity_log(user_email, timestamp DESC);
+    `);
+    console.log("[db] Migration 13: add performance indexes");
+  },
 };
 
 // ── initDb: run once at server startup ───────────────────────────────────────

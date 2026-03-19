@@ -139,21 +139,27 @@ export function ChatTab({ isWidget = false }: ChatTabProps) {
   // Show a toast when this user is invited to a session
   useEffect(() => {
     const socket = getSocket();
+    let inviteTimer: ReturnType<typeof setTimeout> | null = null;
+    let rebuiltTimer: ReturnType<typeof setTimeout> | null = null;
     const handleInvited = ({ sessionId, sessionName, invitedBy }: { sessionId: string; sessionName: string | null; invitedBy: string }) => {
       setInviteToast({ sessionId, sessionName, invitedBy });
-      const timer = setTimeout(() => setInviteToast(null), 6000);
-      return () => clearTimeout(timer);
+      if (inviteTimer) clearTimeout(inviteTimer);
+      inviteTimer = setTimeout(() => setInviteToast(null), 6000);
     };
-    socket.on("claude:session_invited", handleInvited);
-    socket.on("claude:session_rebuilt", ({ sessionId: rebuiltId }: { sessionId: string }) => {
+    const handleRebuilt = ({ sessionId: rebuiltId }: { sessionId: string }) => {
       if (chat.activeSessionRef.current?.id === rebuiltId) {
         setSessionRebuiltToast(true);
-        setTimeout(() => setSessionRebuiltToast(false), 4000);
+        if (rebuiltTimer) clearTimeout(rebuiltTimer);
+        rebuiltTimer = setTimeout(() => setSessionRebuiltToast(false), 4000);
       }
-    });
+    };
+    socket.on("claude:session_invited", handleInvited);
+    socket.on("claude:session_rebuilt", handleRebuilt);
     return () => {
       socket.off("claude:session_invited", handleInvited);
-      socket.off("claude:session_rebuilt");
+      socket.off("claude:session_rebuilt", handleRebuilt);
+      if (inviteTimer) clearTimeout(inviteTimer);
+      if (rebuiltTimer) clearTimeout(rebuiltTimer);
     };
   }, [chat.activeSessionRef]);
 
