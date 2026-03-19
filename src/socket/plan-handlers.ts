@@ -25,6 +25,7 @@ import { logActivity } from "../lib/activity-log";
 import { dispatchNotification } from "../lib/notifications";
 import { DEFAULT_MODEL } from "../lib/models";
 import { buildSystemPrompt } from "../lib/system-prompt";
+import { validateDependencyGraph, getReadySteps } from "../lib/plan-scheduler";
 
 function sanitizePromptInput(input: string, maxLen = 2000): string {
   return input.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').slice(0, maxLen);
@@ -434,11 +435,15 @@ Goal: ${sanitizePromptInput(goal)}
 
 Generate a detailed step-by-step plan. Return ONLY a JSON array of steps:
 [
-  { "summary": "brief one-line summary", "details": "detailed explanation of what will be done" },
+  { "summary": "brief one-line summary", "details": "detailed explanation", "depends_on": [] },
   ...
 ]
 
-Be specific. Each step should be atomic and independently executable. Return only the JSON array.`;
+The "depends_on" array contains 1-based step numbers that must complete before this step can start.
+Most steps should depend on the previous step (sequential). Only mark steps as independent
+(empty depends_on) if they can truly run in parallel with no shared state.
+
+Be specific. Each step should be atomic and independently executable. Max 50 steps. Return only the JSON array.`;
 
         let lastOutput = "";
 
@@ -458,16 +463,36 @@ Be specific. Each step should be atomic and independently executable. Return onl
                 .replace(/^```(?:json)?\s*/i, "")
                 .replace(/\s*```\s*$/, "")
                 .trim();
-              const steps: { summary: string; details?: string }[] = JSON.parse(cleaned);
+              const steps: { summary: string; details?: string; depends_on?: number[] }[] = JSON.parse(cleaned);
               const cappedSteps = steps.slice(0, 50);
               await updatePlanStatus(plan.id, "reviewing");
+
+              // First pass: create all steps to get their IDs
+              const createdSteps = [];
               for (let i = 0; i < cappedSteps.length; i++) {
-                await addPlanStep(plan.id, {
+                const created = await addPlanStep(plan.id, {
                   step_order: i + 1,
                   summary: cappedSteps[i].summary,
                   details: cappedSteps[i].details,
                 });
+                createdSteps.push(created);
               }
+
+              // Second pass: resolve depends_on indices to UUIDs
+              for (let i = 0; i < cappedSteps.length; i++) {
+                const deps = cappedSteps[i].depends_on;
+                if (Array.isArray(deps) && deps.length > 0) {
+                  const resolvedIds = deps
+                    .filter((idx: number) => idx >= 1 && idx <= createdSteps.length && idx !== i + 1)
+                    .map((idx: number) => createdSteps[idx - 1].id);
+                  if (resolvedIds.length > 0) {
+                    await updatePlanStep(createdSteps[i].id, {
+                      depends_on: JSON.stringify(resolvedIds),
+                    });
+                  }
+                }
+              }
+
               const fullPlan = await getPlan(plan.id);
               socket.emit("claude:plan_generated", { plan: fullPlan });
             } catch {
@@ -621,7 +646,18 @@ Be specific. Each step should be atomic and independently executable. Return onl
       await logActivity("plan_executed", email, { planId });
       const approvedSteps = (plan.steps ?? []).filter((s) => s.status === "approved");
       await updatePlanStatus(planId, "executing");
-      socket.emit("claude:plan_executing", { planId });
+
+      // Create git checkpoint for rollback if project is a git repo
+      let canRollback = false;
+      const projectRoot = process.env.CLAUDE_PROJECT_ROOT ?? process.cwd();
+      try {
+        const { execSync } = require("child_process");
+        execSync("git rev-parse --is-inside-work-tree", { cwd: projectRoot, stdio: "pipe" });
+        execSync(`git tag -f plan-checkpoint-${planId}`, { cwd: projectRoot, stdio: "pipe" });
+        canRollback = true;
+      } catch { /* not a git repo — rollback unavailable */ }
+
+      socket.emit("claude:plan_executing", { planId, canRollback });
 
       const systemPrompt = await buildSystemPrompt({ interfaceType: "plan_execution" });
 
@@ -655,7 +691,7 @@ Be specific. Each step should be atomic and independently executable. Return onl
             error,
           });
           socket.emit("claude:step_failed", { planId, stepId: step.id, error });
-          socket.emit("claude:plan_paused", { planId, stepId: step.id, error });
+          socket.emit("claude:plan_paused", { planId, stepId: step.id, error, canRollback });
 
           const updatedPlan = await getPlan(planId);
           socket.emit("claude:plan_updated", { plan: updatedPlan });
@@ -718,14 +754,52 @@ Be specific. Each step should be atomic and independently executable. Return onl
   });
 
 
-  socket.on("claude:rollback_stop", ({ planId }: { planId: string }) => {
-    const cb = ctx.planResumeCallbacks.get(planId);
-    if (cb) cb("cancel");
+  socket.on("claude:rollback_stop", async ({ planId }: { planId: string }) => {
+    try {
+      const projectRoot = process.env.CLAUDE_PROJECT_ROOT ?? process.cwd();
+      const { execSync } = require("child_process");
+
+      // Discard uncommitted changes
+      execSync("git checkout -- .", { cwd: projectRoot, stdio: "pipe" });
+
+      // Reset any commits made during execution
+      try {
+        execSync(`git reset --mixed plan-checkpoint-${planId}`, { cwd: projectRoot, stdio: "pipe" });
+      } catch { /* no commits to reset */ }
+
+      // Clean up tag
+      try {
+        execSync(`git tag -d plan-checkpoint-${planId}`, { cwd: projectRoot, stdio: "pipe" });
+      } catch { /* tag already deleted */ }
+
+      // Mark steps as rolled back
+      const plan = await getPlan(planId);
+      for (const step of plan?.steps ?? []) {
+        if (["executing", "completed", "failed"].includes(step.status)) {
+          await updatePlanStep(step.id, { status: "rolled_back" });
+        }
+      }
+
+      const cb = ctx.planResumeCallbacks.get(planId);
+      if (cb) cb("cancel");
+    } catch (err) {
+      socket.emit("claude:error", { message: `Rollback failed: ${err}` });
+    }
   });
 
-  socket.on("claude:rollback_continue", ({ planId }: { planId: string }) => {
-    const cb = ctx.planResumeCallbacks.get(planId);
-    if (cb) cb("skip");
+  socket.on("claude:rollback_continue", async ({ planId }: { planId: string }) => {
+    try {
+      const projectRoot = process.env.CLAUDE_PROJECT_ROOT ?? process.cwd();
+      const { execSync } = require("child_process");
+
+      // Discard uncommitted changes (current step only — best effort)
+      execSync("git checkout -- .", { cwd: projectRoot, stdio: "pipe" });
+
+      const cb = ctx.planResumeCallbacks.get(planId);
+      if (cb) cb("skip");
+    } catch (err) {
+      socket.emit("claude:error", { message: `Rollback failed: ${err}` });
+    }
   });
 
   socket.on("claude:cancel_plan", async ({ planId }: { planId: string }) => {
