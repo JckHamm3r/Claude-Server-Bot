@@ -22,8 +22,9 @@ export function registerPresenceHandlers(ctx: HandlerContext) {
       [email]
     );
     
-    socket.to(`session:${sessionId}`).emit("claude:typing", { 
-      email, 
+    socket.to(`session:${sessionId}`).emit("claude:typing", {
+      sessionId,
+      email,
       typing: true,
       firstName: user?.first_name || "",
       lastName: user?.last_name || "",
@@ -33,7 +34,7 @@ export function registerPresenceHandlers(ctx: HandlerContext) {
 
   socket.on("claude:typing_stop", async ({ sessionId }: { sessionId: string }) => {
     if (!await canAccessSession(sessionId, email)) return;
-    socket.to(`session:${sessionId}`).emit("claude:typing", { email, typing: false });
+    socket.to(`session:${sessionId}`).emit("claude:typing", { sessionId, email, typing: false });
   });
 
   // ── Notification handlers ─────────────────────────────────────────────
@@ -61,10 +62,14 @@ export function registerPresenceHandlers(ctx: HandlerContext) {
   socket.on("disconnect", async () => {
     await logActivity("user_logout", email);
 
-    // Clean up session maps for sessions owned by this socket
+    // Emit typing-stop so other users in the session clear the indicator
     const userInfo = ctx.connectedUsers.get(socket.id);
     if (userInfo?.activeSession) {
-      // Don't delete command submitter — the command may still be running
+      socket.to(`session:${userInfo.activeSession}`).emit("claude:typing", {
+        sessionId: userInfo.activeSession,
+        email,
+        typing: false,
+      });
     }
 
     // Clean up rate-limit command counts for this user
@@ -74,7 +79,6 @@ export function registerPresenceHandlers(ctx: HandlerContext) {
       }
     }
 
-    ctx.connectedUsers.delete(socket.id);
-    ctx.broadcastPresence();
+    ctx.roomManager.disconnect();
   });
 }
