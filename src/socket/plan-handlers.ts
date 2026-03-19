@@ -19,13 +19,233 @@ import {
   getAgentMemories,
   setMemoryAssignments,
   getMemories,
+  incrementPlanCost,
 } from "../lib/claude-db";
 import { logActivity } from "../lib/activity-log";
 import { dispatchNotification } from "../lib/notifications";
 import { DEFAULT_MODEL } from "../lib/models";
+import { buildSystemPrompt } from "../lib/system-prompt";
 
 function sanitizePromptInput(input: string, maxLen = 2000): string {
   return input.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').slice(0, maxLen);
+}
+
+interface StepResult {
+  summary: string;
+  toolCalls: {
+    tool: string;
+    input: string;
+    status: "done" | "error";
+    exitCode?: number;
+  }[];
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+    cost_usd: number;
+  } | null;
+}
+
+function parseStepResult(raw: string | null): StepResult {
+  if (!raw) return { summary: "", toolCalls: [], usage: null };
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.summary === "string") return parsed;
+  } catch { /* not JSON — legacy plain text */ }
+  return { summary: raw, toolCalls: [], usage: null };
+}
+
+function buildStepPrompt(
+  plan: { goal: string; steps?: { step_order: number; summary: string; status: string; result: string | null }[] },
+  step: { summary: string; details: string | null },
+  stepIdx: number,
+  totalSteps: number,
+): string {
+  const lines: string[] = [];
+
+  lines.push("## Plan Overview");
+  lines.push(`Goal: ${plan.goal}`);
+  lines.push("Steps:");
+  for (const s of (plan.steps ?? []).slice().sort((a, b) => a.step_order - b.step_order)) {
+    const marker = s.status === "completed" ? "✓" : s.status === "executing" ? "→" : s.status === "failed" ? "✗" : "○";
+    lines.push(`  ${marker} ${s.step_order}. ${s.summary}`);
+  }
+  lines.push("");
+
+  const completedSteps = (plan.steps ?? [])
+    .filter((s) => s.status === "completed" && s.result)
+    .sort((a, b) => a.step_order - b.step_order);
+  if (completedSteps.length > 0) {
+    lines.push("## Previous Step Results");
+    let contextLen = 0;
+    for (const s of completedSteps) {
+      const parsed = parseStepResult(s.result);
+      const snippet = parsed.summary.slice(0, 500);
+      const entry = `Step ${s.step_order}: ${s.summary} → ${snippet}`;
+      if (contextLen + entry.length > 4000) break;
+      lines.push(entry);
+      contextLen += entry.length;
+    }
+    lines.push("");
+  }
+
+  lines.push(`## Current Step (${stepIdx + 1} of ${totalSteps})`);
+  lines.push(step.summary);
+  if (step.details) lines.push(step.details);
+  lines.push("");
+  lines.push("Execute this step now. Use tools to make the actual changes.");
+
+  return lines.join("\n");
+}
+
+async function executeStep(
+  ctx: HandlerContext,
+  plan: NonNullable<Awaited<ReturnType<typeof getPlan>>>,
+  step: NonNullable<NonNullable<typeof plan>["steps"]>[number],
+  stepIdx: number,
+  totalSteps: number,
+  systemPrompt: string | undefined,
+): Promise<{ result: StepResult; error?: string }> {
+  const { socket, provider } = ctx;
+  const planId = plan.id;
+  const stepSessionId = `plan-step-${planId}-${step.id}`;
+  const STEP_TIMEOUT_MS = 5 * 60 * 1000;
+
+  const toolCalls: StepResult["toolCalls"] = [];
+  let stepOutput = "";
+  let stepError = "";
+  let stepUsage: StepResult["usage"] = null;
+
+  const preamble = [
+    `You are executing step ${stepIdx + 1} of ${totalSteps} in a multi-step plan.`,
+    "",
+    `Goal: ${plan.goal}`,
+    "",
+    "Your job is to EXECUTE this step by using your tools (Write, Bash, Edit, etc.).",
+    "Do not just describe what to do — actually do it. Use tools to create files, run",
+    "commands, and make changes. When done, provide a brief summary of what you did.",
+  ].join("\n");
+
+  const fullSystemPrompt = systemPrompt
+    ? preamble + "\n\n" + systemPrompt
+    : preamble;
+
+  provider.createSession(stepSessionId, {
+    skipPermissions: true,
+    systemPrompt: fullSystemPrompt,
+    model: DEFAULT_MODEL,
+    maxTurns: 50,
+    userEmail: ctx.email,
+  });
+
+  ctx.activePlanSessions ??= new Map();
+  if (!ctx.activePlanSessions.has(planId)) ctx.activePlanSessions.set(planId, new Set());
+  ctx.activePlanSessions.get(planId)!.add(stepSessionId);
+
+  const stepPrompt = buildStepPrompt(plan, step, stepIdx, totalSteps);
+
+  return new Promise((resolve) => {
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+
+    const cleanup = () => {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      provider.offOutput(stepSessionId);
+      provider.closeSession(stepSessionId);
+      ctx.activePlanSessions?.get(planId)?.delete(stepSessionId);
+    };
+
+    timeoutHandle = setTimeout(() => {
+      provider.interrupt(stepSessionId);
+      cleanup();
+      resolve({
+        result: { summary: stepOutput, toolCalls, usage: stepUsage },
+        error: `Step timed out after ${STEP_TIMEOUT_MS / 1000}s`,
+      });
+    }, STEP_TIMEOUT_MS);
+
+    provider.onOutput(stepSessionId, (parsed) => {
+      if (parsed.type === "streaming" && parsed.content) {
+        stepOutput = parsed.content;
+        socket.emit("claude:step_progress", {
+          planId, stepId: step.id, type: "text", content: stepOutput,
+        });
+      }
+      if (parsed.type === "text" && parsed.content) {
+        stepOutput = parsed.content;
+        socket.emit("claude:step_progress", {
+          planId, stepId: step.id, type: "text", content: stepOutput,
+        });
+      }
+
+      if (parsed.type === "tool_call") {
+        socket.emit("claude:step_tool_activity", {
+          planId, stepId: step.id,
+          toolCallId: parsed.toolCallId,
+          toolName: parsed.toolName,
+          toolInput: parsed.toolInput,
+          status: "running",
+        });
+      }
+      if (parsed.type === "tool_result") {
+        const inputSummary = parsed.toolName === "Bash"
+          ? String((parsed as { toolInput?: { command?: string } }).toolInput?.command ?? "").slice(0, 200)
+          : String((parsed as { toolInput?: { file_path?: string } }).toolInput?.file_path ?? "").slice(0, 200);
+        toolCalls.push({
+          tool: parsed.toolName ?? "unknown",
+          input: inputSummary,
+          status: parsed.toolStatus === "error" ? "error" : "done",
+          exitCode: parsed.exitCode,
+        });
+        socket.emit("claude:step_tool_activity", {
+          planId, stepId: step.id,
+          toolCallId: parsed.toolCallId,
+          toolName: parsed.toolName,
+          toolResult: typeof parsed.toolResult === "string" ? parsed.toolResult.slice(0, 2000) : "",
+          toolStatus: parsed.toolStatus,
+          exitCode: parsed.exitCode,
+        });
+      }
+
+      if (parsed.type === "progress" && parsed.message) {
+        socket.emit("claude:step_progress", {
+          planId, stepId: step.id, type: "progress", message: parsed.message,
+        });
+      }
+
+      if (parsed.type === "usage" && parsed.usage) {
+        stepUsage = {
+          input_tokens: parsed.usage.input_tokens,
+          output_tokens: parsed.usage.output_tokens,
+          cost_usd: parsed.usage.cost_usd ?? 0,
+        };
+        socket.emit("claude:step_usage", {
+          planId, stepId: step.id, usage: stepUsage,
+        });
+      }
+
+      if (parsed.type === "error") {
+        stepError = parsed.message ?? "Unknown error";
+        socket.emit("claude:step_progress", {
+          planId, stepId: step.id, type: "error", message: stepError,
+        });
+      }
+
+      if (parsed.type === "done") {
+        cleanup();
+        if (stepError) {
+          resolve({
+            result: { summary: stepOutput, toolCalls, usage: stepUsage },
+            error: stepError,
+          });
+        } else {
+          resolve({
+            result: { summary: stepOutput, toolCalls, usage: stepUsage },
+          });
+        }
+      }
+    });
+
+    provider.sendMessage(stepSessionId, stepPrompt);
+  });
 }
 
 const planExecutionCounts = new Map<string, number>();
@@ -403,72 +623,42 @@ Be specific. Each step should be atomic and independently executable. Return onl
       await updatePlanStatus(planId, "executing");
       socket.emit("claude:plan_executing", { planId });
 
-      // Plan steps are user-approved, so always run with skipPermissions to
-      // avoid the execution hanging indefinitely on tool permission prompts.
-      const planSessionId = `plan-step-${planId}-${Date.now()}`;
-      provider.createSession(planSessionId, {
-        skipPermissions: true,
-        model: DEFAULT_MODEL,
-        maxTurns: 200,
-      });
-
-      const cleanupPlanSession = () => {
-        provider.offOutput(planSessionId);
-        provider.closeSession(planSessionId);
-      };
-
-      // First message establishes the plan context once
-      const stepSummaries = approvedSteps
-        .map((s, i) => `${i + 1}. ${s.summary}`)
-        .join("\n");
-      const initPrompt = `You are executing a multi-step plan. Execute each step I give you.\n\nOverall goal: ${sanitizePromptInput(plan.goal)}\n\nFull plan (${approvedSteps.length} steps):\n${stepSummaries}\n\nI will now give you each step one at a time. Execute only the step I provide, then stop and wait for the next.`;
-
-      // Send the plan overview as the first message so Claude has full context
-      await new Promise<void>((resolve) => {
-        provider.onOutput(planSessionId, (parsed) => {
-          if (parsed.type === "done") resolve();
-        });
-        provider.sendMessage(planSessionId, initPrompt);
-      });
+      const systemPrompt = await buildSystemPrompt({ interfaceType: "plan_execution" });
 
       let stepIdx = 0;
       while (stepIdx < approvedSteps.length) {
         const step = approvedSteps[stepIdx];
+
+        const freshPlan = await getPlan(planId);
+        if (!freshPlan) break;
+
         await updatePlanStep(step.id, { status: "executing", executed_at: new Date().toISOString() });
         socket.emit("claude:step_executing", { planId, stepId: step.id });
 
-        const stepPrompt = `Execute step ${stepIdx + 1}: ${sanitizePromptInput(step.summary)}${step.details ? `\nDetails: ${sanitizePromptInput(step.details)}` : ""}`;
+        const { result, error } = await executeStep(
+          ctx, freshPlan, step, stepIdx, approvedSteps.length, systemPrompt,
+        );
 
-        let stepOutput = "";
-        let stepError = "";
-
-        await new Promise<void>((resolve) => {
-          provider.onOutput(planSessionId, (parsed) => {
-            if (parsed.type === "text" && parsed.content) {
-              stepOutput = parsed.content;
-              socket.emit("claude:step_progress", { planId, stepId: step.id, content: stepOutput });
-            } else if (parsed.type === "streaming" && parsed.content) {
-              stepOutput = parsed.content;
-              socket.emit("claude:step_progress", { planId, stepId: step.id, content: stepOutput });
-            }
-            if (parsed.type === "error") {
-              stepError = parsed.message ?? "Unknown error";
-            }
-            if (parsed.type === "done") {
-              resolve();
-            }
+        if (result.usage) {
+          await updatePlanStep(step.id, {
+            input_tokens: result.usage.input_tokens,
+            output_tokens: result.usage.output_tokens,
+            cost_usd: result.usage.cost_usd,
           });
-          provider.sendMessage(planSessionId, stepPrompt);
-        });
+          await incrementPlanCost(planId, result.usage.input_tokens, result.usage.output_tokens, result.usage.cost_usd);
+        }
 
-        if (stepError) {
-          await updatePlanStep(step.id, { status: "failed", error: stepError });
-          socket.emit("claude:step_failed", { planId, stepId: step.id, error: stepError });
-          socket.emit("claude:plan_paused", {
-            planId,
-            stepId: step.id,
-            error: stepError,
+        if (error) {
+          await updatePlanStep(step.id, {
+            status: "failed",
+            result: JSON.stringify(result),
+            error,
           });
+          socket.emit("claude:step_failed", { planId, stepId: step.id, error });
+          socket.emit("claude:plan_paused", { planId, stepId: step.id, error });
+
+          const updatedPlan = await getPlan(planId);
+          socket.emit("claude:plan_updated", { plan: updatedPlan });
 
           const action = await new Promise<PlanAction>((resolve) => {
             ctx.planResumeCallbacks.set(planId, resolve);
@@ -476,36 +666,40 @@ Be specific. Each step should be atomic and independently executable. Return onl
           ctx.planResumeCallbacks.delete(planId);
 
           if (action === "cancel") {
-            cleanupPlanSession();
             planExecutionCounts.set(email, (planExecutionCounts.get(email) ?? 1) - 1);
             planOwners.delete(planId);
             await updatePlanStatus(planId, "failed");
-            const updatedPlan = await getPlan(planId);
-            socket.emit("claude:plan_updated", { plan: updatedPlan });
-            dispatchNotification("plan_failed", email, "Plan failed", `Plan execution failed and was stopped.`).catch(() => {});
+            const failedPlan = await getPlan(planId);
+            socket.emit("claude:plan_updated", { plan: failedPlan });
+            dispatchNotification("plan_failed", email, "Plan failed", "Plan execution failed and was stopped.").catch(() => {});
             return;
           }
 
-          if (action === "retry") {
-            continue;
-          }
-
+          if (action === "retry") continue;
           stepIdx++;
           continue;
         }
 
-        await updatePlanStep(step.id, { status: "completed", result: stepOutput });
-        socket.emit("claude:step_completed", { planId, stepId: step.id, result: stepOutput });
+        await updatePlanStep(step.id, {
+          status: "completed",
+          result: JSON.stringify(result),
+        });
+        socket.emit("claude:step_completed", {
+          planId, stepId: step.id, result: JSON.stringify(result),
+        });
+
+        const updatedPlan = await getPlan(planId);
+        socket.emit("claude:plan_updated", { plan: updatedPlan });
+
         stepIdx++;
       }
 
-      cleanupPlanSession();
       planExecutionCounts.set(email, (planExecutionCounts.get(email) ?? 1) - 1);
       planOwners.delete(planId);
       await updatePlanStatus(planId, "completed");
       const completedPlan = await getPlan(planId);
       socket.emit("claude:plan_completed", { plan: completedPlan });
-      dispatchNotification("plan_completed", email, "Plan completed", `Your plan has been executed successfully.`).catch(() => {});
+      dispatchNotification("plan_completed", email, "Plan completed", "Your plan has been executed successfully.").catch(() => {});
     } catch (err) {
       planExecutionCounts.set(email, (planExecutionCounts.get(email) ?? 1) - 1);
       planOwners.delete(planId);
@@ -536,14 +730,25 @@ Be specific. Each step should be atomic and independently executable. Return onl
 
   socket.on("claude:cancel_plan", async ({ planId }: { planId: string }) => {
     try {
+      const activeSessionIds = ctx.activePlanSessions?.get(planId);
+      if (activeSessionIds) {
+        for (const sid of activeSessionIds) {
+          provider.interrupt(sid);
+          provider.closeSession(sid);
+        }
+        ctx.activePlanSessions?.delete(planId);
+      }
+
       const cb = ctx.planResumeCallbacks.get(planId);
       if (cb) {
         cb("cancel");
-        return;
+      } else {
+        await updatePlanStatus(planId, "cancelled");
+        const plan = await getPlan(planId);
+        socket.emit("claude:plan_updated", { plan });
+        planExecutionCounts.set(email, (planExecutionCounts.get(email) ?? 1) - 1);
+        planOwners.delete(planId);
       }
-      await updatePlanStatus(planId, "cancelled");
-      const plan = await getPlan(planId);
-      socket.emit("claude:plan_updated", { plan });
     } catch (err) {
       socket.emit("claude:error", { message: String(err) });
     }
@@ -652,6 +857,17 @@ Be specific. Each step should be atomic and independently executable. Return onl
   });
 
   socket.on("disconnect", () => {
+    // Clean up active plan step sessions on disconnect
+    if (ctx.activePlanSessions) {
+      for (const [, sessions] of ctx.activePlanSessions) {
+        for (const sid of sessions) {
+          provider.interrupt(sid);
+          provider.closeSession(sid);
+        }
+      }
+      ctx.activePlanSessions.clear();
+    }
+
     // Cancel plans waiting for user action (paused at a resume callback)
     for (const [planId, cb] of ctx.planResumeCallbacks) {
       if (planOwners.get(planId) === email) {
