@@ -1,3 +1,4 @@
+import { execSync } from "child_process";
 import type { HandlerContext, PlanAction } from "./types";
 import {
   type ClaudePlanStep,
@@ -652,7 +653,6 @@ Be specific. Each step should be atomic and independently executable. Max 50 ste
       let canRollback = false;
       const projectRoot = process.env.CLAUDE_PROJECT_ROOT ?? process.cwd();
       try {
-        const { execSync } = require("child_process");
         execSync("git rev-parse --is-inside-work-tree", { cwd: projectRoot, stdio: "pipe" });
         execSync(`git tag -f plan-checkpoint-${planId}`, { cwd: projectRoot, stdio: "pipe" });
         canRollback = true;
@@ -795,8 +795,6 @@ Be specific. Each step should be atomic and independently executable. Max 50 ste
   socket.on("claude:rollback_stop", async ({ planId }: { planId: string }) => {
     try {
       const projectRoot = process.env.CLAUDE_PROJECT_ROOT ?? process.cwd();
-      const { execSync } = require("child_process");
-
       // Discard uncommitted changes
       execSync("git checkout -- .", { cwd: projectRoot, stdio: "pipe" });
 
@@ -828,8 +826,6 @@ Be specific. Each step should be atomic and independently executable. Max 50 ste
   socket.on("claude:rollback_continue", async ({ planId }: { planId: string }) => {
     try {
       const projectRoot = process.env.CLAUDE_PROJECT_ROOT ?? process.cwd();
-      const { execSync } = require("child_process");
-
       // Discard uncommitted changes (current step only — best effort)
       execSync("git checkout -- .", { cwd: projectRoot, stdio: "pipe" });
 
