@@ -1,6 +1,6 @@
 # Architecture
 
-**Next.js 14 App Router + custom HTTP server with Socket.IO + SQLite (better-sqlite3, WAL mode)**
+**Next.js 14 App Router + custom HTTP server with Socket.IO + SQLite (@libsql/client, WAL mode)**
 
 ## Build & Development Commands
 
@@ -47,7 +47,7 @@ NextAuth with Credentials provider, JWT strategy. Middleware handles:
 
 ## Database
 
-SQLite at `./data/claude-bot.db` with WAL mode. Schema auto-migrates on startup in `db.ts`. `claude-db.ts` provides all data access functions. No ORM — raw SQL with better-sqlite3.
+SQLite at `./data/claude-bot.db` with WAL mode. Schema auto-migrates on startup in `db.ts`. `claude-db.ts` provides all data access functions. No ORM — raw SQL with @libsql/client.
 
 ### Tables
 

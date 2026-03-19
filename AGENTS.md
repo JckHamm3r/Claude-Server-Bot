@@ -35,7 +35,7 @@ The app uses a slug-based URL path. You **cannot** access `http://localhost:3000
 - **Dev command**: `npm run dev` — starts Next.js in dev mode on port 3000 (auto-increments if busy).
 - **Production command**: `npm run build && npm start` — only needed if testing production mode specifically.
 - **Lint**: `npm run lint`
-- **Database**: SQLite via `better-sqlite3`. DB file auto-creates at `data/claude-bot.db` on first run. No external DB services needed.
+- **Database**: SQLite via `@libsql/client`. DB file auto-creates at `data/claude-bot.db` on first run. No external DB services needed.
 - **SSL**: Not available in this testing env. The `.env` references cert paths that don't exist; the server gracefully falls back to HTTP.
 
 ## Common Pitfalls

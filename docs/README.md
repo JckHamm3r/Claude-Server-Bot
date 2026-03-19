@@ -8,7 +8,7 @@ A self-hosted AI assistant platform powered by Claude AI. It provides a real-tim
 |-------|-----------|
 | Frontend | Next.js 14 (App Router) |
 | Real-time | Socket.IO (WebSocket) |
-| Database | SQLite (better-sqlite3, WAL mode) |
+| Database | SQLite (@libsql/client, WAL mode) |
 | AI | `@anthropic-ai/claude-agent-sdk` (streaming input mode) |
 | Auth | NextAuth (Credentials + JWT) |
 | Styling | Tailwind CSS (dark mode, CSS variable theming) |
