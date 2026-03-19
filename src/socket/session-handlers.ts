@@ -36,6 +36,7 @@ import { buildSystemPrompt } from "../lib/system-prompt";
 import { dbAll } from "../lib/db";
 import { releaseAllSessionLocks, cancelAllSessionQueuedOps } from "../lib/file-lock-manager";
 import { transformerEvents } from "../lib/transformer-events";
+import { clearAiPauseState } from "./message-handlers";
 
 export function registerSessionHandlers(ctx: HandlerContext) {
   const { socket, io, email, isAdmin } = ctx;
@@ -136,10 +137,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
           ...(systemPrompt ? { systemPrompt } : {}),
         });
 
-        socket.join(`session:${sessionId}`);
-
-        ctx.connectedUsers.set(socket.id, { email, activeSession: sessionId });
-        ctx.broadcastPresence();
+        ctx.roomManager.switchTo(sessionId, email);
 
         ctx.sessionStartTimes.set(sessionId, Date.now());
         ctx.metricsBuffer.session_count++;
@@ -161,9 +159,11 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         socket.emit("claude:error", { sessionId, message: "Access denied" });
         return;
       }
-      ctx.connectedUsers.set(socket.id, { email, activeSession: sessionId });
-      if (sessionId) socket.join(`session:${sessionId}`);
-      ctx.broadcastPresence();
+      if (sessionId) {
+        ctx.roomManager.switchTo(sessionId, email);
+      } else {
+        ctx.roomManager.leave(email);
+      }
     },
   );
 
@@ -234,7 +234,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         }
       } catch (err: unknown) {
         console.error("[db] rename_session failed:", err);
-        socket.emit("claude:error", { message: "Failed to rename session." });
+        socket.emit("claude:error", { sessionId, message: "Failed to rename session." });
       }
       try {
         const sessions = await listSessions(email);
@@ -248,6 +248,9 @@ export function registerSessionHandlers(ctx: HandlerContext) {
   socket.on("claude:delete_session", async ({ sessionId }: { sessionId: string }) => {
     try {
       if (!(await canModifySession(sessionId, email))) return;
+      // Notify participants and evict all sockets from the room
+      io.to(`session:${sessionId}`).emit("claude:session_deleted", { sessionId });
+      io.in(`session:${sessionId}`).socketsLeave(`session:${sessionId}`);
       const sp = ctx.getSessionProvider(sessionId);
       sp.offOutput(sessionId);
       sp.closeSession(sessionId);
@@ -258,6 +261,8 @@ export function registerSessionHandlers(ctx: HandlerContext) {
       ctx.sessionStartTimes.delete(sessionId);
       ctx.sessionProviders.delete(sessionId);
       ctx.sessionEventBuffers.delete(sessionId);
+      ctx.flushStreamingThrottle(sessionId);
+      clearAiPauseState(sessionId);
 
       // Release all file locks held by this session
       await releaseAllSessionLocks(sessionId).catch((err) => {
@@ -297,7 +302,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         await updateSessionTags(sessionId, tags);
       } catch (err: unknown) {
         console.error("[db] update_session_tags failed:", err);
-        socket.emit("claude:error", { message: "Failed to update session tags." });
+        socket.emit("claude:error", { sessionId, message: "Failed to update session tags." });
       }
       try {
         const sessions = await listSessions(email);
@@ -340,7 +345,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         await updateSessionModel(sessionId, model);
         io.to(`session:${sessionId}`).emit("claude:model_changed", { sessionId, model });
       } catch (err) {
-        socket.emit("claude:error", { message: String(err) });
+        socket.emit("claude:error", { sessionId, message: String(err) });
       }
     },
   );
@@ -366,9 +371,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         return;
       }
 
-      socket.join(`session:${sessionId}`);
-      ctx.connectedUsers.set(socket.id, { email, activeSession: sessionId });
-      ctx.broadcastPresence();
+      ctx.roomManager.switchTo(sessionId, email);
 
       const sessionProvider = ctx.getSessionProvider(sessionId, dbSession.provider_type);
 
@@ -476,7 +479,7 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         };
         socket.emit("claude:session_usage", { sessionId, usage, budgetLimits });
       } catch (err) {
-        socket.emit("claude:error", { message: String(err) });
+        socket.emit("claude:error", { sessionId, message: String(err) });
       }
     },
   );
@@ -524,6 +527,8 @@ export function registerSessionHandlers(ctx: HandlerContext) {
         ctx.sessionPendingUsage.delete(sid);
         ctx.sessionStartTimes.delete(sid);
         ctx.sessionEventBuffers.delete(sid);
+        ctx.flushStreamingThrottle(sid);
+        clearAiPauseState(sid);
       }
       await logActivity("kill_all", email);
       socket.emit("claude:kill_all_done", { killed: allSessionIds.size });
