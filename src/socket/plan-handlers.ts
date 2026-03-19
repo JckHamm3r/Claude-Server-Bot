@@ -191,7 +191,22 @@ Ask 2-3 targeted questions per turn to understand:
 - What tools it needs (Available: Bash, Read, Write, Edit, Glob, Grep, WebFetch, WebSearch, Agent)
 - Whether it should run in sandbox mode (restricted to specific tools) or have full access
 - Key behavioral instructions and constraints
-- Example trigger phrases that should route tasks to this agent
+
+## CRITICAL: Trigger Phrases
+
+You MUST generate comprehensive trigger phrases. These phrases are used by an automatic routing system to detect when a user's message should be handled by this agent. If trigger phrases are vague or missing, the agent will NEVER be automatically invoked.
+
+**Always ask the user**: "What kinds of requests should automatically trigger this agent?"
+
+Then generate 8-15 diverse trigger phrases that cover:
+- Direct requests ("create a snake game", "build me a website")
+- Variations in phrasing ("make a game", "I want a game", "develop a game for me")
+- Related sub-tasks ("add power-ups to the game", "fix the game collision detection")
+- Domain keywords that signal this agent's specialty
+- Both casual and formal request styles
+
+Bad trigger phrases: ["game", "code"] — too generic, will match everything
+Good trigger phrases: ["create a game", "build me a game", "make a snake game", "develop a platformer", "I want a game with upgrades", "build a web game", "create an arcade game", "make a game with particle effects"]
 
 After gathering enough information (typically 2-4 exchanges), produce the final configuration.
 When ready, emit EXACTLY this XML tag with valid JSON inside:
@@ -200,12 +215,12 @@ When ready, emit EXACTLY this XML tag with valid JSON inside:
 {
   "name": "Agent Name",
   "icon": "emoji",
-  "description": "1-2 sentence summary for the agent list",
-  "system_prompt": "Detailed behavioral instructions, personality, constraints, and domain knowledge",
+  "description": "1-2 sentence summary for the agent list — be specific about what this agent DOES",
+  "system_prompt": "Detailed behavioral instructions, personality, constraints, and domain knowledge. Include the agent's specialty areas, coding style preferences, quality standards, and any domain-specific rules.",
   "model": "claude-sonnet-4-6",
   "allowed_tools": ["Bash", "Read"],
   "skip_permissions": true,
-  "trigger_phrases": ["example phrase 1", "example phrase 2"]
+  "trigger_phrases": ["8-15 diverse phrases covering different ways users might request this agent's specialty"]
 }
 </agent-config>
 
@@ -323,14 +338,20 @@ Be concise. Ask focused questions. When you have enough info, produce the config
 
 Return ONLY valid JSON with these fields:
 {
-  "name": "string",
-  "description": "string",
+  "name": "string — short, memorable agent name",
+  "description": "string — 1-2 sentence summary of what this agent specializes in",
+  "system_prompt": "string — detailed behavioral instructions, personality, domain expertise, quality standards, and constraints for the agent",
   "model": "${DEFAULT_MODEL}",
   "allowed_tools": ["array", "of", "tool", "names"],
-  "icon": "emoji"
+  "skip_permissions": true,
+  "icon": "emoji",
+  "trigger_phrases": ["8-15 diverse phrases covering different ways users might request this agent's specialty — include variations in phrasing, related sub-tasks, and both casual/formal styles"]
 }
 
 Available tools: Bash, Read, Write, Edit, Glob, Grep, WebFetch, WebSearch, Agent
+
+IMPORTANT: trigger_phrases are critical — they power automatic routing. Generate diverse, specific phrases (not single keywords). Cover synonyms, different sentence structures, and related tasks.
+
 Return only the JSON object, no markdown, no explanation.`;
 
       let lastTextOutput = "";

@@ -25,6 +25,7 @@ import { checkBotConfigRequest } from "../lib/security-guard";
 import { dispatchNotification } from "../lib/notifications";
 import { runSubAgent } from "../lib/sub-agent-runner";
 import { buildSystemPrompt } from "../lib/system-prompt";
+import { matchAgentForMessage } from "../lib/agent-matcher";
 import { transformerEvents } from "../lib/transformer-events";
 
 // Per-session AI chat pause state
@@ -158,12 +159,11 @@ export function registerMessageHandlers(ctx: HandlerContext) {
         }
 
         // Block observe-only users from sending messages
-        if (!ctx.isAdmin) {
-          const msgPerms = await getUserGroupPermissions(email);
-          if (msgPerms.platform.observe_only) {
-            socket.emit("claude:error", { sessionId, message: "Your account is in observe-only mode. You cannot interact with sessions." });
-            return;
-          }
+        // Cache permissions for reuse by auto-delegation check below
+        const cachedGroupPerms = ctx.isAdmin ? null : await getUserGroupPermissions(email);
+        if (cachedGroupPerms?.platform.observe_only) {
+          socket.emit("claude:error", { sessionId, message: "Your account is in observe-only mode. You cannot interact with sessions." });
+          return;
         }
 
         // Rate limiting
@@ -294,6 +294,84 @@ export function registerMessageHandlers(ctx: HandlerContext) {
             return;
           }
           // If agentName/task could not be parsed, fall through to normal message handling
+        }
+
+        // ── Auto-delegation: Haiku-based agent matching ─────────────────────
+        // If the user's message matches an active agent's specialty, auto-route
+        // to that agent server-side (same as /agent but automatic).
+        if (!content.trim().startsWith("/")) {
+          try {
+            // Check delegation_enabled permission (reuse cached group permissions)
+            const delegationAllowed = !cachedGroupPerms || cachedGroupPerms.session.delegation_enabled;
+
+            if (delegationAllowed) {
+              const match = await matchAgentForMessage(content);
+              if (match) {
+                const { agent } = match;
+                console.log(`[auto-delegate] Routing to agent "${agent.name}" (confidence: ${match.confidence}, reason: ${match.reasoning})`);
+
+                const savedMsg = await saveMessage(sessionId, "admin", content, email, "chat");
+                io.to(`session:${sessionId}`).emit("claude:user_message", {
+                  sessionId,
+                  message: savedMsg,
+                  fromSocketId: socket.id,
+                  clientMsgId,
+                });
+                ctx.sessionCommandSubmitter.set(sessionId, email);
+                io.to(`session:${sessionId}`).emit("claude:command_started", { sessionId, submittedBy: email });
+                await ctx.setSessionStatus(sessionId, "running");
+
+                // Notify the UI that we're auto-delegating
+                io.to(`session:${sessionId}`).emit("claude:output", {
+                  sessionId,
+                  parsed: {
+                    type: "text",
+                    content: `Routing to **${agent.name}**${agent.icon ? ` ${agent.icon}` : ""} — ${match.reasoning}`,
+                  },
+                  submittedBy: email,
+                  metadata: { isAutoDelegation: true },
+                });
+
+                let agentResult: string;
+                try {
+                  const session = await getSession(sessionId);
+                  const result = await runSubAgent({
+                    agentName: agent.name,
+                    task: content,
+                    parentSessionId: sessionId,
+                    userEmail: email,
+                    skipPermissions: session?.skip_permissions ?? false,
+                    delegationDepth: 0,
+                  });
+
+                  if (result.success) {
+                    agentResult = result.result;
+                  } else {
+                    agentResult = `**${agent.name} — Error**\n\n${result.error ?? "Unknown error"}`;
+                  }
+                } catch (err) {
+                  agentResult = `**${agent.name} — Error**\n\n${String(err)}`;
+                }
+
+                io.to(`session:${sessionId}`).emit("claude:output", {
+                  sessionId,
+                  parsed: { type: "text", content: agentResult },
+                  submittedBy: email,
+                });
+                io.to(`session:${sessionId}`).emit("claude:output", {
+                  sessionId,
+                  parsed: { type: "done" },
+                  submittedBy: email,
+                });
+                await ctx.setSessionStatus(sessionId, "idle");
+                io.to(`session:${sessionId}`).emit("claude:command_done", { sessionId });
+                return;
+              }
+            }
+          } catch (err) {
+            // Auto-delegation errors should never block normal message flow
+            console.error("[auto-delegate] Error during agent matching:", err);
+          }
         }
 
         // ── /remember slash command ───────────────────────────────────────────

@@ -5,14 +5,16 @@ import { randomUUID } from "crypto";
 /**
  * Builds the <agent-delegation> block appended to session system prompts.
  * Tells Claude about available agents and how to invoke them via the
- * internal sub-agent API using the WebFetch tool.
+ * "delegate_to_agent" virtual tool (intercepted in canUseTool).
+ *
+ * The previous approach used WebFetch to POST to an internal API endpoint,
+ * but the SDK's WebFetch tool only supports `url` + `prompt` (not method/headers/body),
+ * so the calls always failed with "Invalid URL". The virtual tool pattern
+ * (same as update_session_context) is intercepted server-side and works reliably.
  */
 export async function buildAgentToolBlock(): Promise<string> {
   const agents = await getActiveAgents();
   if (agents.length === 0) return "";
-
-  const secret = getOrCreateInternalSecret();
-  const baseUrl = getSubAgentBaseUrl();
 
   const agentList = agents
     .map((a) => {
@@ -26,44 +28,36 @@ export async function buildAgentToolBlock(): Promise<string> {
 
   return `
 <agent-delegation>
-You have access to specialized sub-agents. Use them when a task clearly falls within their domain specialty.
+You have access to specialized sub-agents. **You MUST delegate to the appropriate agent** when a task falls within their domain specialty. Do NOT attempt to handle a task yourself if a matching agent exists — delegate first.
 
 Available agents:
 ${agentList}
 
-## How to delegate to an agent
+## MANDATORY delegation rules
 
-Use the **WebFetch** tool to POST to the internal delegation API.
-IMPORTANT: Use WebFetch, NOT Bash/curl. WebFetch to this endpoint is automatically approved.
+1. **If an agent's description or trigger phrases match the user's request, you MUST delegate to that agent.** Do not handle the task yourself. Do not ask the user for permission — delegate immediately.
+2. **If you are unsure whether an agent matches, delegate anyway.** It is always better to delegate to a specialist than to handle it yourself when an agent exists for that domain.
+3. **Only handle a task yourself if NO available agent is even remotely relevant.**
 
-URL: ${baseUrl}
-Method: POST
-Headers: Content-Type: application/json, X-Internal-Secret: ${secret}
-Body (JSON):
+## How to delegate
+
+You have a virtual tool called **"delegate_to_agent"**. Call it with this JSON input:
+
 {
   "agentName": "<exact agent name from the list above>",
-  "task": "<complete description of what the agent should do>",
-  "context": "<optional: any background context the agent needs>",
-  "parentSessionId": "<your current session ID>",
-  "userEmail": "<the user's email address>",
-  "skipPermissions": "<use the agent's configured permission mode>",
-  "depth": 0
+  "task": "<complete description of what the agent should do — include all user context and requirements>"
 }
 
-The response will be JSON: { "success": true/false, "result": "...", "error": "..." }
+The tool returns JSON: { "success": true/false, "result": "...", "error": "..." }
 
-WebFetch example call:
-WebFetch(url="${baseUrl}", method="POST", headers={"Content-Type": "application/json", "X-Internal-Secret": "${secret}"}, body=JSON.stringify({agentName: "AgentName", task: "task description", parentSessionId: "sessionId", userEmail: "email", depth: 0}))
+Example tool call:
+delegate_to_agent({ "agentName": "GameMaster", "task": "Create a snake game with neon cyberpunk aesthetics, power-ups, combo system, and particle effects" })
 
-## How to list agents dynamically
+**IMPORTANT:** Do NOT use WebFetch, Bash, or curl to delegate. The delegate_to_agent tool is the ONLY way to invoke sub-agents. It is automatically approved and requires no user confirmation.
 
-Use WebFetch:
-WebFetch(url="${baseUrl}", method="GET", headers={"X-Internal-Secret": "${secret}"})
+## Additional rules
 
-## Rules
-
-- **Use sub-agents autonomously** when a task fits their specialty — do not ask permission first.
-- **Parallel execution**: you MAY call delegate via WebFetch multiple times in the same response turn for independent tasks. They run concurrently. Wait for ALL tool results before composing your final response.
+- **Parallel execution**: you MAY call delegate_to_agent multiple times in the same response turn for independent tasks. They run concurrently. Wait for ALL tool results before composing your final response.
 - **Be methodical**: ensure sub-agents are not working on conflicting parts of the same files simultaneously.
 - **Error handling**: if an agent returns success: false, relay the error clearly to the user and handle gracefully.
 - **Max depth**: sub-agents can themselves delegate, up to ${MAX_DELEGATION_DEPTH} levels deep.

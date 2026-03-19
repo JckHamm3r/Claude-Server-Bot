@@ -4,6 +4,7 @@ import * as path from "path";
 import type { ClaudeCodeProvider, ParsedOutput, TokenUsage } from "./provider";
 import { updateClaudeSessionId, updateSessionContext, getUserGroupPermissions, isUserAdmin, getSession as getDbSession } from "../claude-db";
 import { getAppSetting } from "../app-settings";
+import { createDelegationMcpServer } from "../agent-delegation-mcp";
 import { 
   acquireLock, 
   queueOperation, 
@@ -405,27 +406,6 @@ async function startStreamingSession(
       toolInput: Record<string, unknown>,
       callOpts: { signal: AbortSignal; toolUseID: string },
     ) => {
-      // Auto-allow WebFetch calls to the internal sub-agent delegation endpoint
-      // (localhost-only, so no security risk).
-      if (toolName === "WebFetch") {
-        const url = typeof toolInput.url === "string" ? toolInput.url : "";
-        const port = process.env.PORT ?? "3000";
-        const nextAuthUrl = process.env.NEXTAUTH_URL ?? "";
-        let pathname = "";
-        try {
-          const parsed = new URL(nextAuthUrl);
-          pathname = parsed.pathname.replace(/\/$/, "");
-        } catch {
-          const pathPrefix = process.env.CLAUDE_BOT_PATH_PREFIX ?? "";
-          const slug = process.env.CLAUDE_BOT_SLUG ?? "";
-          if (pathPrefix && slug) pathname = `/${pathPrefix}/${slug}`;
-        }
-        const internalBase = `http://localhost:${port}${pathname}/api/internal/sub-agent`;
-        if (url.startsWith(internalBase)) {
-          return { behavior: "allow" as const, updatedInput: toolInput };
-        }
-      }
-
       // Intercept update_session_context — virtual tool for per-session context journal
       if (toolName === "update_session_context") {
         const input = toolInput as { context?: string };
@@ -668,6 +648,25 @@ async function processOutputStream(
       } as ParsedOutput);
     }
   }, HEARTBEAT_INTERVAL_MS);
+
+  // Register delegation MCP server for sessions that may need sub-agent access.
+  // Skip for sub-agent sessions at max depth to prevent recursion.
+  if (state.delegationDepth < 4) {
+    try {
+      const delegationServer = await createDelegationMcpServer({
+        sessionId,
+        userEmail: state.userEmail,
+        skipPermissions: state.skipPermissions,
+        delegationDepth: state.delegationDepth,
+      });
+      options.mcpServers = {
+        ...options.mcpServers,
+        "octoby-delegation": delegationServer,
+      };
+    } catch (err) {
+      console.error(`[sdk] Failed to create delegation MCP server for ${sessionId}:`, err);
+    }
+  }
 
   try {
     const messageStream = createMessageStream(state, resetTurnState);
