@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ClaudePlanStep } from "@/lib/claude-db";
+import type { ToolActivity } from "./plan-step-list";
 
 interface PlanStepCardProps {
   step: ClaudePlanStep;
@@ -37,6 +38,8 @@ interface PlanStepCardProps {
   paused?: boolean;
   canRollback?: boolean;
   stepProgress?: string;
+  toolActivity?: ToolActivity[];
+  dependsOnLabels?: string[];
 }
 
 // Step number badge styles per status
@@ -103,6 +106,8 @@ export function PlanStepCard({
   paused,
   canRollback,
   stepProgress,
+  toolActivity,
+  dependsOnLabels,
 }: PlanStepCardProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [resultOpen, setResultOpen]   = useState(false);
@@ -197,6 +202,18 @@ export function PlanStepCard({
                 {step.summary}
               </p>
             )}
+            {dependsOnLabels && dependsOnLabels.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {dependsOnLabels.map((label) => (
+                      <span
+                        key={label}
+                        className="rounded-full bg-bot-elevated/80 px-2 py-0.5 text-[9px] font-medium text-bot-muted/60"
+                      >
+                        After {label}
+                      </span>
+                    ))}
+                  </div>
+                )}
           </div>
 
           <span className={cn(
@@ -276,6 +293,47 @@ export function PlanStepCard({
               </div>
             )}
 
+            {/* Tool activity */}
+            {toolActivity && toolActivity.length > 0 && (
+              <div className="px-4 pb-2">
+                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-bot-muted/50">
+                  Tool Activity
+                </p>
+                <div className="space-y-1">
+                  {toolActivity.map((t) => (
+                    <div
+                      key={t.toolCallId}
+                      className={cn(
+                        "flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-caption",
+                        t.toolStatus === "running" && "bg-blue-500/8 text-blue-400",
+                        t.toolStatus === "done" && "bg-bot-green/8 text-bot-green/70",
+                        t.toolStatus === "error" && "bg-bot-red/8 text-bot-red/70",
+                      )}
+                    >
+                      {t.toolStatus === "running" ? (
+                        <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                      ) : t.toolStatus === "done" ? (
+                        <Check className="h-3 w-3 shrink-0" />
+                      ) : (
+                        <X className="h-3 w-3 shrink-0" />
+                      )}
+                      <span className="font-medium">{t.toolName}</span>
+                      {t.toolResult && (
+                        <span className="truncate text-[11px] opacity-60">
+                          {t.toolResult.slice(0, 80)}
+                        </span>
+                      )}
+                      {t.exitCode !== undefined && t.exitCode !== 0 && (
+                        <span className="ml-auto text-[10px] font-mono text-bot-red">
+                          exit {t.exitCode}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Result (completed) */}
             {isCompleted && step.result && (
               <div className="px-4 pb-2">
@@ -289,7 +347,14 @@ export function PlanStepCard({
                 </button>
                 {resultOpen && (
                   <pre className="mt-2 max-h-40 overflow-auto rounded-xl border border-bot-green/20 bg-bot-green/5 px-3 py-2.5 font-mono text-[11px] leading-relaxed text-bot-green/70 whitespace-pre-wrap break-words animate-fadeUp">
-                    {step.result}
+                    {(() => {
+                      try {
+                        const parsed = JSON.parse(step.result!);
+                        return parsed.summary || step.result;
+                      } catch {
+                        return step.result;
+                      }
+                    })()}
                   </pre>
                 )}
               </div>
@@ -419,6 +484,21 @@ export function PlanStepCard({
               <div className="flex items-center gap-2 border-t border-blue-500/15 px-4 py-2">
                 <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-ping" />
                 <span className="text-caption text-blue-400/70">Working…</span>
+              </div>
+            )}
+
+            {/* Completed footer with cost */}
+            {isCompleted && (step.cost_usd > 0 || step.input_tokens > 0) && (
+              <div className="flex items-center gap-2 border-t border-bot-border/20 px-4 py-2 text-[10px] text-bot-muted/50">
+                <Check className="h-3 w-3 text-bot-green/60" />
+                <span>Completed</span>
+                {step.cost_usd > 0 && <span>· ${step.cost_usd.toFixed(3)}</span>}
+                {step.input_tokens > 0 && (
+                  <span>· {((step.input_tokens + step.output_tokens) / 1000).toFixed(1)}k tokens</span>
+                )}
+                {toolActivity && toolActivity.length > 0 && (
+                  <span>· {toolActivity.length} tool calls</span>
+                )}
               </div>
             )}
           </>

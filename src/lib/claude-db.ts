@@ -525,6 +525,9 @@ export interface ClaudePlan {
   created_by: string;
   created_at: string;
   updated_at: string;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cost_usd: number;
   steps?: ClaudePlanStep[];
 }
 
@@ -540,6 +543,10 @@ export interface ClaudePlanStep {
   approved_by: string | null;
   executed_at: string | null;
   created_at: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  depends_on: string[] | null;
 }
 
 function rowToPlan(row: Record<string, unknown>): ClaudePlan {
@@ -551,6 +558,9 @@ function rowToPlan(row: Record<string, unknown>): ClaudePlan {
     created_by: row.created_by as string,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
+    total_input_tokens: (row.total_input_tokens as number) ?? 0,
+    total_output_tokens: (row.total_output_tokens as number) ?? 0,
+    total_cost_usd: (row.total_cost_usd as number) ?? 0,
   };
 }
 
@@ -567,6 +577,10 @@ function rowToPlanStep(row: Record<string, unknown>): ClaudePlanStep {
     approved_by: row.approved_by as string | null,
     executed_at: row.executed_at as string | null,
     created_at: row.created_at as string,
+    input_tokens: (row.input_tokens as number) ?? 0,
+    output_tokens: (row.output_tokens as number) ?? 0,
+    cost_usd: (row.cost_usd as number) ?? 0,
+    depends_on: row.depends_on ? JSON.parse(row.depends_on as string) : null,
   };
 }
 
@@ -625,7 +639,7 @@ export async function getPlanSteps(planId: string): Promise<ClaudePlanStep[]> {
 
 export async function updatePlanStep(
   id: string,
-  data: Partial<{ summary: string; details: string; status: ClaudePlanStep["status"]; step_order: number; result: string; error: string; approved_by: string; executed_at: string }>,
+  data: Partial<{ summary: string; details: string; status: ClaudePlanStep["status"]; step_order: number; result: string; error: string; approved_by: string; executed_at: string; input_tokens: number; output_tokens: number; cost_usd: number; depends_on: string }>,
 ): Promise<ClaudePlanStep> {
   const fields: string[] = [];
   const values: unknown[] = [];
@@ -637,6 +651,10 @@ export async function updatePlanStep(
   if (data.error !== undefined) { fields.push("error = ?"); values.push(data.error); }
   if (data.approved_by !== undefined) { fields.push("approved_by = ?"); values.push(data.approved_by); }
   if (data.executed_at !== undefined) { fields.push("executed_at = ?"); values.push(data.executed_at); }
+  if (data.input_tokens !== undefined) { fields.push("input_tokens = ?"); values.push(data.input_tokens); }
+  if (data.output_tokens !== undefined) { fields.push("output_tokens = ?"); values.push(data.output_tokens); }
+  if (data.cost_usd !== undefined) { fields.push("cost_usd = ?"); values.push(data.cost_usd); }
+  if (data.depends_on !== undefined) { fields.push("depends_on = ?"); values.push(data.depends_on); }
   if (fields.length === 0) {
     const row = await dbGet<Record<string, unknown>>("SELECT * FROM plan_steps WHERE id = ?", [id]);
     return rowToPlanStep(row!);
@@ -653,6 +671,23 @@ export async function deletePlanSteps(planId: string): Promise<void> {
 
 export async function deletePlan(planId: string): Promise<void> {
   await dbRun("DELETE FROM plans WHERE id = ?", [planId]);
+}
+
+export async function incrementPlanCost(
+  planId: string,
+  inputTokens: number,
+  outputTokens: number,
+  costUsd: number,
+): Promise<void> {
+  await dbRun(
+    `UPDATE plans SET
+      total_input_tokens = total_input_tokens + ?,
+      total_output_tokens = total_output_tokens + ?,
+      total_cost_usd = total_cost_usd + ?,
+      updated_at = datetime('now')
+    WHERE id = ?`,
+    [inputTokens, outputTokens, costUsd, planId]
+  );
 }
 
 // ==================== USER SETTINGS ====================

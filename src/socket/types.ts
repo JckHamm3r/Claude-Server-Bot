@@ -23,6 +23,7 @@ export interface HandlerContext {
   userSessionCommands: Map<string, Map<string, number>>;
   metricsBuffer: { session_count: number; command_count: number; agent_count: number; latencies: number[] };
   planResumeCallbacks: Map<string, (action: PlanAction) => void>;
+  activePlanSessions?: Map<string, Set<string>>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ptyProcesses: Map<string, any>;
   // Helper functions

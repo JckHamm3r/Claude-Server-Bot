@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { CheckCircle2, XCircle, Loader2, Key, Sparkles, Server, User } from "lucide-react";
+import { CheckCircle2, Loader2, Key, Sparkles, Server, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { SERVER_PURPOSES } from "@/lib/user-profile-constants";
@@ -13,20 +13,18 @@ import { SERVER_PURPOSES } from "@/lib/user-profile-constants";
 //  1 = AdminName (your first & last name)
 //  2 = BotName
 //  3 = APIKey
-//  4 = TestClaude
-//  5 = ProjectDir
-//  6 = ServerProfile
-//  7 = Done
-type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+//  4 = ProjectDir
+//  5 = ServerProfile
+//  6 = Done
+type Step = 1 | 2 | 3 | 4 | 5 | 6;
 
 const STEPS = [
   { n: 1, label: "You" },
   { n: 2, label: "Bot" },
   { n: 3, label: "API Key" },
-  { n: 4, label: "Test" },
-  { n: 5, label: "Project" },
-  { n: 6, label: "Server" },
-  { n: 7, label: "Done" },
+  { n: 4, label: "Project" },
+  { n: 5, label: "Server" },
+  { n: 6, label: "Done" },
 ];
 
 function getBasePath() {
@@ -62,18 +60,14 @@ export default function SetupPage() {
   const [apiKey, setApiKey] = useState("");
   const [apiKeyError, setApiKeyError] = useState("");
 
-  // Step 4 — Test Claude
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ ok: boolean; latency?: number; error?: string } | null>(null);
-
-  // Step 5 — Project directory
+  // Step 4 — Project directory
   const [projectRoot, setProjectRoot] = useState("");
   const [projectInput, setProjectInput] = useState("");
   const [projectStatus, setProjectStatus] = useState<{ hasClaudeMd: boolean; hasClaudeDir: boolean } | null>(null);
   const [savingProject, setSavingProject] = useState(false);
   const [projectError, setProjectError] = useState("");
 
-  // Step 7 — Server purpose
+  // Step 5 — Server purpose
   const [selectedPurposes, setSelectedPurposes] = useState<string[]>([]);
   const [customPurpose, setCustomPurpose] = useState("");
   const [projectType, setProjectType] = useState<"new" | "existing" | "">("");
@@ -164,17 +158,6 @@ export default function SetupPage() {
       setNavDir("forward"); setStep(4);
     } catch { setApiKeyError("Network error. Try again."); }
     finally { setSaving(false); }
-  }
-
-  async function handleTestClaude() {
-    setTesting(true);
-    setTestResult(null);
-    try {
-      const res = await fetch(`${bp}/api/claude-code/test`);
-      const data = await res.json() as { ok: boolean; latency?: number; error?: string };
-      setTestResult(data);
-    } catch (err) { setTestResult({ ok: false, error: String(err) }); }
-    finally { setTesting(false); }
   }
 
   async function handleSaveProject(e: React.FormEvent) {
@@ -273,11 +256,11 @@ export default function SetupPage() {
               return (
                 <div key={n} className="flex flex-col items-center gap-1 min-w-0 shrink-0 px-1">
                   <div
-                    onClick={isDone && step !== 7 ? () => { setNavDir("back"); setStep(n as Step); } : undefined}
+                    onClick={isDone && step !== 6 ? () => { setNavDir("back"); setStep(n as Step); } : undefined}
                     className={cn(
                       "flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold transition-all duration-300",
                       isDone ? "gradient-accent text-white shadow-glow-sm" : isActive ? "border-2 border-bot-accent text-bot-accent bg-bot-accent/10" : "bg-bot-elevated text-bot-muted",
-                      isDone && step !== 7 ? "cursor-pointer hover:opacity-75" : "cursor-default",
+                      isDone && step !== 6 ? "cursor-pointer hover:opacity-75" : "cursor-default",
                     )}
                   >
                     {isDone ? <CheckCircle2 className="h-3.5 w-3.5" /> : n}
@@ -422,68 +405,9 @@ export default function SetupPage() {
               </motion.div>
             )}
 
-            {/* ── STEP 4: Test Claude ── */}
+            {/* ── STEP 4: Project Directory ── */}
             {step === 4 && (
               <motion.div key="s4" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-6">
-                <div>
-                  <h2 className="text-subtitle font-semibold text-bot-text mb-1">Test your connection</h2>
-                  <p className="text-body text-bot-muted">Let&apos;s make sure Claude is responding.</p>
-                </div>
-
-                <div className="flex flex-col items-center gap-4 py-2">
-                  {!testResult && !testing && (
-                    <button onClick={handleTestClaude} className="flex items-center gap-2 rounded-xl gradient-accent px-8 py-3.5 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md transition-all duration-200">
-                      Run Test
-                    </button>
-                  )}
-                  {testing && (
-                    <div className="flex items-center gap-3 text-body text-bot-muted">
-                      <Loader2 className="h-5 w-5 animate-spin text-bot-accent" /> Testing…
-                    </div>
-                  )}
-                  {testResult && (
-                    <div className={cn("w-full rounded-xl p-4 flex items-start gap-3", testResult.ok ? "bg-bot-green/10 border border-bot-green/30" : "bg-bot-red/10 border border-bot-red/30")}>
-                      {testResult.ok ? <CheckCircle2 className="h-5 w-5 text-bot-green shrink-0" /> : <XCircle className="h-5 w-5 text-bot-red shrink-0" />}
-                      <div>
-                        {testResult.ok ? (
-                          <>
-                            <p className="text-body font-medium text-bot-green">Connected! Responded in {testResult.latency}ms</p>
-                            <p className="text-caption text-bot-muted mt-0.5">Your API key is working correctly.</p>
-                          </>
-                        ) : (
-                          <>
-                            <p className="text-body font-medium text-bot-red">Couldn&apos;t connect to Claude</p>
-                            {testResult.error && <p className="text-caption text-bot-muted mt-0.5">{testResult.error}</p>}
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  {testResult && (
-                    <button onClick={handleTestClaude} className="text-caption text-bot-muted hover:text-bot-accent transition-colors">Retry</button>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <button
-                    onClick={() => { setNavDir("forward"); setStep(5); }}
-                    disabled={!testResult?.ok}
-                    className="w-full rounded-xl gradient-accent px-4 py-3 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] disabled:opacity-50 transition-all duration-200"
-                  >
-                    Continue →
-                  </button>
-                  {!testResult?.ok && (
-                    <button onClick={() => { setNavDir("forward"); setStep(5); }} className="w-full text-caption text-bot-muted hover:text-bot-text transition-colors py-1">
-                      Skip (set up API key in Settings)
-                    </button>
-                  )}
-                </div>
-              </motion.div>
-            )}
-
-            {/* ── STEP 5: Project Directory ── */}
-            {step === 5 && (
-              <motion.div key="s5" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-6">
                 <div>
                   <h2 className="text-subtitle font-semibold text-bot-text mb-1">Working directory</h2>
                   <p className="text-body text-bot-muted">Where should your assistant look for files and run commands?</p>
@@ -513,16 +437,16 @@ export default function SetupPage() {
                   {projectError && <p className="text-caption text-bot-red">{projectError}</p>}
                 </form>
 
-                <button onClick={() => { setNavDir("forward"); setStep(6); }} disabled={!projectRoot}
+                <button onClick={() => { setNavDir("forward"); setStep(5); }} disabled={!projectRoot}
                   className="w-full rounded-xl gradient-accent px-4 py-3 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] disabled:opacity-50 transition-all duration-200">
                   Continue →
                 </button>
               </motion.div>
             )}
 
-            {/* ── STEP 6: Server Purpose ── */}
-            {step === 6 && (
-              <motion.div key="s6" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-5">
+            {/* ── STEP 5: Server Purpose ── */}
+            {step === 5 && (
+              <motion.div key="s5" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-5">
                 <div>
                   <h2 className="text-subtitle font-semibold text-bot-text mb-1">What is this server for?</h2>
                   <p className="text-body text-bot-muted">This helps your assistant give better advice. Pick all that apply.</p>
@@ -565,16 +489,16 @@ export default function SetupPage() {
                   </div>
                 </div>
 
-                <button onClick={() => { setNavDir("forward"); setStep(7); }}
+                <button onClick={() => { setNavDir("forward"); setStep(6); }}
                   className="w-full rounded-xl gradient-accent px-4 py-3 text-body font-semibold text-white shadow-glow-sm hover:shadow-glow-md hover:brightness-110 active:scale-[0.98] transition-all duration-200">
                   Continue →
                 </button>
               </motion.div>
             )}
 
-            {/* ── STEP 7: Done ── */}
-            {step === 7 && (
-              <motion.div key="s7" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-6 text-center">
+            {/* ── STEP 6: Done ── */}
+            {step === 6 && (
+              <motion.div key="s6" variants={stepVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-6 text-center">
                 <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 200, damping: 15, delay: 0.1 }}
                   className="flex flex-col items-center gap-3">
                   <div className="relative">

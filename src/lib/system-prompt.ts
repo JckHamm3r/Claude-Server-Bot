@@ -7,7 +7,7 @@ import { getMemoriesForTarget, MAIN_SESSION_TARGET, getSessionContext } from "./
 import { buildAgentToolBlock } from "./agent-tool-injector";
 import { transformerRegistry } from "./transformer-registry";
 
-export type InterfaceType = "ui_chat" | "customization_interface" | "system_agent";
+export type InterfaceType = "ui_chat" | "customization_interface" | "system_agent" | "plan_execution";
 
 interface BuildSystemPromptOpts {
   interfaceType?: InterfaceType;
@@ -200,6 +200,12 @@ export async function buildSystemPrompt(opts: BuildSystemPromptOpts = {}): Promi
     systemPrompt = await getCustomizationSystemPrompt();
   } else if (interfaceType === "system_agent") {
     systemPrompt = undefined;
+  } else if (interfaceType === "plan_execution") {
+    // Plan execution: task-oriented, no personality/transformers/journal/agent-tools
+    const parts: string[] = [];
+    const selfIdentity = await getBotSelfIdentityPrompt();
+    if (selfIdentity) parts.push(selfIdentity);
+    systemPrompt = parts.length > 0 ? parts.join("\n\n") : undefined;
   } else {
     const parts: string[] = [];
     const selfIdentity = await getBotSelfIdentityPrompt();

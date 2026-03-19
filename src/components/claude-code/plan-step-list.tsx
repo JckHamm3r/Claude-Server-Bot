@@ -14,6 +14,15 @@ import { cn } from "@/lib/utils";
 import type { ClaudePlan, ClaudePlanStep } from "@/lib/claude-db";
 import { PlanStepCard } from "./plan-step-card";
 
+export interface ToolActivity {
+  toolCallId: string;
+  toolName: string;
+  toolInput?: unknown;
+  toolResult?: string;
+  toolStatus: "running" | "done" | "error";
+  exitCode?: number;
+}
+
 interface PlanStepListProps {
   plan: ClaudePlan;
   onApprove: (stepId: string) => void;
@@ -33,6 +42,7 @@ interface PlanStepListProps {
   pausedStepId?: string | null;
   pausedCanRollback?: boolean;
   stepProgress?: Map<string, string>;
+  stepToolActivity?: Map<string, ToolActivity[]>;
 }
 
 const PLAN_STATUS_CONFIG: Record<
@@ -47,7 +57,7 @@ const PLAN_STATUS_CONFIG: Record<
   cancelled: { label: "Cancelled", dot: "bg-bot-muted",               bar: "bg-bot-muted/20" },
 };
 
-function ProgressBar({ status, steps }: { status: ClaudePlan["status"]; steps: ClaudePlanStep[] }) {
+function ProgressBar({ status, steps, plan }: { status: ClaudePlan["status"]; steps: ClaudePlanStep[]; plan: ClaudePlan }) {
   if (!steps.length) return null;
   const total = steps.length;
   const done = steps.filter((s) => s.status === "completed").length;
@@ -66,6 +76,11 @@ function ProgressBar({ status, steps }: { status: ClaudePlan["status"]; steps: C
           {failed > 0 && ` · ${failed} failed`}
         </span>
         <span className="text-[10px] font-bold text-bot-accent">{pct}%</span>
+        {plan.total_cost_usd > 0 && (
+          <span className="text-[10px] text-bot-muted/50 ml-2">
+            ${plan.total_cost_usd.toFixed(3)} · {((plan.total_input_tokens + plan.total_output_tokens) / 1000).toFixed(1)}k tokens
+          </span>
+        )}
       </div>
       <div className="h-1 w-full overflow-hidden rounded-full bg-bot-elevated">
         {failed > 0 && (
@@ -106,6 +121,7 @@ export function PlanStepList({
   pausedStepId,
   pausedCanRollback,
   stepProgress,
+  stepToolActivity,
 }: PlanStepListProps) {
   const steps = (plan.steps ?? []).slice().sort((a, b) => a.step_order - b.step_order);
   const hasApproved = steps.some((s) => s.status === "approved");
@@ -190,7 +206,7 @@ export function PlanStepList({
             </div>
           </div>
 
-          <ProgressBar status={plan.status} steps={steps} />
+          <ProgressBar status={plan.status} steps={steps} plan={plan} />
 
           {/* Action row */}
           <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -284,6 +300,12 @@ export function PlanStepList({
 
           {steps.map((step: ClaudePlanStep, idx: number) => {
             const progress = stepProgress?.get(step.id);
+            const dependsOnLabels = step.depends_on
+                    ?.map((depId) => {
+                      const depStep = steps.find((s) => s.id === depId);
+                      return depStep ? `Step ${steps.indexOf(depStep) + 1}` : null;
+                    })
+                    .filter(Boolean) as string[] | undefined;
             return (
               <div key={step.id} className="flex flex-col">
                 <PlanStepCard
@@ -316,6 +338,8 @@ export function PlanStepList({
                   paused={pausedStepId === step.id}
                   canRollback={pausedStepId === step.id ? pausedCanRollback : false}
                   stepProgress={progress}
+                  toolActivity={stepToolActivity?.get(step.id)}
+                  dependsOnLabels={dependsOnLabels}
                 />
               </div>
             );

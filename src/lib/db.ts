@@ -577,6 +577,18 @@ const migrations: Record<number, () => Promise<void>> = {
     `);
     console.log('[db] Migration 11: agent-scoped memories (is_global + memory_agent_assignments)');
   },
+  12: async () => {
+    // Plan mode cost tracking
+    await addColumnSafe("plan_steps", "input_tokens", "INTEGER NOT NULL DEFAULT 0");
+    await addColumnSafe("plan_steps", "output_tokens", "INTEGER NOT NULL DEFAULT 0");
+    await addColumnSafe("plan_steps", "cost_usd", "REAL NOT NULL DEFAULT 0");
+    await addColumnSafe("plans", "total_input_tokens", "INTEGER NOT NULL DEFAULT 0");
+    await addColumnSafe("plans", "total_output_tokens", "INTEGER NOT NULL DEFAULT 0");
+    await addColumnSafe("plans", "total_cost_usd", "REAL NOT NULL DEFAULT 0");
+    // Dependency support (Phase 2 column, added now to avoid a second migration)
+    await addColumnSafe("plan_steps", "depends_on", "TEXT");
+    console.log("[db] Migration 12: plan mode cost tracking + dependency columns");
+  },
 };
 
 // ── initDb: run once at server startup ───────────────────────────────────────

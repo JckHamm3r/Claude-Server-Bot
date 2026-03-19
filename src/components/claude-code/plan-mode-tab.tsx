@@ -16,6 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { ClaudePlan } from "@/lib/claude-db";
 import { PlanStepList } from "./plan-step-list";
+import type { ToolActivity } from "./plan-step-list";
 
 type PlanMap = Map<string, ClaudePlan>;
 
@@ -49,6 +50,7 @@ export function PlanModeTab() {
   const [planError, setPlanError] = useState<string | null>(null);
   const [generatingProgress, setGeneratingProgress] = useState("");
   const [stepProgress, setStepProgress] = useState<Map<string, string>>(new Map());
+  const [stepToolActivity, setStepToolActivity] = useState<Map<string, ToolActivity[]>>(new Map());
   const [refineInput, setRefineInput] = useState("");
   const [showThinking, setShowThinking] = useState(false);
 
@@ -204,12 +206,57 @@ export function PlanModeTab() {
 
     socket.on(
       "claude:step_progress",
-      ({ stepId, content }: { planId: string; stepId: string; content: string }) => {
+      ({ stepId, type: _type, content, message }: {
+        planId: string; stepId: string;
+        type?: "text" | "progress" | "error";
+        content?: string; message?: string;
+      }) => {
+        const displayContent = content ?? message ?? "";
         setStepProgress((prev) => {
           const next = new Map(prev);
-          next.set(stepId, content);
+          next.set(stepId, displayContent);
           return next;
         });
+      },
+    );
+
+    socket.on(
+      "claude:step_tool_activity",
+      ({ stepId, toolCallId, toolName, toolInput, toolResult, toolStatus, exitCode }: {
+        planId: string; stepId: string; toolCallId: string; toolName: string;
+        toolInput?: unknown; toolResult?: string; toolStatus?: string; exitCode?: number;
+      }) => {
+        setStepToolActivity((prev) => {
+          const next = new Map(prev);
+          const existing = next.get(stepId) ?? [];
+          const idx = existing.findIndex((t) => t.toolCallId === toolCallId);
+          const entry: ToolActivity = {
+            toolCallId,
+            toolName,
+            toolInput: toolInput ?? existing[idx]?.toolInput,
+            toolResult: toolResult ?? existing[idx]?.toolResult,
+            toolStatus: (toolStatus as ToolActivity["toolStatus"]) ?? "running",
+            exitCode,
+          };
+          if (idx >= 0) {
+            const updated = [...existing];
+            updated[idx] = entry;
+            next.set(stepId, updated);
+          } else {
+            next.set(stepId, [...existing, entry]);
+          }
+          return next;
+        });
+      },
+    );
+
+    socket.on(
+      "claude:step_usage",
+      ({ planId: _planId, stepId: _stepId, usage: _usage }: {
+        planId: string; stepId: string;
+        usage: { input_tokens: number; output_tokens: number; cost_usd: number };
+      }) => {
+        // Cost data persisted on plan via claude:plan_updated
       },
     );
 
@@ -248,6 +295,8 @@ export function PlanModeTab() {
       socket.off("claude:step_failed");
       socket.off("claude:plan_progress");
       socket.off("claude:step_progress");
+      socket.off("claude:step_tool_activity");
+      socket.off("claude:step_usage");
       socket.off("claude:plan_deleted");
       socket.off("claude:error");
     };
@@ -577,6 +626,7 @@ export function PlanModeTab() {
                 pausedStepId={pausedStepId}
                 pausedCanRollback={pausedCanRollback}
                 stepProgress={stepProgress}
+                stepToolActivity={stepToolActivity}
                 onDelete={handleDeletePlan}
               />
 
